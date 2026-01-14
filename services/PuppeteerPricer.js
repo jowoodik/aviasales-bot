@@ -102,10 +102,175 @@ class PuppeteerPricer {
   }
 
   /**
-   * 🔥 ЖЕЛЕЗОБЕТОННЫЙ МЕТОД: Применяет фильтр авиакомпании
+   * 🔥 НОВЫЙ МЕТОД: Устанавливает максимальную длительность пересадки через СЛАЙДЕР
+   */
+  async setMaxLayoverDuration(page, maxHours, index, total) {
+    console.log(`[${index}/${total}] ⏱️ Установка макс. длительности пересадки: ${maxHours}ч`);
+
+    try {
+      // Сохраняем snapshot до изменения
+      const beforeSnapshot = await this.getPricesSnapshot(page);
+
+      // Ищем контейнер фильтра по data-test-id
+      const filterContainer = await page.$('[data-test-id="range-filter-transfers_duration"]');
+
+      if (!filterContainer) {
+        console.warn(`[${index}/${total}] ⚠️ Контейнер фильтра длительности пересадок не найден`);
+        return false;
+      }
+
+      console.log(`[${index}/${total}] ✅ Контейнер фильтра найден`);
+
+      // Выполняем код симуляции drag внутри страницы
+      const success = await page.evaluate((targetHours) => {
+        console.log('🔍 Ищу фильтр длительности пересадок...');
+
+        // 1. Находим контейнер фильтра
+        const filterContainer = document.querySelector('[data-test-id="range-filter-transfers_duration"]');
+        if (!filterContainer) {
+          console.error('❌ Контейнер фильтра не найден');
+          return false;
+        }
+        console.log('✅ Контейнер найден');
+
+        // 2. Находим слайдер и правую ручку
+        const slider = filterContainer.querySelector('.rc-slider');
+        const maxHandle = slider.querySelector('.rc-slider-handle-2');
+
+        if (!maxHandle) {
+          console.error('❌ Правая ручка слайдера не найдена');
+          return false;
+        }
+
+        const oldValue = parseInt(maxHandle.getAttribute('aria-valuenow'));
+        const minValue = parseInt(maxHandle.getAttribute('aria-valuemin'));
+        const maxValue = parseInt(maxHandle.getAttribute('aria-valuemax'));
+
+        console.log(`✅ Слайдер найден:`);
+        console.log(`   Текущее: ${oldValue}мин (${Math.floor(oldValue/60)}ч)`);
+        console.log(`   Диапазон: ${minValue} - ${maxValue}мин`);
+
+        // 3. УСТАНАВЛИВАЕМ НОВОЕ ЗНАЧЕНИЕ
+        const newValue = targetHours * 60;
+
+        console.log(`🎯 Устанавливаю: ${targetHours}ч (${newValue}мин)`);
+
+        // 4. Вычисляем позицию в процентах
+        const range = maxValue - minValue;
+        const valueFromMin = newValue - minValue;
+        const percentPosition = (valueFromMin / range) * 100;
+
+        console.log(`📐 Позиция: ${percentPosition.toFixed(2)}%`);
+
+        // 5. Получаем размеры слайдера
+        const sliderRect = slider.getBoundingClientRect();
+        const handleRect = maxHandle.getBoundingClientRect();
+
+        // Вычисляем координаты для новой позиции
+        const newX = sliderRect.left + (sliderRect.width * percentPosition / 100);
+        const centerY = sliderRect.top + (sliderRect.height / 2);
+
+        console.log(`📍 Координаты: x=${newX.toFixed(0)}, y=${centerY.toFixed(0)}`);
+
+        // 6. СИМУЛИРУЕМ DRAG
+        console.log('🖱️ Симулирую перетаскивание...');
+
+        // Mousedown (начало перетаскивания)
+        const mousedownEvent = new MouseEvent('mousedown', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: handleRect.left + handleRect.width / 2,
+          clientY: handleRect.top + handleRect.height / 2,
+          buttons: 1
+        });
+        maxHandle.dispatchEvent(mousedownEvent);
+
+        // Используем setTimeout с Promise для async работы
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            // Mousemove (движение к новой позиции)
+            const mousemoveEvent = new MouseEvent('mousemove', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: newX,
+              clientY: centerY,
+              buttons: 1
+            });
+            document.dispatchEvent(mousemoveEvent);
+
+            setTimeout(() => {
+              // Mouseup (отпускаем)
+              const mouseupEvent = new MouseEvent('mouseup', {
+                view: window,
+                bubbles: true,
+                cancelable: true,
+                clientX: newX,
+                clientY: centerY
+              });
+              document.dispatchEvent(mouseupEvent);
+
+              // Проверяем результат
+              setTimeout(() => {
+                const resultValue = parseInt(maxHandle.getAttribute('aria-valuenow'));
+                const resultHours = Math.floor(resultValue / 60);
+
+                console.log('\n📊 РЕЗУЛЬТАТ:');
+                console.log(`   Было: ${oldValue}мин (${Math.floor(oldValue/60)}ч)`);
+                console.log(`   Стало: ${resultValue}мин (${resultHours}ч)`);
+                console.log(`   Цель: ${newValue}мин (${targetHours}ч)`);
+
+                if (Math.abs(resultValue - newValue) < 60) {
+                  console.log('✅ УСПЕХ! Фильтр применен');
+                  resolve(true);
+                } else {
+                  console.log('⚠️ Не совсем точно, но близко');
+                  resolve(true);
+                }
+
+                // Проверяем изменение тега
+                const tag = filterContainer.querySelector('[data-test-id*="text"]');
+                if (tag) {
+                  console.log(`   Тег: ${tag.textContent.trim()}`);
+                }
+              }, 500);
+            }, 100);
+          }, 100);
+        });
+      }, maxHours);
+
+      if (!success) {
+        console.warn(`[${index}/${total}] ⚠️ Не удалось установить длительность через слайдер`);
+        return false;
+      }
+
+      console.log(`[${index}/${total}] ✅ Слайдер установлен, жду обновления результатов...`);
+
+      // Ждем изменения результатов
+      await this.sleep(1000); // Даем время на обработку
+      const changed = await this.waitForResultsChange(page, beforeSnapshot, index, total, 15000);
+
+      if (changed) {
+        await this.waitForStableResults(page, index, total, 2000);
+        console.log(`[${index}/${total}] ✅ Фильтр длительности пересадки применен`);
+        return true;
+      } else {
+        console.warn(`[${index}/${total}] ⚠️ Результаты не изменились после установки длительности`);
+        return false;
+      }
+
+    } catch (error) {
+      console.error(`[${index}/${total}] ❌ Ошибка установки длительности пересадки: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 🔥 ИСПРАВЛЕННЫЙ МЕТОД: Применяет фильтр авиакомпании
    */
   async applyAirlineFilter(page, airline, index, total) {
-    console.log(`[${index}/${total}] ✈️ Применение фильтра: ${airline}`);
+    console.log(`[${index}/${total}] ✈️ Применение фильтра авиакомпании: ${airline}`);
 
     try {
       // 1️⃣ СОХРАНЯЕМ SNAPSHOT ДО КЛИКА
@@ -140,6 +305,7 @@ class PuppeteerPricer {
           airlineButton.click();
           return true;
         }
+
         return false;
       });
 
@@ -157,13 +323,12 @@ class PuppeteerPricer {
       await page.waitForSelector('[data-test-id*="filter"]', { timeout: 5000 });
       await this.sleep(500);
 
-      // Ищем строку с нужной авиакомпанией по data-test-id="set-filter-row-IATA"
+      // Ищем строку с нужной авиакомпанией
       const checkboxClicked = await page.evaluate((airlineCode) => {
-        // Ищем по data-test-id="set-filter-row-EY" (например)
+        // Ищем по data-test-id="set-filter-row-IATA"
         const filterRow = document.querySelector(`[data-test-id="set-filter-row-${airlineCode}"]`);
 
         if (filterRow) {
-          // Ищем чекбокс внутри строки
           const checkbox = filterRow.querySelector('input[type="checkbox"]');
           if (checkbox) {
             console.log(`Найден чекбокс для ${airlineCode}, состояние: ${checkbox.checked}`);
@@ -208,6 +373,7 @@ class PuppeteerPricer {
 
   async getPriceFromUrl(url, index, total, airline = null) {
     const startTime = Date.now();
+
     console.log(`\n${'='.repeat(80)}`);
     console.log(`[${index}/${total}] 🔍 Обработка`);
     console.log(`[${index}/${total}] 🔗 ${url}`);
@@ -217,6 +383,7 @@ class PuppeteerPricer {
     // Кэш
     const cacheKey = `${url}_${airline || 'all'}`;
     const cached = this.cache.get(cacheKey);
+
     if (cached && (Date.now() - cached.timestamp < this.cacheTimeout)) {
       console.log(`[${index}/${total}] 💾 Кэш: ${cached.price.toLocaleString('ru-RU')} ₽`);
       return {
@@ -261,7 +428,9 @@ class PuppeteerPricer {
       await page.setUserAgent(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       );
+
       await page.setViewport({ width: 1920, height: 1080 });
+
       await page.setExtraHTTPHeaders({
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -301,6 +470,7 @@ class PuppeteerPricer {
       });
 
       console.log(`[${index}/${total}] ✅ HTTP ${response.status()}`);
+
       if (response.status() === 403 || response.status() >= 500) {
         throw new Error(`HTTP ${response.status()}`);
       }
@@ -309,6 +479,7 @@ class PuppeteerPricer {
       await this.sleep(8000);
 
       console.log(`[${index}/${total}] 🔍 Поиск результатов...`);
+
       let attempts = 0;
       const maxAttempts = 10;
       let found = false;
@@ -335,8 +506,13 @@ class PuppeteerPricer {
       // 🔥 ЖДЕМ ПЕРВОНАЧАЛЬНОЙ СТАБИЛИЗАЦИИ
       await this.waitForStableResults(page, index, total, 3000);
 
-      // 🔥 ПРИМЕНЯЕМ ФИЛЬТР (ЕСЛИ УКАЗАН)
+      // 🔥 ШАГ 1: СНАЧАЛА УСТАНАВЛИВАЕМ ДЛИТЕЛЬНОСТЬ ПЕРЕСАДКИ (6 часов)
+      console.log(`\n[${index}/${total}] ===== ШАГ 1: УСТАНОВКА ДЛИТЕЛЬНОСТИ ПЕРЕСАДКИ =====`);
+      await this.setMaxLayoverDuration(page, 6, index, total);
+
+      // 🔥 ШАГ 2: ЗАТЕМ ПРИМЕНЯЕМ ФИЛЬТР АВИАКОМПАНИИ (ЕСЛИ УКАЗАН)
       if (airline) {
+        console.log(`\n[${index}/${total}] ===== ШАГ 2: ПРИМЕНЕНИЕ ФИЛЬТРА АВИАКОМПАНИИ =====`);
         await this.applyAirlineFilter(page, airline, index, total);
       }
 
@@ -416,8 +592,8 @@ class PuppeteerPricer {
 
   async init() {
     if (this.browser) return;
-    console.log('🚀 Запуск Puppeteer...');
 
+    console.log('🚀 Запуск Puppeteer...');
     this.browser = await puppeteer.launch({
       headless: !this.debug,
       args: [
@@ -441,12 +617,14 @@ class PuppeteerPricer {
   async getPricesFromUrls(urls, airline = null) {
     const total = urls.length;
     const results = new Array(total).fill(null);
+
     console.log(`\n📊 Парсинг ${total} URL (по ${this.maxConcurrent} одновременно)\n`);
 
     const startTime = Date.now();
 
     for (let i = 0; i < total; i += this.maxConcurrent) {
       const batch = [];
+
       for (let j = 0; j < this.maxConcurrent && (i + j) < total; j++) {
         const index = i + j;
         batch.push(
@@ -473,6 +651,7 @@ class PuppeteerPricer {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const validResults = results.filter(r => r !== null);
+
     console.log(`\n✅ Завершено: ${elapsed} сек. Успешно: ${validResults.length}/${total}\n`);
 
     return results;
