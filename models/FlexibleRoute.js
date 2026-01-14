@@ -1,29 +1,42 @@
 const db = require('../config/database');
 
 class FlexibleRoute {
-  static create(data) {
+  static create(chatId, data) {
     return new Promise((resolve, reject) => {
-      const sql = `
-          INSERT INTO flexible_routes
-          (chat_id, origin, destination, departure_start, departure_end,
-           min_days, max_days, airline, baggage, max_stops, adults, children, threshold_price, currency)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-
-      db.run(sql, [
-        data.chat_id, data.origin, data.destination,
-        data.departure_start, data.departure_end,
-        data.min_days, data.max_days,
-        data.airline, data.baggage, data.max_stops,
-        data.adults, data.children, data.threshold_price, data.currency
-      ], function(err) {
-        if (err) reject(err);
-        else {
-          db.run('UPDATE user_stats SET total_flexible = total_flexible + 1 WHERE chat_id = ?', [data.chat_id]);
-          resolve(this.lastID);
+      db.run(
+        `INSERT INTO flexible_routes
+         (chat_id, origin, destination, departure_start, departure_end,
+          min_days, max_days, adults, children, airline, baggage, max_stops,
+          max_layover_hours, threshold_price, currency)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          chatId,
+          data.origin,
+          data.destination,
+          data.departure_start,
+          data.departure_end,
+          data.min_days,
+          data.max_days,
+          data.adults || 1,
+          data.children || 0,
+          data.airline,
+          data.baggage || 0,
+          data.max_stops || 99,
+          data.max_layover_hours || 5,
+          data.threshold_price,
+          data.currency || 'RUB'
+        ],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.lastID);
         }
-      });
+      );
     });
+  }
+
+  // 🔥 ДОБАВЛЕН МЕТОД findByChatId
+  static findByChatId(chatId) {
+    return this.findByUser(chatId);
   }
 
   static findByUser(chatId) {
@@ -39,42 +52,41 @@ class FlexibleRoute {
     });
   }
 
-  static findByChatId(chatId) {
+  static findById(routeId) {
     return new Promise((resolve, reject) => {
-      db.all('SELECT * FROM flexible_routes WHERE chat_id = ?', [chatId], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
+      db.get(
+        'SELECT * FROM flexible_routes WHERE id = ?',
+        [routeId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
+        }
+      );
     });
   }
 
   static findActive() {
     return new Promise((resolve, reject) => {
-      db.all('SELECT * FROM flexible_routes WHERE is_paused = 0', [], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-  }
-
-  static delete(id, chatId) {
-    return new Promise((resolve, reject) => {
-      db.run('DELETE FROM flexible_routes WHERE id = ? AND chat_id = ?', [id, chatId], function(err) {
-        if (err) reject(err);
-        else {
-          db.run('UPDATE user_stats SET total_flexible = total_flexible - 1 WHERE chat_id = ?', [chatId]);
-          resolve(this.changes);
+      db.all(
+        `SELECT * FROM flexible_routes
+         WHERE is_paused = 0
+           AND date(departure_end) >= date('now')
+         ORDER BY departure_start ASC`,
+        [],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
         }
-      });
+      );
     });
   }
 
-  static updateThreshold(id, chatId, newThreshold) {
+  static delete(routeId, chatId) {
     return new Promise((resolve, reject) => {
       db.run(
-        'UPDATE flexible_routes SET threshold_price = ? WHERE id = ? AND chat_id = ?',
-        [newThreshold, id, chatId],
-        function(err) {
+        'DELETE FROM flexible_routes WHERE id = ? AND chat_id = ?',
+        [routeId, chatId],
+        function (err) {
           if (err) reject(err);
           else resolve(this.changes);
         }
@@ -82,12 +94,12 @@ class FlexibleRoute {
     });
   }
 
-  static togglePause(id, chatId, isPaused) {
+  static togglePause(routeId, chatId, isPaused) {
     return new Promise((resolve, reject) => {
       db.run(
         'UPDATE flexible_routes SET is_paused = ? WHERE id = ? AND chat_id = ?',
-        [isPaused, id, chatId],
-        function(err) {
+        [isPaused, routeId, chatId],
+        function (err) {
           if (err) reject(err);
           else resolve(this.changes);
         }
@@ -95,14 +107,30 @@ class FlexibleRoute {
     });
   }
 
-  static updateLastCheck(id) {
+  static updateThreshold(routeId, chatId, newPrice) {
     return new Promise((resolve, reject) => {
       db.run(
-        "UPDATE flexible_routes SET last_check = datetime('now') WHERE id = ?",
-        [id],
-        (err) => {
+        'UPDATE flexible_routes SET threshold_price = ? WHERE id = ? AND chat_id = ?',
+        [newPrice, routeId, chatId],
+        function (err) {
           if (err) reject(err);
-          else resolve();
+          else resolve(this.changes);
+        }
+      );
+    });
+  }
+
+  // 🔥 ДОБАВЛЕН МЕТОД updateLastCheck
+  static updateLastCheck(routeId) {
+    return new Promise((resolve, reject) => {
+      db.run(
+        `UPDATE flexible_routes 
+                SET last_check = CURRENT_TIMESTAMP 
+                WHERE id = ?`,
+        [routeId],
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.changes);
         }
       );
     });

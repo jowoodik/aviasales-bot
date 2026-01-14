@@ -4,10 +4,10 @@ class Route {
   static create(chatId, data) {
     return new Promise((resolve, reject) => {
       db.run(
-        `INSERT INTO routes 
-         (chat_id, origin, destination, departure_date, return_date, adults, children, 
-          airline, baggage, max_stops, threshold_price, currency) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO routes
+         (chat_id, origin, destination, departure_date, return_date, adults, children,
+          airline, baggage, max_stops, max_layover_hours, threshold_price, currency)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           chatId,
           data.origin,
@@ -19,6 +19,7 @@ class Route {
           data.airline,
           data.baggage || 0,
           data.max_stops || 99,
+          data.max_layover_hours || 5,  // 🔥 НОВОЕ ПОЛЕ
           data.threshold_price,
           data.currency || 'RUB'
         ],
@@ -60,9 +61,9 @@ class Route {
   static findActive() {
     return new Promise((resolve, reject) => {
       db.all(
-        `SELECT * FROM routes 
-         WHERE is_paused = 0 
-         AND date(departure_date) >= date('now')
+        `SELECT * FROM routes
+         WHERE is_paused = 0
+           AND date(departure_date) >= date('now')
          ORDER BY departure_date ASC`,
         [],
         (err, rows) => {
@@ -115,9 +116,9 @@ class Route {
   static deleteExpired() {
     return new Promise((resolve, reject) => {
       db.run(
-        `DELETE FROM routes 
-         WHERE auto_delete = 1 
-         AND date(departure_date) < date('now')`,
+        `DELETE FROM routes
+         WHERE auto_delete = 1
+           AND date(departure_date) < date('now')`,
         [],
         function (err) {
           if (err) reject(err);

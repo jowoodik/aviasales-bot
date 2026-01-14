@@ -3,6 +3,25 @@ const FlexibleResult = require('../models/FlexibleResult');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
 
+function formatTimeAgo(dateString) {
+  if (!dateString) return '';
+
+  // 🔑 Добавляем 'Z' - говорим JavaScript что это UTC!
+  const utcDate = new Date(dateString + 'Z');
+
+  // Форматируем с часовым поясом Екатеринбурга
+  const options = {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Yekaterinburg',
+    hour12: false
+  };
+
+  return utcDate.toLocaleString('ru-RU', options);
+}
+
 class FlexibleHandlers {
   constructor(bot, userStates) {
     this.bot = bot;
@@ -18,12 +37,98 @@ class FlexibleHandlers {
           ['📊 Лучшие варианты', '📈 История цен'],
           ['✏️ Редактировать', '🗑 Удалить'],
           ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', 'ℹ️ Помощь']
+          ['✅ Проверить сейчас', '🎯 Проверить один'],  // 🔥 ИЗМЕНЕНО
+          ['ℹ️ Помощь']
         ],
         resize_keyboard: true,
         persistent: true
       }
     };
+  }
+
+  // 🔥 НОВЫЙ МЕТОД: Выбор маршрута для проверки
+  async handleCheckOne(chatId) {
+    try {
+      const routes = await FlexibleRoute.findByChatId(chatId);
+      if (!routes || routes.length === 0) {
+        this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов для проверки');
+        return;
+      }
+
+      let message = '🎯 ВЫБОРОЧНАЯ ПРОВЕРКА\n\n';
+      message += 'Выберите маршрут для проверки:\n\n';
+
+      const keyboard = { reply_markup: { keyboard: [], one_time_keyboard: true, resize_keyboard: true } };
+
+      routes.forEach((route, index) => {
+        const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
+        const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
+        const airline = route.airline || 'Любая';
+        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
+
+        message += `${routeText}\n`;
+        message += `   📆 ${route.min_days}-${route.max_days} дней\n`;
+        message += `   💰 ${Formatters.formatPrice(route.threshold_price)}\n\n`;
+
+        keyboard.reply_markup.keyboard.push([routeText]);
+      });
+
+      keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
+      this.bot.sendMessage(chatId, message, keyboard);
+      this.userStates[chatId] = { step: 'flex_check_select', routes: routes };
+    } catch (error) {
+      this.bot.sendMessage(chatId, '❌ Ошибка: ' + error.message);
+    }
+  }
+
+  // 🔥 НОВЫЙ МЕТОД: Обработка выбора маршрута для проверки
+  async handleCheckSelectStep(chatId, text) {
+    const state = this.userStates[chatId];
+    if (!state || state.step !== 'flex_check_select') return false;
+
+    if (text === '◀️ Отмена') {
+      delete this.userStates[chatId];
+      this.bot.sendMessage(chatId, '❌ Отменено', this.getMainMenuKeyboard());
+      return true;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (!match) return false;
+
+    const index = parseInt(match[1]) - 1;
+    const route = state.routes[index];
+
+    if (!route) {
+      this.bot.sendMessage(chatId, '❌ Маршрут не найден');
+      return true;
+    }
+
+    delete this.userStates[chatId];
+
+    // Запускаем проверку одного маршрута
+    await this.bot.sendMessage(
+      chatId,
+      `🔍 Запускаю проверку маршрута:\n` +
+      `${route.origin} → ${route.destination}\n\n` +
+      `⏳ Это может занять несколько минут...`,
+      this.getMainMenuKeyboard()
+    );
+
+    const FlexibleMonitor = require('../services/FlexibleMonitor');
+    const flexMonitor = new FlexibleMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
+
+    try {
+      await flexMonitor.checkSingleRoute(route);
+      await flexMonitor.sendSingleReport(chatId, route);
+    } catch (error) {
+      console.error('Ошибка проверки:', error);
+      await this.bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
+    } finally {
+      await flexMonitor.close();
+    }
+
+    return true;
   }
 
   handleAddFlexible(chatId) {
@@ -73,7 +178,6 @@ class FlexibleHandlers {
       await priceMonitor.checkPrices();
       await priceMonitor.sendReport(chatId);
       await priceMonitor.close();
-
     } catch (error) {
       console.error('Ошибка проверки:', error);
       await this.bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
@@ -83,14 +187,12 @@ class FlexibleHandlers {
   async handleListFlexible(chatId) {
     try {
       const routes = await FlexibleRoute.findByChatId(chatId);
-
       if (!routes || routes.length === 0) {
         this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов');
         return;
       }
 
       let list = '🔍 ГИБКИЕ МАРШРУТЫ\n\n';
-
       for (let i = 0; i < routes.length; i++) {
         const r = routes[i];
         const airlineName = Formatters.getAirlineName(r.airline);
@@ -109,8 +211,10 @@ class FlexibleHandlers {
           const best = topResults[0];
           list += `   🏆 Лучшая: ${Formatters.formatPrice(best.total_price, r.currency)}\n`;
           list += `   📅 ${DateUtils.formatDateDisplay(best.departure_date)}-${DateUtils.formatDateDisplay(best.return_date)} (${best.days_in_country}д)\n`;
+          if (best.found_at) {
+            list += ` 🕐 ${formatTimeAgo(best.found_at)}\n`;
+          }
         }
-
         list += '\n';
       }
 
@@ -122,7 +226,6 @@ class FlexibleHandlers {
 
   async handleShowTopResults(chatId) {
     const routes = await FlexibleRoute.findByUser(chatId);
-
     if (!routes || routes.length === 0) {
       this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов', this.getMainMenuKeyboard());
       return;
@@ -140,12 +243,10 @@ class FlexibleHandlers {
     });
 
     keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
-
     this.bot.sendMessage(chatId, message, keyboard);
     this.userStates[chatId] = { step: 'flex_show_results', routes };
   }
 
-// 🔥 ДОБАВЬТЕ НОВЫЙ МЕТОД для отправки результатов со скриншотами
   async sendTopResultsWithScreenshots(chatId, route) {
     const FlexibleResult = require('../models/FlexibleResult');
     const results = await FlexibleResult.getTopResults(route.id, 5);
@@ -155,8 +256,7 @@ class FlexibleHandlers {
       return;
     }
 
-    // Отправляем заголовок
-    let headerMessage = `📊 <b>ЛУЧШИЕ ВАРИАНТЫ</b>\n\n`;
+    let headerMessage = `📊 ЛУЧШИЕ ВАРИАНТЫ\n\n`;
     headerMessage += `${route.origin} → ${route.destination}\n`;
     headerMessage += `Диапазон вылета: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
     headerMessage += `Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
@@ -164,19 +264,21 @@ class FlexibleHandlers {
 
     await this.bot.sendMessage(chatId, headerMessage, { parse_mode: 'HTML' });
 
-    // Отправляем каждый результат со скриншотом
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
       const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}️⃣`;
 
-      let message = `${icon} <b>${r.total_price.toLocaleString('ru-RU')} ₽</b>\n\n`;
+      let message = `${icon} ${r.total_price.toLocaleString('ru-RU')} ₽\n\n`;
       message += `✈️ ${r.airline}\n`;
       message += `📅 ${DateUtils.formatDateDisplay(r.departure_date)} → ${DateUtils.formatDateDisplay(r.return_date)}\n`;
       message += `📆 В стране: ${r.days_in_country} дней\n`;
+      if (r.found_at) {
+        message += `🕐 Найдено: ${formatTimeAgo(r.found_at)}\n`;
+      }
 
       if (r.total_price <= route.threshold_price) {
         const savings = route.threshold_price - r.total_price;
-        message += `\n🔥 <b>Ниже порога!</b>\n`;
+        message += `\n🔥 Ниже порога!\n`;
         message += `📉 Экономия: ${savings.toLocaleString('ru-RU')} ₽\n`;
       }
 
@@ -186,7 +288,6 @@ class FlexibleHandlers {
         ]]
       };
 
-      // Отправляем со скриншотом если есть
       const fs = require('fs');
       if (r.screenshot_path && fs.existsSync(r.screenshot_path)) {
         await this.bot.sendPhoto(chatId, r.screenshot_path, {
@@ -201,11 +302,9 @@ class FlexibleHandlers {
         });
       }
 
-      // Небольшая задержка между сообщениями
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Итоговое сообщение
     const summaryMessage = `\n💵 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`;
     await this.bot.sendMessage(chatId, summaryMessage, this.getMainMenuKeyboard());
   }
@@ -213,13 +312,11 @@ class FlexibleHandlers {
   async handleEditFlexible(chatId) {
     try {
       const routes = await FlexibleRoute.findByChatId(chatId);
-
       if (!routes || routes.length === 0) {
         this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов для редактирования');
         return;
       }
 
-      // Список с датами + авиакомпанией
       let keyboard = routes.map((r, i) => {
         const depStart = DateUtils.formatDateDisplay(r.departure_start).substring(0, 5);
         const depEnd = DateUtils.formatDateDisplay(r.departure_end).substring(0, 5);
@@ -245,13 +342,11 @@ class FlexibleHandlers {
   async handleDeleteFlexible(chatId) {
     try {
       const routes = await FlexibleRoute.findByChatId(chatId);
-
       if (!routes || routes.length === 0) {
         this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов для удаления');
         return;
       }
 
-      // Список с датами + авиакомпанией
       let keyboard = routes.map((r, i) => {
         const depStart = DateUtils.formatDateDisplay(r.departure_start).substring(0, 5);
         const depEnd = DateUtils.formatDateDisplay(r.departure_end).substring(0, 5);
@@ -275,7 +370,6 @@ class FlexibleHandlers {
   }
 
   handleFlexibleStep(chatId, text) {
-    // Весь код остается БЕЗ ИЗМЕНЕНИЙ
     const state = this.userStates[chatId];
     if (!state || state.type !== 'flexible') return false;
 
@@ -293,7 +387,6 @@ class FlexibleHandlers {
         }
 
         state.step = 'flex_destination';
-
         const destKeyboard = {
           reply_markup: {
             keyboard: [
@@ -306,7 +399,6 @@ class FlexibleHandlers {
             resize_keyboard: true
           }
         };
-
         this.bot.sendMessage(chatId, 'Аэропорт назначения:', destKeyboard);
         return true;
 
@@ -336,6 +428,7 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте: ДД-ММ-ГГГГ');
           return true;
         }
+
         state.departure_start = depStart;
         state.step = 'flex_departure_end';
         this.bot.sendMessage(
@@ -350,9 +443,9 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, '❌ Дата должна быть позже начала диапазона');
           return true;
         }
+
         state.departure_end = depEnd;
         state.step = 'flex_min_days';
-
         this.bot.sendMessage(chatId, 'Минимум дней в стране:', {
           reply_markup: {
             keyboard: [
@@ -372,9 +465,9 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, '❌ Введите от 1 до 365 дней');
           return true;
         }
+
         state.min_days = minDays;
         state.step = 'flex_max_days';
-
         this.bot.sendMessage(chatId, `Максимум дней в стране (не менее ${minDays}):`, {
           reply_markup: {
             keyboard: [
@@ -395,9 +488,9 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, `❌ Введите от ${state.min_days} до 365 дней`);
           return true;
         }
+
         state.max_days = maxDays;
         state.step = 'flex_adults';
-
         this.bot.sendMessage(chatId, 'Количество взрослых:', {
           reply_markup: {
             keyboard: [['1', '2', '3'], ['4', '5', '6'], ['◀️ Главное меню']],
@@ -413,9 +506,9 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, '❌ Введите от 1 до 9');
           return true;
         }
+
         state.adults = adults;
         state.step = 'flex_children';
-
         this.bot.sendMessage(chatId, 'Количество детей:', {
           reply_markup: {
             keyboard: [['0 (без детей)'], ['1', '2', '3'], ['◀️ Главное меню']],
@@ -431,9 +524,9 @@ class FlexibleHandlers {
           this.bot.sendMessage(chatId, '❌ Введите от 0 до 8');
           return true;
         }
+
         state.children = children;
         state.step = 'flex_airline';
-
         this.bot.sendMessage(chatId, 'Авиакомпания:', {
           reply_markup: {
             keyboard: [
@@ -467,7 +560,6 @@ class FlexibleHandlers {
       case 'flex_baggage':
         state.baggage = text === 'Да' ? 1 : 0;
         state.step = 'flex_max_stops';
-
         this.bot.sendMessage(chatId, 'Пересадок:', {
           reply_markup: {
             keyboard: [
@@ -488,8 +580,29 @@ class FlexibleHandlers {
         else if (text.includes('2')) state.max_stops = 2;
         else state.max_stops = 99;
 
+        state.step = 'flex_max_layover';
+        this.bot.sendMessage(chatId, '⏱️ Введите максимальное время пересадки в часах (например, 5):', {
+          reply_markup: {
+            keyboard: [['5 часов'], ['10 часов'], ['15 часов'], ['24 часа']],
+            one_time_keyboard: true,
+            resize_keyboard: true
+          }
+        });
+        return true;
+
+      case 'flex_max_layover':
+        const hours = parseInt(text.replace(/\D/g, ''));
+        if (isNaN(hours) || hours <= 0 || hours > 48) {
+          this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48:');
+          return true;
+        }
+        state.max_layover_hours = hours;
         state.step = 'flex_threshold';
-        this.bot.sendMessage(chatId, 'Порог цены (₽):', { reply_markup: { remove_keyboard: true } });
+        this.bot.sendMessage(
+          chatId,
+          `✅ Максимальное время пересадки: ${hours} часов\n\nПорог цены (₽):`,
+          { reply_markup: { remove_keyboard: true } }
+        );
         return true;
 
       case 'flex_threshold':
@@ -501,8 +614,7 @@ class FlexibleHandlers {
 
         state.threshold_price = price;
 
-        FlexibleRoute.create({
-          chat_id: chatId,
+        FlexibleRoute.create(chatId, {
           origin: state.origin,
           destination: state.destination,
           departure_start: state.departure_start,
@@ -514,6 +626,7 @@ class FlexibleHandlers {
           airline: state.airline,
           baggage: state.baggage,
           max_stops: state.max_stops,
+          max_layover_hours: state.max_layover_hours || 5,
           threshold_price: state.threshold_price,
           currency: 'RUB'
         })
@@ -532,6 +645,7 @@ class FlexibleHandlers {
               `🏢 ${airlineName}\n` +
               `🧳 ${state.baggage ? 'Да' : 'Нет'}\n` +
               `🔄 ${stopsText}\n` +
+              `⏱️ Макс. пересадка: ${state.max_layover_hours} ч\n` +
               `💰 Порог: ${Formatters.formatPrice(state.threshold_price)}\n\n` +
               `🔍 Бот будет искать лучшие комбинации дат автоматически!`,
               this.getMainMenuKeyboard()

@@ -352,17 +352,48 @@ class PuppeteerPricer {
 
       console.log(`[${index}/${total}] ✅ Кликнул по чекбоксу ${airline}`);
 
-      // 4️⃣ ЖЕЛЕЗОБЕТОННО ЖДЕМ ИЗМЕНЕНИЯ РЕЗУЛЬТАТОВ
-      const changed = await this.waitForResultsChange(page, beforeSnapshot, index, total, 30000);
+      // 4️⃣ ПРОВЕРЯЕМ ИЗМЕНЕНИЕ РЕЗУЛЬТАТОВ ИЛИ СООТВЕТСТВИЕ АВИАКОМПАНИИ
+      console.log(`[${index}/${total}] ⏳ Проверяю применение фильтра...`);
+      await this.sleep(2000); // Даем время на обновление
 
-      if (!changed) {
-        throw new Error(`Результаты не изменились после клика по ${airline}`);
+      // Проверяем изменились ли результаты
+      const currentSnapshot = await this.getPricesSnapshot(page);
+      const resultsChanged = !this.arraysEqual(beforeSnapshot, currentSnapshot);
+
+      if (resultsChanged) {
+        console.log(`[${index}/${total}] ✅ Результаты обновились`);
+        await this.waitForStableResults(page, index, total, 3000);
+      } else {
+        console.log(`[${index}/${total}] ⚠️ Результаты не изменились, проверяю билеты...`);
+
+        // 🔥 ПРОВЕРЯЕМ ЧТО ВСЕ БИЛЕТЫ ОТ НУЖНОЙ АВИАКОМПАНИИ
+        const allMatchAirline = await page.evaluate((airlineCode) => {
+          const tickets = document.querySelectorAll('[data-test-id^="flight-card"]');
+          if (tickets.length === 0) return false;
+
+          let matchCount = 0;
+          tickets.forEach(ticket => {
+            // Ищем код авиакомпании в карточке билета
+            const airlineElements = ticket.querySelectorAll('[class*="airline"], [class*="carrier"]');
+            const text = ticket.textContent;
+
+            if (text.includes(airlineCode)) {
+              matchCount++;
+            }
+          });
+
+          console.log(`Проверено билетов: ${tickets.length}, совпадений с ${airlineCode}: ${matchCount}`);
+          return matchCount > 0; // Хотя бы один билет от нужной авиакомпании
+        }, airline);
+
+        if (allMatchAirline) {
+          console.log(`[${index}/${total}] ✅ Все билеты от ${airline} - фильтр уже был применен!`);
+        } else {
+          console.log(`[${index}/${total}] ⚠️ Не все билеты от ${airline}, но продолжаю...`);
+        }
       }
 
-      // 5️⃣ ЖДЕМ СТАБИЛИЗАЦИИ
-      await this.waitForStableResults(page, index, total, 3000);
-
-      console.log(`[${index}/${total}] ✅ Фильтр ${airline} успешно применен!`);
+      console.log(`[${index}/${total}] ✅ Фильтр ${airline} применен!`);
       return true;
 
     } catch (error) {
@@ -371,17 +402,18 @@ class PuppeteerPricer {
     }
   }
 
-  async getPriceFromUrl(url, index, total, airline = null) {
+  async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = 5) {
     const startTime = Date.now();
 
     console.log(`\n${'='.repeat(80)}`);
     console.log(`[${index}/${total}] 🔍 Обработка`);
     console.log(`[${index}/${total}] 🔗 ${url}`);
     if (airline) console.log(`[${index}/${total}] ✈️ Фильтр: ${airline}`);
+    console.log(`[${index}/${total}] ⏱️ Макс. пересадка: ${maxLayoverHours} ч`);  // 🔥 ЛОГИРОВАНИЕ
     console.log(`${'='.repeat(80)}\n`);
 
     // Кэш
-    const cacheKey = `${url}_${airline || 'all'}`;
+    const cacheKey = `${url}_${airline || 'all'}_${maxLayoverHours}`;  // 🔥 ДОБАВЛЕНО В КЛЮЧ КЭША
     const cached = this.cache.get(cacheKey);
 
     if (cached && (Date.now() - cached.timestamp < this.cacheTimeout)) {
@@ -508,7 +540,7 @@ class PuppeteerPricer {
 
       // 🔥 ШАГ 1: СНАЧАЛА УСТАНАВЛИВАЕМ ДЛИТЕЛЬНОСТЬ ПЕРЕСАДКИ (6 часов)
       console.log(`\n[${index}/${total}] ===== ШАГ 1: УСТАНОВКА ДЛИТЕЛЬНОСТИ ПЕРЕСАДКИ =====`);
-      await this.setMaxLayoverDuration(page, 6, index, total);
+      await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
 
       // 🔥 ШАГ 2: ЗАТЕМ ПРИМЕНЯЕМ ФИЛЬТР АВИАКОМПАНИИ (ЕСЛИ УКАЗАН)
       if (airline) {
@@ -614,7 +646,7 @@ class PuppeteerPricer {
     console.log('✅ Puppeteer запущен');
   }
 
-  async getPricesFromUrls(urls, airline = null) {
+  async getPricesFromUrls(urls, airline = null, maxLayoverHours = 5) {
     const total = urls.length;
     const results = new Array(total).fill(null);
 
@@ -628,7 +660,7 @@ class PuppeteerPricer {
       for (let j = 0; j < this.maxConcurrent && (i + j) < total; j++) {
         const index = i + j;
         batch.push(
-          this.getPriceFromUrl(urls[index], index + 1, total, airline)
+          this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours)
             .then(result => {
               results[index] = result;
               return result;

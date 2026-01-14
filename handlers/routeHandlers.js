@@ -147,7 +147,6 @@ class RouteHandlers {
         return true;
       }
       data.return_date = date;
-
       const keyboard = {
         reply_markup: {
           keyboard: [['1 взрослый'], ['2 взрослых'], ['1+1 (взр+реб)'], ['2+2 (взр+реб)']],
@@ -155,7 +154,6 @@ class RouteHandlers {
           resize_keyboard: true
         }
       };
-
       this.bot.sendMessage(
         chatId,
         `✅ Возврат: ${DateUtils.formatDateDisplay(date)}\n\nСколько пассажиров?`,
@@ -171,10 +169,8 @@ class RouteHandlers {
         this.bot.sendMessage(chatId, '❌ Неверный формат. Выберите из предложенных:');
         return true;
       }
-
       data.adults = parseInt(match[1]) || 1;
       data.children = parseInt(match[2]) || 0;
-
       const keyboard = {
         reply_markup: {
           keyboard: [['✅ С багажом'], ['❌ Без багажа']],
@@ -182,7 +178,6 @@ class RouteHandlers {
           resize_keyboard: true
         }
       };
-
       this.bot.sendMessage(chatId, 'Багаж:', keyboard);
       state.step = 'baggage';
       return true;
@@ -190,7 +185,6 @@ class RouteHandlers {
 
     if (step === 'baggage') {
       data.baggage = text.includes('✅') ? 1 : 0;
-
       this.bot.sendMessage(
         chatId,
         'Укажите код авиакомпании (например, S7, SU) или "любая":',
@@ -203,7 +197,36 @@ class RouteHandlers {
     if (step === 'airline') {
       data.airline = text.toLowerCase() === 'любая' ? null : text.toUpperCase();
 
-      this.bot.sendMessage(chatId, 'Введите порог цены в рублях (например, 50000):');
+      // 🔥 НОВЫЙ ШАГ: Спрашиваем максимальное время пересадки
+      const keyboard = {
+        reply_markup: {
+          keyboard: [['5 часов'], ['10 часов'], ['15 часов'], ['24 часа']],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+      this.bot.sendMessage(
+        chatId,
+        '⏱️ Введите максимальное время пересадки в часах (например, 5):',
+        keyboard
+      );
+      state.step = 'max_layover';
+      return true;
+    }
+
+    // 🔥 НОВЫЙ ШАГ: Обработка максимального времени пересадки
+    if (step === 'max_layover') {
+      const hours = parseInt(text.replace(/\D/g, ''));
+      if (isNaN(hours) || hours <= 0 || hours > 48) {
+        this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48:');
+        return true;
+      }
+      data.max_layover_hours = hours;
+      this.bot.sendMessage(
+        chatId,
+        `✅ Максимальное время пересадки: ${hours} часов\n\nВведите порог цены в рублях (например, 50000):`,
+        { reply_markup: { remove_keyboard: true } }
+      );
       state.step = 'threshold';
       return true;
     }
@@ -214,7 +237,6 @@ class RouteHandlers {
         this.bot.sendMessage(chatId, '❌ Неверная цена. Введите число:');
         return true;
       }
-
       data.threshold_price = price;
 
       Route.create(chatId, data).then(() => {
@@ -225,13 +247,13 @@ class RouteHandlers {
           `👥 ${Formatters.formatPassengers(data.adults, data.children)}\n` +
           `🧳 ${data.baggage ? 'С багажом' : 'Без багажа'}\n` +
           `✈️ ${data.airline || 'Любая авиакомпания'}\n` +
+          `⏱️ Макс. пересадка: ${data.max_layover_hours} ч\n` +  // 🔥 НОВАЯ СТРОКА
           `💰 Порог: ${Formatters.formatPrice(price, 'RUB')}\n\n` +
           `Бот будет проверять цены каждые 2 часа`;
 
         this.bot.sendMessage(chatId, summary, this.getMainMenuKeyboard());
         delete this.userStates[chatId];
       });
-
       return true;
     }
 
@@ -307,13 +329,12 @@ class RouteHandlers {
     this.userStates[chatId] = { type: 'regular', step: 'history_select', routes };
   }
 
-  // 🔥 НОВЫЙ МЕТОД: Проверка цены по требованию со скриншотом
+  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Проверка цены по требованию со скриншотом
   async handleCheckPrice(chatId, routeId) {
     await this.bot.sendMessage(chatId, '🔍 Проверяю актуальную цену...\n⏳ Это займет 10-15 секунд');
 
     try {
       const route = await Route.findById(routeId);
-
       if (!route || route.chat_id !== chatId) {
         await this.bot.sendMessage(chatId, '❌ Маршрут не найден');
         return;
@@ -334,30 +355,36 @@ class RouteHandlers {
 
       // Получаем цену через Puppeteer
       const puppeteer = new PuppeteerPricer(false);
-      const result = await puppeteer.getPriceFromUrl(searchUrl, 1, 1, route.airline);
+      // 🔥 ПЕРЕДАЕМ max_layover_hours вместо хардкода
+      const result = await puppeteer.getPriceFromUrl(
+        searchUrl,
+        1,
+        1,
+        route.airline,
+        route.max_layover_hours || 5  // 🔥 НОВЫЙ ПАРАМЕТР
+      );
       await puppeteer.close();
 
       if (result && result.price) {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);
         const baggageText = route.baggage ? '✅ С багажом' : '❌ Без багажа';
 
-        let message = `💰 <b>АКТУАЛЬНАЯ ЦЕНА</b>\n\n`;
+        let message = `💰 АКТУАЛЬНАЯ ЦЕНА\n\n`;
         message += `📍 ${route.origin} → ${route.destination}\n`;
-        message += `💵 <b>${Formatters.formatPrice(result.price, route.currency)}</b>\n`;
-        message += `✅ <i>Проверено через браузер</i>\n\n`;
+        message += `💵 ${Formatters.formatPrice(result.price, route.currency)}\n`;
+        message += `✅ Проверено через браузер\n\n`;
         message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}\n`;
         message += `👥 ${passengersText}\n`;
         message += `🧳 ${baggageText}\n`;
-
         if (route.airline) {
           message += `✈️ ${route.airline}\n`;
         }
+        message += `⏱️ Макс. пересадка: ${route.max_layover_hours || 5} ч\n`;  // 🔥 ДОБАВЛЕНО
 
         message += `\n💵 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n`;
-
         if (result.price <= route.threshold_price) {
           const savings = route.threshold_price - result.price;
-          message += `\n🔥 <b>ЦЕНА НИЖЕ ПОРОГА!</b>\n`;
+          message += `\n🔥 ЦЕНА НИЖЕ ПОРОГА!\n`;
           message += `📉 Экономия: ${Formatters.formatPrice(savings, route.currency)}`;
         }
 

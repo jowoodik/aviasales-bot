@@ -19,6 +19,7 @@ db.serialize(() => {
                                             airline TEXT,
                                             baggage INTEGER DEFAULT 0,
                                             max_stops INTEGER DEFAULT 99,
+                                            max_layover_hours INTEGER DEFAULT 5,
                                             threshold_price REAL NOT NULL,
                                             currency TEXT DEFAULT 'RUB',
                                             is_paused INTEGER DEFAULT 0,
@@ -44,6 +45,7 @@ db.serialize(() => {
                                                      airline TEXT,
                                                      baggage INTEGER DEFAULT 0,
                                                      max_stops INTEGER DEFAULT 99,
+                                                     max_layover_hours INTEGER DEFAULT 5,
                                                      threshold_price REAL NOT NULL,
                                                      currency TEXT DEFAULT 'RUB',
                                                      is_paused INTEGER DEFAULT 0,
@@ -69,7 +71,7 @@ db.serialize(() => {
           )
   `);
 
-  // 🔥 НОВАЯ ТАБЛИЦА: Аналитика цен с временными метками
+  // Аналитика цен с временными метками
   db.run(`
       CREATE TABLE IF NOT EXISTS price_analytics (
                                                      id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,7 +92,7 @@ db.serialize(() => {
       )
   `);
 
-  // История цен (старая таблица - оставляем для совместимости)
+  // История цен
   db.run(`
       CREATE TABLE IF NOT EXISTS price_history (
                                                    id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +123,7 @@ db.serialize(() => {
                                                    chat_id INTEGER PRIMARY KEY,
                                                    notify_on_drop INTEGER DEFAULT 1,
                                                    notify_on_new_min INTEGER DEFAULT 1,
+                                                   notify_on_check INTEGER DEFAULT 0,
                                                    quiet_hours_start INTEGER DEFAULT 23,
                                                    quiet_hours_end INTEGER DEFAULT 7,
                                                    check_frequency INTEGER DEFAULT 120,
@@ -128,26 +131,26 @@ db.serialize(() => {
       )
   `);
 
-  // 🔥 ОБНОВЛЕННАЯ ТАБЛИЦА: Статистика пользователей
+  // Статистика пользователей
   db.run(`
-    CREATE TABLE IF NOT EXISTS user_stats (
-      chat_id INTEGER PRIMARY KEY,
-      total_routes INTEGER DEFAULT 0,
-      total_flexible INTEGER DEFAULT 0,
-      total_alerts INTEGER DEFAULT 0,
-      total_savings REAL DEFAULT 0,
-      total_checks INTEGER DEFAULT 0,
-      last_check DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
+      CREATE TABLE IF NOT EXISTS user_stats (
+                                                chat_id INTEGER PRIMARY KEY,
+                                                total_routes INTEGER DEFAULT 0,
+                                                total_flexible INTEGER DEFAULT 0,
+                                                total_alerts INTEGER DEFAULT 0,
+                                                total_savings REAL DEFAULT 0,
+                                                total_checks INTEGER DEFAULT 0,
+                                                last_check DATETIME,
+                                                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
   `);
 
   // Cooldown уведомлений
   db.run(`
-    CREATE TABLE IF NOT EXISTS notification_cooldown (
-      chat_id INTEGER PRIMARY KEY,
-      last_notification INTEGER NOT NULL
-    )
+      CREATE TABLE IF NOT EXISTS notification_cooldown (
+                                                           chat_id INTEGER PRIMARY KEY,
+                                                           last_notification INTEGER NOT NULL
+      )
   `);
 
   // Индексы для быстрой аналитики
@@ -155,6 +158,29 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_route ON price_analytics(origin, destination)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_time ON price_analytics(hour_of_day, day_of_week)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_chat ON price_analytics(chat_id)`);
+
+  // 🔥 МИГРАЦИЯ: Добавляем колонку max_layover_hours в routes
+  db.run(`ALTER TABLE routes ADD COLUMN max_layover_hours INTEGER DEFAULT 5`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('Ошибка миграции routes:', err.message);
+    }
+  });
+
+  // 🔥 МИГРАЦИЯ: Добавляем колонку max_layover_hours в flexible_routes
+  db.run(`ALTER TABLE flexible_routes ADD COLUMN max_layover_hours INTEGER DEFAULT 5`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('Ошибка миграции flexible_routes:', err.message);
+    }
+  });
+
+  // 🔥 МИГРАЦИЯ: Добавляем колонку notify_on_check в user_settings
+  db.run(`ALTER TABLE user_settings ADD COLUMN notify_on_check INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('Ошибка миграции user_settings:', err.message);
+    } else if (!err) {
+      console.log('✅ Миграция: добавлена колонка notify_on_check');
+    }
+  });
 
   console.log('✅ База данных инициализирована');
 });

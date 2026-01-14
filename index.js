@@ -35,7 +35,8 @@ function getMainMenuKeyboard() {
         ['📊 Лучшие варианты', '📈 История цен'],
         ['✏️ Редактировать', '🗑 Удалить'],
         ['📊 Статистика', '⚙️ Настройки'],
-        ['✅ Проверить сейчас', 'ℹ️ Помощь']
+        ['✅ Проверить сейчас', '🎯 Проверить один'],  // 🔥 ИЗМЕНЕНО
+        ['ℹ️ Помощь']  // 🔥 ПЕРЕНЕСЕНО НА НОВУЮ СТРОКУ
       ],
       resize_keyboard: true,
       persistent: true
@@ -229,6 +230,11 @@ bot.on('message', async (msg) => {
     return;
   }
 
+  if (text === '🎯 Проверить один') {
+    flexibleHandlers.handleCheckOne(chatId);
+    return;
+  }
+
   if (text === '✏️ Редактировать') {
     bot.sendMessage(chatId, 'Выберите тип маршрута:', {
       reply_markup: {
@@ -329,6 +335,10 @@ bot.on('message', async (msg) => {
       flexibleHandlers.handleEditFlexible(chatId); // <-- ФИКС: Добавили
     }
     return;
+  }
+
+  if (state && state.step === 'flex_check_select') {
+    if (await flexibleHandlers.handleCheckSelectStep(chatId, text)) return;
   }
 
   // Выбор типа для удаления
@@ -682,6 +692,13 @@ bot.on('message', async (msg) => {
       }
     }
     return;
+  }
+
+  // 🔥 ДОБАВЬТЕ ЭТО: Выборочная проверка гибкого маршрута
+  if (state.step === 'flex_check_select') {
+    if (await flexibleHandlers.handleCheckSelectStep(chatId, text)) {
+      return;
+    }
   }
 });
 

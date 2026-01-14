@@ -6,7 +6,7 @@ const DateUtils = require('../utils/dateUtils');
 const PuppeteerPricer = require('./PuppeteerPricer');
 const { SEARCH_LIMITS } = require('../config/constants');
 const fs = require('fs');
-const PriceAnalytics = require('./PriceAnalytics');  // 🔥 ДОБАВЬТЕ ЭТУ СТРОКУ
+const PriceAnalytics = require('./PriceAnalytics');
 
 class FlexibleMonitor {
   constructor(aviasalesToken, bot, debug = false) {
@@ -24,7 +24,6 @@ class FlexibleMonitor {
     };
   }
 
-  // 🔥 ДОБАВЬТЕ ЭТОТ МЕТОД
   generateDateCombinations(route) {
     const combinations = [];
     const startDate = new Date(route.departure_start);
@@ -52,7 +51,6 @@ class FlexibleMonitor {
 
   async checkAllRoutes() {
     this.stats.startTime = Date.now();
-
     console.log('\n========================================');
     console.log('🔍 ПРОВЕРКА ГИБКИХ МАРШРУТОВ (Puppeteer)');
     console.log(new Date().toLocaleString('ru-RU'));
@@ -60,15 +58,16 @@ class FlexibleMonitor {
 
     const routes = await FlexibleRoute.findActive();
     console.log(`📋 Найдено маршрутов: ${routes.length}\n`);
-
     this.stats.total = routes.length;
 
     for (let i = 0; i < routes.length; i++) {
       const route = routes[i];
+
       console.log(`\n[${i + 1}/${routes.length}] 🔍 ${route.origin} → ${route.destination}`);
-      console.log(`  📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
-      console.log(`  🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
-      console.log(`  💰 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`);
+      console.log(` 📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
+      console.log(` 🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
+      console.log(` ⏱️ Макс. пересадка: ${route.max_layover_hours || 5} ч`);
+      console.log(` 💰 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`);
 
       const canNotify = await this.notificationService.canSendNotification(route.chat_id);
 
@@ -91,7 +90,6 @@ class FlexibleMonitor {
           routeStats.alert = result.alert;
           routeStats.screenshot = result.screenshot;
           this.stats.success++;
-
           if (result.alert) {
             this.stats.alerts++;
           }
@@ -99,18 +97,20 @@ class FlexibleMonitor {
           this.stats.failed++;
         }
       } catch (error) {
-        console.error(`  ❌ Ошибка: ${error.message}`);
+        console.error(` ❌ Ошибка: ${error.message}`);
         this.stats.failed++;
       }
 
       this.stats.routes.push(routeStats);
-
       await FlexibleRoute.updateLastCheck(route.id);
       this.puppeteerPricer.cleanCache();
 
+      // 🔥 ОБНОВЛЕНО: Пауза между маршрутами увеличена с 10 до 30-60 сек
       if (i < routes.length - 1) {
-        console.log(`\n  ⏳ Ожидание 10 сек перед следующим маршрутом...`);
-        await this.sleep(10000);
+        const pause = Math.floor(Math.random() * 30000 + 30000); // 30-60 сек
+        const pauseSec = (pause / 1000).toFixed(0);
+        console.log(`\n ⏳ Ожидание ${pauseSec} сек перед следующим маршрутом...`);
+        await this.sleep(pause);
       }
     }
 
@@ -123,10 +123,10 @@ class FlexibleMonitor {
 
   async analyzeRoute(route, canNotify) {
     console.log(`\n📊 Анализ гибкого маршрута`);
-    console.log(`  ${route.origin} → ${route.destination}`);
+    console.log(` ${route.origin} → ${route.destination}`);
 
     const combinations = this.generateDateCombinations(route);
-    console.log(`  🔍 Комбинаций для проверки: ${combinations.length}`);
+    console.log(` 🔍 Комбинаций для проверки: ${combinations.length}`);
 
     const urls = combinations.map(c => this.api.generateSearchLink({
       origin: route.origin,
@@ -140,8 +140,12 @@ class FlexibleMonitor {
       max_stops: route.max_stops
     }));
 
-    // Получаем цены со скриншотами через Puppeteer
-    const priceResults = await this.puppeteerPricer.getPricesFromUrls(urls, route.airline);
+    // 🔥 ИСПРАВЛЕНО: Передаем max_layover_hours
+    const priceResults = await this.puppeteerPricer.getPricesFromUrls(
+      urls,
+      route.airline,
+      route.max_layover_hours || 5 // 🔥 ДОБАВЛЕН ПАРАМЕТР
+    );
 
     const results = [];
     for (let i = 0; i < combinations.length; i++) {
@@ -172,8 +176,7 @@ class FlexibleMonitor {
     }
 
     if (results.length === 0) {
-      console.log(`  ❌ Не найдено результатов`);
-      // 🔥 ВОЗВРАЩАЕМ ОБЪЕКТ С ОШИБКОЙ
+      console.log(` ❌ Не найдено результатов`);
       return {
         success: false,
         bestPrice: null,
@@ -186,8 +189,8 @@ class FlexibleMonitor {
     results.sort((a, b) => a.total_price - b.total_price);
     const topResults = results.slice(0, 5);
 
-    console.log(`  ✅ Найдено ${results.length} вариантов`);
-    console.log(`  💰 Лучшая цена: ${topResults[0].total_price.toLocaleString('ru-RU')} ₽`);
+    console.log(` ✅ Найдено ${results.length} вариантов`);
+    console.log(` 💰 Лучшая цена: ${topResults[0].total_price.toLocaleString('ru-RU')} ₽`);
 
     // Сохраняем результаты
     await FlexibleResult.saveResults(route.id, topResults);
@@ -199,7 +202,7 @@ class FlexibleMonitor {
 
     if (canNotify) {
       if (!previousBest || currentBest < previousBest) {
-        console.log(`  🔥 Новый минимум! ${currentBest} < ${previousBest || 'N/A'}`);
+        console.log(` 🔥 Новый минимум! ${currentBest} < ${previousBest || 'N/A'}`);
         await this.notificationService.sendFlexibleAlert(
           route,
           topResults,
@@ -209,7 +212,7 @@ class FlexibleMonitor {
         );
         alertSent = true;
       } else if (currentBest <= route.threshold_price) {
-        console.log(`  📉 Цена ниже порога: ${currentBest} <= ${route.threshold_price}`);
+        console.log(` 📉 Цена ниже порога: ${currentBest} <= ${route.threshold_price}`);
         await this.notificationService.sendFlexibleAlert(
           route,
           topResults,
@@ -221,7 +224,6 @@ class FlexibleMonitor {
       }
     }
 
-    // 🔥 ВАЖНО: ВОЗВРАЩАЕМ ОБЪЕКТ С РЕЗУЛЬТАТОМ
     return {
       success: true,
       bestPrice: currentBest,
@@ -230,12 +232,10 @@ class FlexibleMonitor {
     };
   }
 
-  // Отправка отчета в бот
   async sendReport(chatId) {
     const elapsed = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
-
-    let report = `<b>📊 ОТЧЕТ О ПРОВЕРКЕ</b>\n`;
-    report += `<b>Тип:</b> 🔄 Гибкие маршруты\n\n`;
+    let report = `📊 ОТЧЕТ О ПРОВЕРКЕ\n`;
+    report += `Тип: 🔄 Гибкие маршруты\n\n`;
     report += `⏱ Время: ${elapsed} мин\n`;
     report += `📋 Всего маршрутов: ${this.stats.total}\n`;
     report += `✅ Успешно: ${this.stats.success}\n`;
@@ -243,14 +243,14 @@ class FlexibleMonitor {
     report += `🔥 Отправлено алертов: ${this.stats.alerts}\n`;
 
     if (this.stats.routes.length > 0) {
-      report += `\n<b>Детали:</b>\n`;
+      report += `\nДетали:\n`;
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '⚠️';
         report += `\n${emoji} ${route.origin} → ${route.destination}\n`;
         if (route.success && route.bestPrice) {
           report += ` 💰 ${route.bestPrice.toLocaleString('ru-RU')} ₽`;
           if (route.alert) {
-            report += ` <i>(алерт отправлен)</i>`;
+            report += ` (алерт отправлен)`;
           }
           report += `\n`;
         } else {
@@ -279,12 +279,113 @@ class FlexibleMonitor {
     }
   }
 
+  async checkSingleRoute(route) {
+    this.stats.startTime = Date.now();
+    console.log('\n========================================');
+    console.log('🎯 ПРОВЕРКА ОДНОГО МАРШРУТА');
+    console.log(new Date().toLocaleString('ru-RU'));
+    console.log('========================================\n');
+
+    console.log(`🔍 ${route.origin} → ${route.destination}`);
+    console.log(` 📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
+    console.log(` 🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
+    console.log(` ⏱️ Макс. пересадка: ${route.max_layover_hours || 5} ч`);
+    console.log(` 💰 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`);
+
+    const canNotify = await this.notificationService.canSendNotification(route.chat_id);
+
+    const routeStats = {
+      origin: route.origin,
+      destination: route.destination,
+      chatId: route.chat_id,
+      success: false,
+      bestPrice: null,
+      alert: false,
+      screenshot: null
+    };
+
+    try {
+      const result = await this.analyzeRoute(route, canNotify);
+
+      if (result && result.success) {
+        routeStats.success = true;
+        routeStats.bestPrice = result.bestPrice;
+        routeStats.alert = result.alert;
+        routeStats.screenshot = result.screenshot;
+        this.stats.success++;
+        if (result.alert) {
+          this.stats.alerts++;
+        }
+      } else {
+        this.stats.failed++;
+      }
+    } catch (error) {
+      console.error(` ❌ Ошибка: ${error.message}`);
+      this.stats.failed++;
+    }
+
+    this.stats.routes.push(routeStats);
+    await FlexibleRoute.updateLastCheck(route.id);
+    this.puppeteerPricer.cleanCache();
+
+    console.log('\n========================================');
+    console.log('✅ Проверка завершена');
+    console.log('========================================\n');
+
+    return routeStats;
+  }
+
+  // 🔥 НОВЫЙ МЕТОД: Отчет для одного маршрута
+  async sendSingleReport(chatId, route) {
+    const elapsed = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
+    const routeStats = this.stats.routes[0]; // Единственный проверенный маршрут
+
+    let report = `📊 ОТЧЕТ О ПРОВЕРКЕ\n`;
+    report += `Маршрут: ${route.origin} → ${route.destination}\n\n`;
+    report += `⏱ Время: ${elapsed} мин\n`;
+
+    if (routeStats.success && routeStats.bestPrice) {
+      report += `✅ Успешно\n`;
+      report += `💰 Лучшая цена: ${routeStats.bestPrice.toLocaleString('ru-RU')} ₽\n`;
+
+      if (routeStats.bestPrice <= route.threshold_price) {
+        const savings = route.threshold_price - routeStats.bestPrice;
+        report += `🔥 Ниже порога на ${savings.toLocaleString('ru-RU')} ₽!\n`;
+      }
+
+      if (routeStats.alert) {
+        report += `📬 Алерт отправлен\n`;
+      }
+    } else {
+      report += `❌ Не удалось получить данные с сайта\n`;
+    }
+
+    try {
+      await this.bot.sendMessage(chatId, report, { parse_mode: 'HTML' });
+
+      // Отправляем скриншот если есть
+      if (routeStats.screenshot && require('fs').existsSync(routeStats.screenshot)) {
+        try {
+          await this.bot.sendPhoto(chatId, routeStats.screenshot, {
+            caption: `📸 ${route.origin} → ${route.destination}: ${routeStats.bestPrice?.toLocaleString('ru-RU')} ₽`
+          });
+        } catch (e) {
+          console.error(`Ошибка отправки скриншота: ${e.message}`);
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка отправки отчета:', error.message);
+    }
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async close() {
-    await this.puppeteerPricer.close();
+    if (this.puppeteerPricer) {
+      await this.puppeteerPricer.close();
+    }
   }
 }
 

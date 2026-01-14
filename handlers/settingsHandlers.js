@@ -11,25 +11,21 @@ class SettingsHandlers {
     try {
       // Общая статистика пользователя
       const userStats = await PriceAnalytics.getUserStats(chatId);
-
       // Анализ по времени суток
       const hourAnalysis = await PriceAnalytics.analyzeByHour(chatId);
-
       // Будни vs Выходные
       const weekdayAnalysis = await PriceAnalytics.compareWeekdaysVsWeekends(chatId);
-
       // Получаем базовую статистику
       const baseStats = await this.getBaseStats(chatId);
 
-      let message = '📊 <b>УМНАЯ АНАЛИТИКА ЦЕН</b>\n\n';
+      let message = '📊 УМНАЯ АНАЛИТИКА ЦЕН\n\n';
 
       // Базовая статистика
       if (baseStats) {
-        message += `🎯 <b>Ваши маршруты:</b>\n`;
+        message += `🎯 Ваши маршруты:\n`;
         message += `✈️ Обычных: ${baseStats.routes}\n`;
         message += `🔍 Гибких: ${baseStats.flexible}\n`;
         message += `🔔 Отправлено алертов: ${baseStats.alerts}\n`;
-
         if (baseStats.savings > 0) {
           message += `💰 Сэкономлено: ${baseStats.savings.toLocaleString('ru-RU')} ₽\n`;
         }
@@ -38,7 +34,7 @@ class SettingsHandlers {
 
       // Статистика проверок
       if (userStats && userStats.total_prices > 0) {
-        message += `📈 <b>Найдено цен:</b> ${userStats.total_prices}\n`;
+        message += `📈 Найдено цен: ${userStats.total_prices}\n`;
         message += `💎 Лучшая: ${Math.floor(userStats.best_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📊 Средняя: ${Math.floor(userStats.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
@@ -51,7 +47,7 @@ class SettingsHandlers {
           .slice(0, 3);
 
         if (bestHours.length > 0) {
-          message += `⏰ <b>Лучшее время для поиска:</b>\n`;
+          message += `⏰ Лучшее время для поиска:\n`;
           bestHours.forEach((h, i) => {
             const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
             const timeRange = `${h.hour_of_day}:00-${h.hour_of_day + 1}:00`;
@@ -63,7 +59,7 @@ class SettingsHandlers {
 
       // 🔥 Будни vs Выходные
       if (weekdayAnalysis.length === 2) {
-        message += `📅 <b>Будни vs Выходные:</b>\n`;
+        message += `📅 Будни vs Выходные:\n`;
         weekdayAnalysis.forEach(day => {
           const icon = day.period === 'Будни' ? '💼' : '🏖';
           message += `${icon} ${day.period}: ${Math.floor(day.avg_price).toLocaleString('ru-RU')} ₽\n`;
@@ -92,7 +88,6 @@ class SettingsHandlers {
         parse_mode: 'HTML',
         reply_markup: keyboard
       });
-
     } catch (error) {
       console.error('Ошибка статистики:', error);
       await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
@@ -102,11 +97,11 @@ class SettingsHandlers {
   async getBaseStats(chatId) {
     return new Promise((resolve) => {
       db.get(`
-        SELECT 
-          (SELECT COUNT(*) FROM routes WHERE chat_id = ?) as routes,
-          (SELECT COUNT(*) FROM flexible_routes WHERE chat_id = ?) as flexible,
-          (SELECT COALESCE(total_alerts, 0) FROM user_stats WHERE chat_id = ?) as alerts,
-          (SELECT COALESCE(total_savings, 0) FROM user_stats WHERE chat_id = ?) as savings
+          SELECT
+                  (SELECT COUNT(*) FROM routes WHERE chat_id = ?) as routes,
+                  (SELECT COUNT(*) FROM flexible_routes WHERE chat_id = ?) as flexible,
+                  (SELECT COALESCE(total_alerts, 0) FROM user_stats WHERE chat_id = ?) as alerts,
+                  (SELECT COALESCE(total_savings, 0) FROM user_stats WHERE chat_id = ?) as savings
       `, [chatId, chatId, chatId, chatId], (err, row) => {
         resolve(row || { routes: 0, flexible: 0, alerts: 0, savings: 0 });
       });
@@ -225,10 +220,10 @@ class SettingsHandlers {
     }
 
     db.run(
-      `INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end) 
-       VALUES (?, ?, ?) 
-       ON CONFLICT(chat_id) DO 
-       UPDATE SET quiet_hours_start = ?, quiet_hours_end = ?`,
+      `INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end)
+       VALUES (?, ?, ?)
+           ON CONFLICT(chat_id) DO
+      UPDATE SET quiet_hours_start = ?, quiet_hours_end = ?`,
       [chatId, start, end, start, end],
       (err) => {
         if (!err) {
@@ -237,6 +232,7 @@ class SettingsHandlers {
         delete this.userStates[chatId];
       }
     );
+
     return true;
   }
 
@@ -270,9 +266,11 @@ class SettingsHandlers {
         delete this.userStates[chatId];
       }
     );
+
     return true;
   }
 
+  // 🔥 ИСПРАВЛЕННЫЙ МЕТОД
   handleNotifications(chatId, text) {
     const state = this.userStates[chatId];
     if (!state || state.step !== 'settings_notify') return false;
@@ -297,29 +295,47 @@ class SettingsHandlers {
     }
 
     if (field) {
+      // 🔥 ШАГ 1: Обновляем базу данных
       db.run(
-        `INSERT INTO user_settings (chat_id, ${field}) 
-         VALUES (?, ?) 
-         ON CONFLICT(chat_id) DO 
-         UPDATE SET ${field} = ?`,
+        `INSERT INTO user_settings (chat_id, ${field})
+         VALUES (?, ?)
+             ON CONFLICT(chat_id) DO
+        UPDATE SET ${field} = ?`,
         [chatId, value, value],
-        () => {
-          db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, settings) => {
-            const s = settings || state.settings;
+        (err) => {
+          if (err) {
+            console.error('Ошибка обновления настроек:', err);
+            this.bot.sendMessage(chatId, '❌ Ошибка сохранения настроек');
+            return;
+          }
+
+          // 🔥 ШАГ 2: Получаем СВЕЖИЕ данные из БД
+          db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, freshSettings) => {
+            if (err || !freshSettings) {
+              console.error('Ошибка чтения настроек:', err);
+              this.bot.sendMessage(chatId, '❌ Ошибка чтения настроек');
+              return;
+            }
+
+            // 🔥 ШАГ 3: Обновляем state
+            state.settings = freshSettings;
+
+            // 🔥 ШАГ 4: Формируем клавиатуру с АКТУАЛЬНЫМИ данными
             const keyboard = {
               reply_markup: {
                 keyboard: [
-                  [`${s.notify_on_drop ? '✅' : '⬜'} Цена ниже порога`],
-                  [`${s.notify_on_new_min ? '✅' : '⬜'} Новый минимум`],
-                  [`${s.notify_on_check ? '✅' : '⬜'} Каждая проверка`],
+                  [`${freshSettings.notify_on_drop ? '✅' : '⬜'} Цена ниже порога`],
+                  [`${freshSettings.notify_on_new_min ? '✅' : '⬜'} Новый минимум`],
+                  [`${freshSettings.notify_on_check ? '✅' : '⬜'} Каждая проверка`],
                   ['◀️ Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
               }
             };
+
+            // 🔥 ШАГ 5: Отправляем сообщение с обновленной клавиатурой
             this.bot.sendMessage(chatId, '✅ Обновлено!\n\n🔔 Переключите нужные уведомления:', keyboard);
-            state.settings = s;
           });
         }
       );
