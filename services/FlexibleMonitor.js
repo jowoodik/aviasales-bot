@@ -4,7 +4,6 @@ const AviasalesAPI = require('./AviasalesAPI');
 const NotificationService = require('./NotificationService');
 const DateUtils = require('../utils/dateUtils');
 const PuppeteerPricer = require('./PuppeteerPricer');
-const { SEARCH_LIMITS } = require('../config/constants');
 const fs = require('fs');
 const PriceAnalytics = require('./PriceAnalytics');
 

@@ -1,7 +1,6 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 require('./config/database');
-const cron = require('node-cron');
 
 const PriceMonitor = require('./services/PriceMonitor');
 const FlexibleMonitor = require('./services/FlexibleMonitor');

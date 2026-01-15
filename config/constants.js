@@ -19,14 +19,4 @@ module.exports = {
     'HKT': 'Пхукет',
     'IST': 'Стамбул'
   },
-
-  API_LIMITS: {
-    MAX_REQUESTS_PER_MINUTE: 600,
-    DELAY_BETWEEN_REQUESTS: 3000
-  },
-
-  SEARCH_LIMITS: {
-    MAX_FLEXIBLE_COMBINATIONS: 50,
-    TOP_RESULTS_TO_SAVE: 5
-  }
 };
