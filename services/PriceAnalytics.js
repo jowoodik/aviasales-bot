@@ -18,11 +18,11 @@ class PriceAnalytics {
 
     return new Promise((resolve, reject) => {
       db.run(`
-                INSERT INTO price_analytics
-                (route_type, origin, destination, price, airline, hour_of_day, day_of_week,
-                 day_of_month, month, year, is_weekend, season, chat_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, [
+          INSERT INTO price_analytics
+          (route_type, origin, destination, price, airline, hour_of_day, day_of_week,
+           day_of_month, month, year, is_weekend, season, chat_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
         data.routeType,
         data.origin,
         data.destination,
@@ -47,14 +47,14 @@ class PriceAnalytics {
   static async getRouteStats(origin, destination, chatId) {
     return new Promise((resolve, reject) => {
       db.get(`
-                SELECT
-                    COUNT(*) as total_checks,
-                    MIN(price) as min_price,
-                    AVG(price) as avg_price,
-                    MAX(price) as max_price
-                FROM price_analytics
-                WHERE origin = ? AND destination = ? AND chat_id = ?
-            `, [origin, destination, chatId], (err, row) => {
+          SELECT
+              COUNT(*) as total_checks,
+              MIN(price) as min_price,
+              AVG(price) as avg_price,
+              MAX(price) as max_price
+          FROM price_analytics
+          WHERE origin = ? AND destination = ? AND chat_id = ?
+      `, [origin, destination, chatId], (err, row) => {
         if (err) reject(err);
         else resolve(row || {});
       });
@@ -201,6 +201,71 @@ class PriceAnalytics {
       `, [chatId], (err, row) => {
         if (err) reject(err);
         else resolve(row || {});
+      });
+    });
+  }
+
+  // История цен для обычного маршрута
+  static async getRegularRoutePriceHistory(routeId, chatId, days = 30) {
+    return new Promise((resolve, reject) => {
+      db.all(`
+          SELECT
+              price,
+              airline,
+              found_at,
+              search_link
+          FROM best_prices
+          WHERE route_id = ?
+          ORDER BY found_at DESC
+              LIMIT 20
+      `, [routeId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+  }
+
+  // История цен для гибкого маршрута по дням - ИСПРАВЛЕНО
+  static async getFlexibleRoutePriceHistory(routeId, days = 30) {
+    return new Promise((resolve, reject) => {
+      db.all(`
+          SELECT
+              DATE(found_at) as date,
+              MIN(total_price) as min_price,
+              AVG(total_price) as avg_price,
+              MAX(total_price) as max_price,
+              COUNT(*) as checks_count
+          FROM flexible_results
+          WHERE route_id = ?
+            AND found_at >= datetime('now', '-' || ? || ' days')
+          GROUP BY DATE(found_at)
+          ORDER BY date DESC
+      `, [routeId, days], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+  }
+
+  // Детальная история гибкого маршрута (все найденные варианты) - ИСПРАВЛЕНО
+  static async getFlexibleRouteDetailedHistory(routeId, limit = 20) {
+    return new Promise((resolve, reject) => {
+      db.all(`
+          SELECT
+              total_price,
+              airline,
+              departure_date,
+              return_date,
+              days_in_country,
+              found_at,
+              search_link
+          FROM flexible_results
+          WHERE route_id = ?
+          ORDER BY found_at DESC
+              LIMIT ?
+      `, [routeId, limit], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
       });
     });
   }

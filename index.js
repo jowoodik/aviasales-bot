@@ -730,11 +730,11 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Просмотр истории обычного маршрута
-  if (state.step === 'history_select' && state.type === 'regular') {
-    if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
+  // Просмотр истории - выбор маршрута
+  if (state.step === 'history_select') {
+    if (text === '◀️ Главное меню') {
       delete userStates[chatId];
+      bot.sendMessage(chatId, 'Главное меню:', getMainMenuKeyboard());
       return;
     }
 
@@ -744,38 +744,37 @@ bot.on('message', async (msg) => {
       const route = state.routes[index];
 
       if (route) {
-        db.all(
-          `SELECT * FROM best_prices WHERE route_id = ? ORDER BY price ASC LIMIT 3`,
-          [route.id],
-          (err, prices) => {
-            if (err || !prices || prices.length === 0) {
-              bot.sendMessage(chatId, '📈 Нет истории цен для этого маршрута', getMainMenuKeyboard());
-              delete userStates[chatId];
-              return;
-            }
+        delete userStates[chatId];
 
-            let message = `📈 ИСТОРИЯ ЦЕН\n\n`;
-            message += `${route.origin} → ${route.destination}\n`;
-            message += `${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
-            message += `🏆 ТОП-3 ЛУЧШИХ ЦЕН:\n\n`;
-
-            prices.forEach((p, i) => {
-              const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-              const date = new Date(p.found_at).toLocaleDateString('ru-RU');
-              message += `${icon} ${Formatters.formatPrice(p.price, route.currency)}\n`;
-              message += `   ${p.airline} | Найдено: ${date}\n`;
-              message += `   🔗 ${p.search_link}\n\n`;
-            });
-
-            message += `💵 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}`;
-
-            bot.sendMessage(chatId, message, getMainMenuKeyboard());
-            delete userStates[chatId];
-          }
-        );
+        if (route.type === 'regular') {
+          await routeHandlers.showRegularRouteHistory(chatId, route);
+        } else if (route.type === 'flexible') {
+          await routeHandlers.showFlexibleRouteHistory(chatId, route);
+        }
       }
     }
     return;
+  }
+
+  // Выбор типа истории для гибкого маршрута
+  if (state.step === 'flex_history_type') {
+    if (text === '◀️ Главное меню') {
+      delete userStates[chatId];
+      bot.sendMessage(chatId, 'Главное меню:', getMainMenuKeyboard());
+      return;
+    }
+
+    if (text === '📊 Сводка по дням') {
+      delete userStates[chatId];
+      await routeHandlers.showFlexibleRouteDailySummary(chatId, state.route);
+      return;
+    }
+
+    if (text === '📋 Детальная история') {
+      delete userStates[chatId];
+      await routeHandlers.showFlexibleRouteDetailedHistory(chatId, state.route);
+      return;
+    }
   }
 
   // Просмотр результатов гибкого поиска
