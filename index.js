@@ -146,14 +146,65 @@ bot.on('callback_query', async (query) => {
       return;
     }
 
-    // Детальная аналитика
-    if (data === 'detailed_analytics') {
+    // 🔥 НОВЫЕ ОБРАБОТЧИКИ ДЛЯ СТАТИСТИКИ
+    if (data === 'general_analytics') {
+      await settingsHandlers.handleGeneralAnalytics(chatId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
 
+    if (data === 'regular_route_stats') {
+      await settingsHandlers.handleRegularRouteStats(chatId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'flexible_route_stats') {
+      await settingsHandlers.handleFlexibleRouteStats(chatId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data === 'price_trends_menu') {
+      await settingsHandlers.handlePriceTrendsMenu(chatId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('route_stats_')) {
+      const routeId = parseInt(data.replace('route_stats_', ''));
+      await settingsHandlers.showRouteStatistics(chatId, routeId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('flex_stats_')) {
+      const routeId = parseInt(data.replace('flex_stats_', ''));
+      await settingsHandlers.showFlexibleRouteStatistics(chatId, routeId);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('route_trend_')) {
+      const routeId = parseInt(data.replace('route_trend_', ''));
+      await settingsHandlers.showPriceTrend(chatId, routeId, false);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    if (data.startsWith('flex_trend_')) {
+      const routeId = parseInt(data.replace('flex_trend_', ''));
+      await settingsHandlers.showPriceTrend(chatId, routeId, true);
+      bot.answerCallbackQuery(query.id);
+      return;
+    }
+
+    // Детальная аналитика (старый обработчик, можно оставить)
+    if (data === 'detailed_analytics') {
       const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeek(chatId);
       const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-
-      let message = '📊 <b>ДЕТАЛЬНАЯ АНАЛИТИКА</b>\n\n';
-      message += '<b>Средние цены по дням недели:</b>\n\n';
+      let message = '📊 ДЕТАЛЬНАЯ АНАЛИТИКА\n\n';
+      message += 'Средние цены по дням недели:\n\n';
 
       if (dayAnalysis.length === 0) {
         message += 'Недостаточно данных. Продолжайте использовать бота!';
@@ -162,14 +213,16 @@ bot.on('callback_query', async (query) => {
           const dayName = days[day.day_of_week];
           const icon = day.is_weekend ? '🏖' : '💼';
           message += `${icon} ${dayName}: ${Math.floor(day.avg_price).toLocaleString('ru-RU')} ₽\n`;
-          message += `   └ от ${Math.floor(day.min_price).toLocaleString('ru-RU')} до ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
+          message += `  └ от ${Math.floor(day.min_price).toLocaleString('ru-RU')} до ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
         });
       }
 
       await bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
       bot.answerCallbackQuery(query.id);
+      return;
+    }
 
-    } else if (data === 'price_trends') {
+    if (data === 'price_trends') {
       await bot.sendMessage(chatId, '📈 Выберите маршрут для просмотра трендов:', {
         reply_markup: {
           inline_keyboard: [[
@@ -178,13 +231,18 @@ bot.on('callback_query', async (query) => {
         }
       });
       bot.answerCallbackQuery(query.id);
+      return;
+    }
 
-    } else if (data === 'back_to_stats') {
+    if (data === 'back_to_stats') {
       await settingsHandlers.handleStats(chatId);
       bot.answerCallbackQuery(query.id);
-    } else {
-      bot.answerCallbackQuery(query.id);
+      return;
     }
+
+    // Если ничего не подошло
+    bot.answerCallbackQuery(query.id);
+
   } catch (error) {
     console.error('Ошибка callback:', error);
     bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
@@ -389,6 +447,82 @@ bot.on('message', async (msg) => {
     if (settingsHandlers.handleNotifications(chatId, text)) {
       return;
     }
+  }
+
+  // Обработка статистики
+  if (state.step === 'stats_menu') {
+    if (settingsHandlers.handleStatsMenuStep(chatId, text)) {
+      return;
+    }
+  }
+
+  if (state.step === 'stats_back') {
+    if (text === '◀️ Назад к статистике') {
+      settingsHandlers.handleStats(chatId);
+      return;
+    }
+  }
+
+  if (state.step === 'route_stats_select') {
+    if (text === '◀️ Назад к статистике') {
+      settingsHandlers.handleStats(chatId);
+      return;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (match) {
+      const index = parseInt(match[1]) - 1;
+      const route = state.routes[index];
+      if (route) {
+        await settingsHandlers.showRouteStatistics(chatId, route);
+      }
+    }
+    return;
+  }
+
+  if (state.step === 'flex_stats_select') {
+    if (text === '◀️ Назад к статистике') {
+      settingsHandlers.handleStats(chatId);
+      return;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (match) {
+      const index = parseInt(match[1]) - 1;
+      const route = state.routes[index];
+      if (route) {
+        await settingsHandlers.showFlexibleRouteStatistics(chatId, route);
+      }
+    }
+    return;
+  }
+
+  if (state.step === 'route_stats_detail' || state.step === 'flex_stats_detail') {
+    if (text === '📈 Посмотреть тренд') {
+      await settingsHandlers.showPriceTrend(chatId, state.route, state.step === 'flex_stats_detail');
+      return;
+    }
+    if (text === '◀️ Назад к статистике') {
+      settingsHandlers.handleStats(chatId);
+      return;
+    }
+  }
+
+  if (state.step === 'trend_select') {
+    if (text === '◀️ Назад к статистике') {
+      settingsHandlers.handleStats(chatId);
+      return;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (match) {
+      const index = parseInt(match[1]) - 1;
+      const route = state.routes[index];
+      if (route) {
+        await settingsHandlers.showPriceTrend(chatId, route, route.isFlexible);
+      }
+    }
+    return;
   }
 
   // Редактирование гибкого маршрута - выбор маршрута
