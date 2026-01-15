@@ -771,11 +771,10 @@ bot.on('message', async (msg) => {
     }
   }
 
-  // Просмотр результатов гибкого поиска
-  if (state.step === 'flex_show_results') {
+  if (state.step === 'show_top_results') {
     if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
-      delete userStates[chatId];
+      delete this.userStates[chatId];
+      this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
       return;
     }
 
@@ -784,9 +783,8 @@ bot.on('message', async (msg) => {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
       if (route) {
-        // 🔥 ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД
         await flexibleHandlers.sendTopResultsWithScreenshots(chatId, route);
-        delete userStates[chatId];
+        delete this.userStates[chatId];
       }
     }
     return;
@@ -855,6 +853,11 @@ global.flexibleMonitor = flexibleMonitor;
 
 // Запуск планировщика
 setupScheduler(priceMonitor, flexibleMonitor);
+
+// Запуск веб-интерфейса
+if (process.env.ENABLE_WEB === 'true') {
+  require('./web/server');
+}
 
 console.log('\n========================================');
 console.log('🤖 Бот v3.0 запущен успешно!');

@@ -65,7 +65,7 @@ class FlexibleMonitor {
       console.log(`\n[${i + 1}/${routes.length}] 🔍 ${route.origin} → ${route.destination}`);
       console.log(` 📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
       console.log(` 🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
-      console.log(` ⏱️ Макс. пересадка: ${route.max_layover_hours || 5} ч`);
+      !!route.max_layover_hours && console.log(` ⏱️ Макс. пересадка: ${route.max_layover_hours} ч`);
       console.log(` 💰 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`);
 
       const canNotify = await this.notificationService.canSendNotification(route.chat_id);
@@ -143,7 +143,7 @@ class FlexibleMonitor {
     const priceResults = await this.puppeteerPricer.getPricesFromUrls(
       urls,
       route.airline,
-      route.max_layover_hours || 5 // 🔥 ДОБАВЛЕН ПАРАМЕТР
+      route.max_stops === 0 ? null : route.max_layover_hours
     );
 
     const results = [];

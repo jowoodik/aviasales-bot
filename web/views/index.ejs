@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aviasales Price Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 50px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            text-align: center;
+        }
+        h1 {
+            font-size: 2.5em;
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .emoji {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+        p {
+            color: #666;
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        input {
+            width: 100%;
+            padding: 15px;
+            font-size: 1em;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            outline: none;
+            transition: border 0.3s;
+        }
+        input:focus {
+            border-color: #667eea;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .bot-link {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #eee;
+        }
+        .bot-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="emoji">✈️🤖</div>
+    <h1>Aviasales Price Bot</h1>
+    <p>Отслеживайте цены на авиабилеты и получайте уведомления о лучших предложениях!</p>
+
+    <div class="input-group">
+        <input type="number" id="chatId" placeholder="Введите ваш Chat ID">
+    </div>
+    <button onclick="openDashboard()">Открыть Dashboard</button>
+
+    <div class="bot-link">
+        <p>Ещё нет Chat ID?<br>
+            <a href="https://t.me/YOUR_BOT_USERNAME" target="_blank">Запустите бота в Telegram</a></p>
+        <p style="margin-top: 10px; font-size: 0.9em; color: #999;">
+            Ваш Chat ID отображается при запуске бота командой /start
+        </p>
+    </div>
+</div>
+
+<script>
+  function openDashboard() {
+    const chatId = document.getElementById('chatId').value;
+    if (!chatId) {
+      alert('Пожалуйста, введите Chat ID');
+      return;
+    }
+    window.location.href = `/dashboard?chat_id=${chatId}`;
+  }
+
+  document.getElementById('chatId').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      openDashboard();
+    }
+  });
+</script>
+</body>
+</html>

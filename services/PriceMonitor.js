@@ -76,7 +76,8 @@ class PriceMonitor {
           searchUrl,
           i + 1,
           routes.length,
-          route.airline
+          route.airline,
+          route.max_stops === 0 ? null : route.max_layover_hours
         );
 
         if (priceResult && priceResult.price) {

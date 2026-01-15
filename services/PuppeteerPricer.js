@@ -6,8 +6,8 @@ class PuppeteerPricer {
   constructor(debug = false) {
     this.browser = null;
     this.cache = new Map();
-    this.cacheTimeout = 60 * 60 * 1000;
-    this.maxConcurrent = 2;
+    this.cacheTimeout = 60 * 60 * 1000; // 1 час
+    this.maxConcurrent = 4;
     this.debug = debug;
 
     const tempDir = path.join(__dirname, '../temp');
@@ -20,9 +20,7 @@ class PuppeteerPricer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * 🔥 ЖЕЛЕЗОБЕТОННЫЙ МЕТОД: Получает snapshot текущих цен
-   */
+  // Снимок цен для отслеживания изменений
   async getPricesSnapshot(page) {
     return await page.evaluate(() => {
       const prices = document.querySelectorAll('[data-test-id="price"]');
@@ -30,20 +28,14 @@ class PuppeteerPricer {
     });
   }
 
-  /**
-   * 🔥 ЖЕЛЕЗОБЕТОННЫЙ МЕТОД: Сравнивает два snapshot'а
-   */
   arraysEqual(arr1, arr2) {
     if (arr1.length !== arr2.length) return false;
     return arr1.every((val, index) => val === arr2[index]);
   }
 
-  /**
-   * 🔥 ЖЕЛЕЗОБЕТОННЫЙ МЕТОД: Ждет изменения списка результатов
-   */
   async waitForResultsChange(page, beforeSnapshot, index, total, timeout = 30000) {
     console.log(`[${index}/${total}] ⏳ Ожидание изменения результатов...`);
-    console.log(`[${index}/${total}] 📸 Было цен: ${beforeSnapshot.length}`);
+    console.log(`[${index}/${total}] 📊 Начальное состояние: ${beforeSnapshot.length} цен`);
 
     const startTime = Date.now();
     let attempts = 0;
@@ -54,16 +46,15 @@ class PuppeteerPricer {
 
       const currentSnapshot = await this.getPricesSnapshot(page);
 
-      // Проверяем, изменились ли результаты
       if (!this.arraysEqual(beforeSnapshot, currentSnapshot) && currentSnapshot.length > 0) {
-        console.log(`[${index}/${total}] ✅ Результаты обновились! (попытка ${attempts})`);
-        console.log(`[${index}/${total}] 📸 Стало цен: ${currentSnapshot.length}`);
-        console.log(`[${index}/${total}] 💰 Новая первая цена: ${currentSnapshot[0]}`);
+        console.log(`[${index}/${total}] ✅ Результаты изменились! (попытка ${attempts})`);
+        console.log(`[${index}/${total}] 📊 Новое состояние: ${currentSnapshot.length} цен`);
+        console.log(`[${index}/${total}] 💰 Первая цена: ${currentSnapshot[0]}`);
         return true;
       }
 
       if (attempts % 10 === 0) {
-        console.log(`[${index}/${total}] ⏳ Попытка ${attempts}, жду изменений... (${Math.floor((Date.now() - startTime) / 1000)}с)`);
+        console.log(`[${index}/${total}] ⏱ Прошло ${attempts} попыток (${Math.floor((Date.now() - startTime) / 1000)}с)...`);
       }
     }
 
@@ -71,9 +62,6 @@ class PuppeteerPricer {
     return false;
   }
 
-  /**
-   * 🔥 ЖЕЛЕЗОБЕТОННЫЙ МЕТОД: Ждет стабилизации результатов
-   */
   async waitForStableResults(page, index, total, stabilityTime = 3000) {
     console.log(`[${index}/${total}] ⏳ Ожидание стабилизации результатов...`);
 
@@ -93,52 +81,48 @@ class PuppeteerPricer {
       } else {
         stableFor = 0;
         previousSnapshot = currentSnapshot;
-        console.log(`[${index}/${total}] 🔄 Результаты еще меняются... (проверка ${checks})`);
       }
+
+      console.log(`[${index}/${total}] 📊 Проверка стабильности ${checks} (${previousSnapshot.length} цен, стабильно ${stableFor}мс)`);
     }
 
-    console.log(`[${index}/${total}] ✅ Результаты стабильны (${previousSnapshot.length} элементов, ${checks} проверок)`);
-    return previousSnapshot.length;
+    return previousSnapshot.length > 0;
   }
 
-  /**
-   * 🔥 НОВЫЙ МЕТОД: Устанавливает максимальную длительность пересадки через СЛАЙДЕР
-   */
   async setMaxLayoverDuration(page, maxHours, index, total) {
-    console.log(`[${index}/${total}] ⏱️ Установка макс. длительности пересадки: ${maxHours}ч`);
+    console.log(`[${index}/${total}] ⏱ Установка макс. времени пересадки: ${maxHours}ч...`);
 
     try {
-      // Сохраняем snapshot до изменения
+      // Снимок ПЕРЕД изменением
       const beforeSnapshot = await this.getPricesSnapshot(page);
 
-      // Ищем контейнер фильтра по data-test-id
-      const filterContainer = await page.$('[data-test-id="range-filter-transfers_duration"]');
-
+      // Ждем контейнер фильтра
+      const filterContainer = await page.$('[data-test-id="range-filter-transfers:duration"]');
       if (!filterContainer) {
-        console.warn(`[${index}/${total}] ⚠️ Контейнер фильтра длительности пересадок не найден`);
+        console.warn(`[${index}/${total}] ⚠️ Фильтр времени пересадки не найден`);
         return false;
       }
 
-      console.log(`[${index}/${total}] ✅ Контейнер фильтра найден`);
+      console.log(`[${index}/${total}] 🎯 Начинаю изменение слайдера drag&drop...`);
 
-      // Выполняем код симуляции drag внутри страницы
       const success = await page.evaluate((targetHours) => {
-        console.log('🔍 Ищу фильтр длительности пересадок...');
+        console.log('🎯 Начинаем изменение слайдера...');
 
-        // 1. Находим контейнер фильтра
-        const filterContainer = document.querySelector('[data-test-id="range-filter-transfers_duration"]');
+        // 1. Находим контейнер
+        const filterContainer = document.querySelector('[data-test-id="range-filter-transfers:duration"]');
         if (!filterContainer) {
-          console.error('❌ Контейнер фильтра не найден');
+          console.error('❌ Контейнер не найден');
           return false;
         }
-        console.log('✅ Контейнер найден');
+
+        console.log('✅ 2. Контейнер найден');
 
         // 2. Находим слайдер и правую ручку
         const slider = filterContainer.querySelector('.rc-slider');
         const maxHandle = slider.querySelector('.rc-slider-handle-2');
 
         if (!maxHandle) {
-          console.error('❌ Правая ручка слайдера не найдена');
+          console.error('❌ Правая ручка не найдена');
           return false;
         }
 
@@ -146,36 +130,33 @@ class PuppeteerPricer {
         const minValue = parseInt(maxHandle.getAttribute('aria-valuemin'));
         const maxValue = parseInt(maxHandle.getAttribute('aria-valuemax'));
 
-        console.log(`✅ Слайдер найден:`);
-        console.log(`   Текущее: ${oldValue}мин (${Math.floor(oldValue/60)}ч)`);
-        console.log(`   Диапазон: ${minValue} - ${maxValue}мин`);
+        console.log('📊 Текущие значения:');
+        console.log(`   Старое значение: ${oldValue} (${Math.floor(oldValue/60)}ч)`);
+        console.log(`   Диапазон: ${minValue} - ${maxValue}`);
 
-        // 3. УСТАНАВЛИВАЕМ НОВОЕ ЗНАЧЕНИЕ
-        const newValue = targetHours * 60;
-
-        console.log(`🎯 Устанавливаю: ${targetHours}ч (${newValue}мин)`);
+        // 3. Вычисляем новое значение
+        const newValue = targetHours * 60; // переводим часы в минуты
+        console.log(`🎯 Целевое значение: ${targetHours}ч = ${newValue} минут`);
 
         // 4. Вычисляем позицию в процентах
         const range = maxValue - minValue;
         const valueFromMin = newValue - minValue;
         const percentPosition = (valueFromMin / range) * 100;
 
-        console.log(`📐 Позиция: ${percentPosition.toFixed(2)}%`);
+        console.log(`📐 Процентная позиция: ${percentPosition.toFixed(2)}%`);
 
-        // 5. Получаем размеры слайдера
+        // 5. Вычисляем пиксельные координаты
         const sliderRect = slider.getBoundingClientRect();
         const handleRect = maxHandle.getBoundingClientRect();
-
-        // Вычисляем координаты для новой позиции
         const newX = sliderRect.left + (sliderRect.width * percentPosition / 100);
-        const centerY = sliderRect.top + (sliderRect.height / 2);
+        const centerY = sliderRect.top + sliderRect.height / 2;
 
         console.log(`📍 Координаты: x=${newX.toFixed(0)}, y=${centerY.toFixed(0)}`);
 
-        // 6. СИМУЛИРУЕМ DRAG
-        console.log('🖱️ Симулирую перетаскивание...');
+        // 6. DRAG & DROP
+        console.log('🖱 Начинаем драг...');
 
-        // Mousedown (начало перетаскивания)
+        // Mousedown
         const mousedownEvent = new MouseEvent('mousedown', {
           view: window,
           bubbles: true,
@@ -186,10 +167,9 @@ class PuppeteerPricer {
         });
         maxHandle.dispatchEvent(mousedownEvent);
 
-        // Используем setTimeout с Promise для async работы
-        return new Promise((resolve) => {
+        return new (Function.prototype.bind.call(Promise, null, (resolve) => {
           setTimeout(() => {
-            // Mousemove (движение к новой позиции)
+            // Mousemove
             const mousemoveEvent = new MouseEvent('mousemove', {
               view: window,
               bubbles: true,
@@ -201,7 +181,7 @@ class PuppeteerPricer {
             document.dispatchEvent(mousemoveEvent);
 
             setTimeout(() => {
-              // Mouseup (отпускаем)
+              // Mouseup
               const mouseupEvent = new MouseEvent('mouseup', {
                 view: window,
                 bubbles: true,
@@ -211,217 +191,196 @@ class PuppeteerPricer {
               });
               document.dispatchEvent(mouseupEvent);
 
-              // Проверяем результат
               setTimeout(() => {
                 const resultValue = parseInt(maxHandle.getAttribute('aria-valuenow'));
                 const resultHours = Math.floor(resultValue / 60);
 
-                console.log('\n📊 РЕЗУЛЬТАТ:');
-                console.log(`   Было: ${oldValue}мин (${Math.floor(oldValue/60)}ч)`);
-                console.log(`   Стало: ${resultValue}мин (${resultHours}ч)`);
-                console.log(`   Цель: ${newValue}мин (${targetHours}ч)`);
+                console.log('✅ Результат:');
+                console.log(`   Старое: ${oldValue} (${Math.floor(oldValue/60)}ч)`);
+                console.log(`   Новое: ${resultValue} (${resultHours}ч)`);
+                console.log(`   Цель: ${newValue} (${targetHours}ч)`);
 
-                if (Math.abs(resultValue - newValue) < 60) {
-                  console.log('✅ УСПЕХ! Фильтр применен');
+                // Допускаем погрешность ±1 час
+                if (Math.abs(resultValue - newValue) <= 60) {
+                  console.log('🎉 Значение установлено!');
                   resolve(true);
                 } else {
-                  console.log('⚠️ Не совсем точно, но близко');
+                  console.log('⚠️ Значение не точное, но продолжаем');
                   resolve(true);
                 }
 
-                // Проверяем изменение тега
-                const tag = filterContainer.querySelector('[data-test-id*="text"]');
+                // Логируем текст тега
+                const tag = filterContainer.querySelector('[data-test-id="text"]');
                 if (tag) {
-                  console.log(`   Тег: ${tag.textContent.trim()}`);
+                  console.log(`📝 Текст фильтра: "${tag.textContent.trim()}"`);
                 }
               }, 500);
             }, 100);
           }, 100);
-        });
+        }))();
       }, maxHours);
 
       if (!success) {
-        console.warn(`[${index}/${total}] ⚠️ Не удалось установить длительность через слайдер`);
+        console.warn(`[${index}/${total}] ⚠️ Не удалось изменить слайдер`);
         return false;
       }
 
-      console.log(`[${index}/${total}] ✅ Слайдер установлен, жду обновления результатов...`);
+      console.log(`[${index}/${total}] ✅ Слайдер изменён, ожидаю обновления результатов...`);
 
-      // Ждем изменения результатов
-      await this.sleep(1000); // Даем время на обработку
+      await this.sleep(1000);
+
       const changed = await this.waitForResultsChange(page, beforeSnapshot, index, total, 15000);
 
       if (changed) {
         await this.waitForStableResults(page, index, total, 2000);
-        console.log(`[${index}/${total}] ✅ Фильтр длительности пересадки применен`);
+        console.log(`[${index}/${total}] ✅ Фильтр времени пересадки применён!`);
         return true;
       } else {
-        console.warn(`[${index}/${total}] ⚠️ Результаты не изменились после установки длительности`);
+        console.warn(`[${index}/${total}] ⚠️ Результаты не изменились после фильтра`);
         return false;
       }
-
     } catch (error) {
-      console.error(`[${index}/${total}] ❌ Ошибка установки длительности пересадки: ${error.message}`);
+      console.error(`[${index}/${total}] ❌ Ошибка изменения времени пересадки:`, error.message);
       return false;
     }
   }
 
-  /**
-   * 🔥 ИСПРАВЛЕННЫЙ МЕТОД: Применяет фильтр авиакомпании
-   */
   async applyAirlineFilter(page, airline, index, total) {
     console.log(`[${index}/${total}] ✈️ Применение фильтра авиакомпании: ${airline}`);
 
     try {
-      // 1️⃣ СОХРАНЯЕМ SNAPSHOT ДО КЛИКА
+      // 1. SNAPSHOT ПЕРЕД фильтрацией
       const beforeSnapshot = await this.getPricesSnapshot(page);
-      console.log(`[${index}/${total}] 📸 Запомнили ${beforeSnapshot.length} цен перед кликом`);
+      console.log(`[${index}/${total}] 📊 До фильтра: ${beforeSnapshot.length} цен`);
 
       if (beforeSnapshot.length === 0) {
-        throw new Error('Нет результатов для фильтрации');
+        throw new Error('Нет цен для фильтрации');
       }
 
-      // 2️⃣ ОТКРЫВАЕМ МОДАЛКУ ФИЛЬТРОВ
+      // 2. Открываем модалку авиакомпаний
       console.log(`[${index}/${total}] 🔍 Ищу кнопку "Авиакомпании"...`);
 
-      // Ждем кнопку с текстом "Авиакомпании"
       await page.waitForFunction(() => {
         const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
-        return buttons.some(btn =>
-          btn.textContent.includes('Авиакомпани') ||
-          btn.textContent.includes('авиакомпани')
-        );
+        return buttons.some(btn => btn.textContent.includes('Авиакомпании') || btn.textContent.includes('Airlines'));
       }, { timeout: 10000 });
 
-      // Кликаем по кнопке
       const modalOpened = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
         const airlineButton = buttons.find(btn =>
-          btn.textContent.includes('Авиакомпани') ||
-          btn.textContent.includes('авиакомпани')
+          btn.textContent.includes('Авиакомпании') || btn.textContent.includes('Airlines')
         );
-
         if (airlineButton) {
           airlineButton.click();
           return true;
         }
-
         return false;
       });
 
       if (!modalOpened) {
-        throw new Error('Не удалось кликнуть по кнопке "Авиакомпании"');
+        throw new Error('Не удалось открыть модалку авиакомпаний');
       }
 
-      console.log(`[${index}/${total}] ✅ Кликнул по "Авиакомпании", жду модалку...`);
+      console.log(`[${index}/${total}] ✅ Модалка открыта, ожидаю загрузки...`);
       await this.sleep(1000);
 
-      // 3️⃣ ИЩЕМ И КЛИКАЕМ ПО ЧЕКБОКСУ АВИАКОМПАНИИ
-      console.log(`[${index}/${total}] 🔍 Ищу чекбокс для ${airline}...`);
+      // 3. Кликаем чекбокс авиакомпании
+      console.log(`[${index}/${total}] 🎯 Включаю фильтр авиакомпании ${airline}...`);
 
-      // Ждем появления модалки с фильтрами
       await page.waitForSelector('[data-test-id*="filter"]', { timeout: 5000 });
       await this.sleep(500);
 
-      // Ищем строку с нужной авиакомпанией
       const checkboxClicked = await page.evaluate((airlineCode) => {
-        // Ищем по data-test-id="set-filter-row-IATA"
+        // data-test-id="set-filter-row-IATA:SU"
         const filterRow = document.querySelector(`[data-test-id="set-filter-row-${airlineCode}"]`);
-
         if (filterRow) {
           const checkbox = filterRow.querySelector('input[type="checkbox"]');
           if (checkbox) {
-            console.log(`Найден чекбокс для ${airlineCode}, состояние: ${checkbox.checked}`);
+            console.log(`Найден чекбокс для ${airlineCode}, checked=${checkbox.checked}`);
             if (!checkbox.checked) {
               checkbox.click();
-              console.log(`Кликнул по чекбоксу ${airlineCode}`);
+              console.log(`Кликнули ${airlineCode}`);
               return true;
             } else {
-              console.log(`Чекбокс ${airlineCode} уже отмечен`);
+              console.log(`${airlineCode} уже выбран`);
               return true;
             }
           }
         }
-
         return false;
       }, airline);
 
       if (!checkboxClicked) {
-        throw new Error(`Не найден чекбокс для ${airline}`);
+        throw new Error(`Чекбокс авиакомпании ${airline} не найден`);
       }
 
-      console.log(`[${index}/${total}] ✅ Кликнул по чекбоксу ${airline}`);
+      console.log(`[${index}/${total}] ✅ Чекбокс ${airline} активирован`);
 
-      // 4️⃣ ПРОВЕРЯЕМ ИЗМЕНЕНИЕ РЕЗУЛЬТАТОВ ИЛИ СООТВЕТСТВИЕ АВИАКОМПАНИИ
-      console.log(`[${index}/${total}] ⏳ Проверяю применение фильтра...`);
-      await this.sleep(2000); // Даем время на обновление
+      // 4. Ждём обновления результатов
+      console.log(`[${index}/${total}] ⏳ Ожидаю применения фильтра...`);
+      await this.sleep(2000);
 
-      // Проверяем изменились ли результаты
       const currentSnapshot = await this.getPricesSnapshot(page);
       const resultsChanged = !this.arraysEqual(beforeSnapshot, currentSnapshot);
 
       if (resultsChanged) {
-        console.log(`[${index}/${total}] ✅ Результаты обновились`);
+        console.log(`[${index}/${total}] ✅ Результаты обновились!`);
         await this.waitForStableResults(page, index, total, 3000);
       } else {
-        console.log(`[${index}/${total}] ⚠️ Результаты не изменились, проверяю билеты...`);
-
-        // 🔥 ПРОВЕРЯЕМ ЧТО ВСЕ БИЛЕТЫ ОТ НУЖНОЙ АВИАКОМПАНИИ
-        const allMatchAirline = await page.evaluate((airlineCode) => {
-          const tickets = document.querySelectorAll('[data-test-id^="flight-card"]');
-          if (tickets.length === 0) return false;
-
-          let matchCount = 0;
-          tickets.forEach(ticket => {
-            // Ищем код авиакомпании в карточке билета
-            const airlineElements = ticket.querySelectorAll('[class*="airline"], [class*="carrier"]');
-            const text = ticket.textContent;
-
-            if (text.includes(airlineCode)) {
-              matchCount++;
-            }
-          });
-
-          console.log(`Проверено билетов: ${tickets.length}, совпадений с ${airlineCode}: ${matchCount}`);
-          return matchCount > 0; // Хотя бы один билет от нужной авиакомпании
-        }, airline);
-
-        if (allMatchAirline) {
-          console.log(`[${index}/${total}] ✅ Все билеты от ${airline} - фильтр уже был применен!`);
-        } else {
-          console.log(`[${index}/${total}] ⚠️ Не все билеты от ${airline}, но продолжаю...`);
-        }
+        console.log(`[${index}/${total}] ⚠️ Результаты не изменились, возможно фильтр уже применён`);
       }
 
-      console.log(`[${index}/${total}] ✅ Фильтр ${airline} применен!`);
+      // Проверяем, что все билеты соответствуют авиакомпании
+      const allMatchAirline = await page.evaluate((airlineCode) => {
+        const tickets = document.querySelectorAll('[data-test-id="flight-card"]');
+        if (tickets.length === 0) return false;
+
+        let matchCount = 0;
+        tickets.forEach(ticket => {
+          const airlineElements = ticket.querySelectorAll('[class*="airline"], [class*="carrier"]');
+          const text = ticket.textContent;
+          if (text.includes(airlineCode)) matchCount++;
+        });
+
+        console.log(`Всего билетов: ${tickets.length}, подходящих ${airlineCode}: ${matchCount}`);
+        return matchCount > 0;
+      }, airline);
+
+      if (allMatchAirline) {
+        console.log(`[${index}/${total}] ✅ Фильтр авиакомпании ${airline} применён успешно!`);
+      } else {
+        console.log(`[${index}/${total}] ⚠️ Не все билеты соответствуют ${airline}, но продолжаем`);
+      }
+
+      console.log(`[${index}/${total}] ✅ Фильтрация авиакомпании ${airline} завершена!`);
       return true;
 
     } catch (error) {
-      console.error(`[${index}/${total}] ❌ Ошибка применения фильтра: ${error.message}`);
+      console.error(`[${index}/${total}] ❌ Ошибка фильтрации авиакомпании:`, error.message);
       throw error;
     }
   }
 
-  async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = 5) {
+  async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = null) {
     const startTime = Date.now();
 
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[${index}/${total}] 🔍 Обработка`);
+    console.log('='.repeat(80));
+    console.log(`[${index}/${total}] 🚀 НАЧАЛО ПРОВЕРКИ`);
     console.log(`[${index}/${total}] 🔗 ${url}`);
-    if (airline) console.log(`[${index}/${total}] ✈️ Фильтр: ${airline}`);
-    console.log(`[${index}/${total}] ⏱️ Макс. пересадка: ${maxLayoverHours} ч`);  // 🔥 ЛОГИРОВАНИЕ
-    console.log(`${'='.repeat(80)}\n`);
+    if (airline) {
+      console.log(`[${index}/${total}] ✈️ Авиакомпания: ${airline}`);
+    }
+    if (maxLayoverHours !== null && maxLayoverHours !== undefined) {
+      console.log(`[${index}/${total}] ⏱ Макс. пересадка: ${maxLayoverHours}ч`);
+    }
+    console.log('='.repeat(80));
 
-    // Кэш
-    const cacheKey = `${url}_${airline || 'all'}_${maxLayoverHours}`;  // 🔥 ДОБАВЛЕНО В КЛЮЧ КЭША
+    const cacheKey = `${url}|${airline || 'all'}|${maxLayoverHours || 'default'}`;
     const cached = this.cache.get(cacheKey);
 
     if (cached && (Date.now() - cached.timestamp < this.cacheTimeout)) {
-      console.log(`[${index}/${total}] 💾 Кэш: ${cached.price.toLocaleString('ru-RU')} ₽`);
-      return {
-        price: cached.price,
-        screenshot: cached.screenshot || null
-      };
+      console.log(`[${index}/${total}] 💾 Из кэша: ${cached.price.toLocaleString('ru-RU')} ₽`);
+      return { price: cached.price, screenshot: cached.screenshot };
     }
 
     await this.init();
@@ -429,7 +388,6 @@ class PuppeteerPricer {
     let screenshotPath = null;
 
     try {
-      // Защита от детекта
       await page.evaluateOnNewDocument(() => {
         delete Object.getPrototypeOf(navigator).webdriver;
 
@@ -438,15 +396,13 @@ class PuppeteerPricer {
           if (parameters.name === 'notifications') {
             return Promise.resolve({ state: Notification.permission });
           }
-          return originalQuery.apply(window.navigator.permissions, [parameters]);
+          return originalQuery.apply(window.navigator.permissions, parameters);
         };
 
-        window.chrome = {
-          runtime: {},
-          loadTimes: function() {},
-          csi: function() {},
-          app: {}
-        };
+        window.chrome = { runtime: {} };
+        window.chrome.loadTimes = function() {};
+        window.chrome.csi = function() {};
+        window.chrome.app = {};
 
         Object.defineProperty(navigator, 'plugins', {
           get: () => [1, 2, 3, 4, 5]
@@ -457,10 +413,7 @@ class PuppeteerPricer {
         });
       });
 
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
-
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       await page.setViewport({ width: 1920, height: 1080 });
 
       await page.setExtraHTTPHeaders({
@@ -472,30 +425,24 @@ class PuppeteerPricer {
         'Upgrade-Insecure-Requests': '1'
       });
 
-      // Блокируем капчи и трекеры
       await page.setRequestInterception(true);
       page.on('request', (request) => {
         const url = request.url();
-        if (
-          url.includes('recaptcha') ||
-          url.includes('google-analytics') ||
-          url.includes('googletagmanager') ||
-          url.includes('mc.yandex') ||
-          url.includes('metrika')
-        ) {
+        if (url.includes('recaptcha') || url.includes('google-analytics') ||
+          url.includes('googletagmanager') || url.includes('mc.yandex') ||
+          url.includes('metrika')) {
           request.abort();
         } else {
           request.continue();
         }
       });
 
-      console.log(`[${index}/${total}] 🔧 Страница настроена`);
-
-      const delay = Math.floor(Math.random() * 2000 + 2000);
-      console.log(`[${index}/${total}] ⏳ Задержка ${delay}мс...`);
+      console.log(`[${index}/${total}] 📄 Загрузка страницы...`);
+      const delay = Math.floor(Math.random() * 2000) + 2000;
+      console.log(`[${index}/${total}] ⏳ Задержка перед загрузкой: ${delay}мс`);
       await this.sleep(delay);
 
-      console.log(`[${index}/${total}] 🌐 Загрузка страницы...`);
+      console.log(`[${index}/${total}] 🌐 Переход по URL...`);
       const response = await page.goto(url, {
         waitUntil: 'domcontentloaded',
         timeout: 60000
@@ -507,11 +454,10 @@ class PuppeteerPricer {
         throw new Error(`HTTP ${response.status()}`);
       }
 
-      console.log(`[${index}/${total}] ⏳ Ожидание JavaScript...`);
+      console.log(`[${index}/${total}] ⏳ Ожидание выполнения JavaScript...`);
       await this.sleep(8000);
 
       console.log(`[${index}/${total}] 🔍 Поиск результатов...`);
-
       let attempts = 0;
       const maxAttempts = 10;
       let found = false;
@@ -523,7 +469,7 @@ class PuppeteerPricer {
             visible: true
           });
           found = true;
-          console.log(`[${index}/${total}] ✅ Результаты найдены`);
+          console.log(`[${index}/${total}] ✅ Результаты найдены!`);
         } catch (e) {
           attempts++;
           console.log(`[${index}/${total}] ⏳ Попытка ${attempts}/${maxAttempts}...`);
@@ -535,34 +481,36 @@ class PuppeteerPricer {
         throw new Error('Timeout: результаты не загрузились');
       }
 
-      // 🔥 ЖДЕМ ПЕРВОНАЧАЛЬНОЙ СТАБИЛИЗАЦИИ
       await this.waitForStableResults(page, index, total, 3000);
 
-      // 🔥 ШАГ 1: СНАЧАЛА УСТАНАВЛИВАЕМ ДЛИТЕЛЬНОСТЬ ПЕРЕСАДКИ (6 часов)
-      console.log(`\n[${index}/${total}] ===== ШАГ 1: УСТАНОВКА ДЛИТЕЛЬНОСТИ ПЕРЕСАДКИ =====`);
-      await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
+      // ПРИМЕНЕНИЕ ФИЛЬТРОВ
+      console.log(`[${index}/${total}] 📝 Применение фильтров...`);
 
-      // 🔥 ШАГ 2: ЗАТЕМ ПРИМЕНЯЕМ ФИЛЬТР АВИАКОМПАНИИ (ЕСЛИ УКАЗАН)
+      // Шаг 1: Время пересадки (только если задано)
+      if (maxLayoverHours !== null && maxLayoverHours !== undefined && maxLayoverHours > 0) {
+        console.log(`[${index}/${total}] 🔧 Устанавливаю макс. время пересадки: ${maxLayoverHours}ч`);
+        await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
+      } else {
+        console.log(`[${index}/${total}] ⏭ Пропускаю настройку времени пересадки (прямые рейсы или не задано)`);
+      }
+
+      // Шаг 2: Авиакомпания
       if (airline) {
-        console.log(`\n[${index}/${total}] ===== ШАГ 2: ПРИМЕНЕНИЕ ФИЛЬТРА АВИАКОМПАНИИ =====`);
+        console.log(`[${index}/${total}] 🔧 Фильтр авиакомпании`);
         await this.applyAirlineFilter(page, airline, index, total);
       }
 
-      // Извлекаем цену
-      console.log(`[${index}/${total}] 💰 Извлечение цены...`);
+      console.log(`[${index}/${total}] 💰 Получение цены...`);
+
       const priceData = await page.evaluate(() => {
         const container = document.querySelector('[data-test-id="search-results-items-list"]');
-        if (!container) {
-          return { error: 'Контейнер не найден' };
-        }
+        if (!container) return { error: 'Контейнер результатов не найден' };
 
         const prices = container.querySelectorAll('[data-test-id="price"]');
-        if (prices.length === 0) {
-          return { error: 'Цены не найдены' };
-        }
+        if (prices.length === 0) return { error: 'Цены не найдены' };
 
         const firstPrice = prices[0].textContent.trim();
-        const num = parseInt(firstPrice.replace(/[^\d]/g, ''));
+        const num = parseInt(firstPrice.replace(/\D/g, ''));
 
         if (isNaN(num) || num < 1000 || num > 10000000) {
           return { error: `Некорректная цена: ${firstPrice}` };
@@ -579,19 +527,18 @@ class PuppeteerPricer {
         throw new Error(priceData.error);
       }
 
-      // 📸 СКРИНШОТ ПРИ УСПЕХЕ
       const timestamp = Date.now();
       screenshotPath = path.join(__dirname, '../temp', `success_${airline || 'all'}_${timestamp}.png`);
+
       await page.screenshot({
         path: screenshotPath,
         fullPage: false,
         clip: { x: 0, y: 0, width: 1200, height: 800 }
       });
 
-      console.log(`[${index}/${total}] ✅ ${priceData.price.toLocaleString('ru-RU')} ₽ (найдено ${priceData.totalPrices} цен)`);
-      console.log(`[${index}/${total}] 📸 ${screenshotPath}`);
+      console.log(`[${index}/${total}] 💰 Цена: ${priceData.price.toLocaleString('ru-RU')} ₽ (всего ${priceData.totalPrices} вариантов)`);
+      console.log(`[${index}/${total}] 📸 Скриншот: ${screenshotPath}`);
 
-      // Сохраняем в кэш
       this.cache.set(cacheKey, {
         price: priceData.price,
         screenshot: screenshotPath,
@@ -599,7 +546,7 @@ class PuppeteerPricer {
       });
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${index}/${total}] ⏱️ ${elapsed} сек`);
+      console.log(`[${index}/${total}] ✅ ЗАВЕРШЕНО за ${elapsed}с`);
 
       return {
         price: priceData.price,
@@ -607,18 +554,78 @@ class PuppeteerPricer {
       };
 
     } catch (error) {
-      console.error(`[${index}/${total}] ❌ ${error.message}`);
+      console.error(`[${index}/${total}] ❌ ОШИБКА:`, error.message);
 
       try {
         const timestamp = Date.now();
         screenshotPath = path.join(__dirname, '../temp', `error_${airline || 'all'}_${timestamp}.png`);
         await page.screenshot({ path: screenshotPath, fullPage: true });
-        console.log(`[${index}/${total}] 📸 ${screenshotPath}`);
-      } catch (e) {}
+        console.log(`[${index}/${total}] 📸 Скриншот ошибки: ${screenshotPath}`);
+      } catch (e) {
+        // ignore
+      }
 
       return null;
+
     } finally {
       await page.close();
+    }
+  }
+
+  async getPricesFromUrls(urls, airline = null, maxLayoverHours = null) {
+    const total = urls.length;
+    const results = new Array(total).fill(null);
+
+    console.log(`🚀 Начинаю обработку ${total} URL по ${this.maxConcurrent} параллельно`);
+    const startTime = Date.now();
+
+    for (let i = 0; i < total; i += this.maxConcurrent) {
+      const batch = [];
+
+      for (let j = 0; j < this.maxConcurrent && i + j < total; j++) {
+        const index = i + j;
+        batch.push(
+          this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours)
+            .then(result => {
+              results[index] = result;
+              return result;
+            })
+            .catch(error => {
+              results[index] = null;
+              return null;
+            })
+        );
+      }
+
+      await Promise.all(batch);
+
+      if (i + this.maxConcurrent < total) {
+        const pause = Math.floor(Math.random() * 3000) + 5000;
+        console.log(`⏸ Пауза ${pause}мс перед следующей пачкой...`);
+        await this.sleep(pause);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const validResults = results.filter(r => r !== null);
+    console.log(`✅ Обработка завершена за ${elapsed}с. Успешно: ${validResults.length}/${total}`);
+
+    return results;
+  }
+
+  cleanCache() {
+    const now = Date.now();
+    let removed = 0;
+
+    for (const [url, data] of this.cache.entries()) {
+      if (now - data.timestamp > this.cacheTimeout) {
+        this.cache.delete(url);
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(`🧹 Очищен кэш: удалено ${removed} записей`);
     }
   }
 
@@ -646,70 +653,11 @@ class PuppeteerPricer {
     console.log('✅ Puppeteer запущен');
   }
 
-  async getPricesFromUrls(urls, airline = null, maxLayoverHours = 5) {
-    const total = urls.length;
-    const results = new Array(total).fill(null);
-
-    console.log(`\n📊 Парсинг ${total} URL (по ${this.maxConcurrent} одновременно)\n`);
-
-    const startTime = Date.now();
-
-    for (let i = 0; i < total; i += this.maxConcurrent) {
-      const batch = [];
-
-      for (let j = 0; j < this.maxConcurrent && (i + j) < total; j++) {
-        const index = i + j;
-        batch.push(
-          this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours)
-            .then(result => {
-              results[index] = result;
-              return result;
-            })
-            .catch(error => {
-              results[index] = null;
-              return null;
-            })
-        );
-      }
-
-      await Promise.all(batch);
-
-      if (i + this.maxConcurrent < total) {
-        const pause = Math.floor(Math.random() * 3000 + 5000);
-        console.log(`\n⏸️ Пауза ${pause}мс...\n`);
-        await this.sleep(pause);
-      }
-    }
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const validResults = results.filter(r => r !== null);
-
-    console.log(`\n✅ Завершено: ${elapsed} сек. Успешно: ${validResults.length}/${total}\n`);
-
-    return results;
-  }
-
-  cleanCache() {
-    const now = Date.now();
-    let removed = 0;
-
-    for (const [url, data] of this.cache.entries()) {
-      if (now - data.timestamp > this.cacheTimeout) {
-        this.cache.delete(url);
-        removed++;
-      }
-    }
-
-    if (removed > 0) {
-      console.log(`🧹 Очищено ${removed} записей кэша`);
-    }
-  }
-
   async close() {
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
-      console.log('🌐 Puppeteer закрыт');
+      console.log('🔒 Puppeteer закрыт');
     }
   }
 }

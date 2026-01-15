@@ -1,6 +1,4 @@
 const Route = require('../models/Route');
-const FlexibleRoute = require('../models/FlexibleRoute');
-const FlexibleResult = require('../models/FlexibleResult');
 const AviasalesAPI = require('../services/AviasalesAPI');
 const PuppeteerPricer = require('../services/PuppeteerPricer');
 const db = require('../config/database');
@@ -24,7 +22,8 @@ class RouteHandlers {
           ['📊 Лучшие варианты', '📈 История цен'],
           ['✏️ Редактировать', '🗑 Удалить'],
           ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', 'ℹ️ Помощь'],
+          ['✅ Проверить сейчас', '🎯 Проверить один'],
+          ['ℹ️ Помощь']
         ],
         resize_keyboard: true,
         persistent: true
@@ -74,7 +73,484 @@ class RouteHandlers {
     });
   }
 
+  async handleAddRoute(chatId) {
+    this.userStates[chatId] = { type: 'regular', step: 'origin', data: {} };
+
+    const keyboard = {
+      reply_markup: {
+        keyboard: [
+          ['SVX (Екатеринбург)', 'MOW (Москва)'],
+          ['LED (Санкт-Петербург)', 'DXB (Дубай)'],
+          ['DPS (Бали)'],
+          ['🔙 Отмена']
+        ],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    this.bot.sendMessage(
+      chatId,
+      '✈️ Добавление обычного маршрута\n\n' +
+      'Введите город вылета (SVX, MOW и т.д.):',
+      keyboard
+    );
+  }
+
+  handleRouteStep(chatId, text) {
+    const state = this.userStates[chatId];
+    if (!state || state.type !== 'regular') return false;
+
+    const { step, data } = state;
+
+    if (step === 'origin') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      data.origin = Formatters.parseAirportCode(text);
+      if (!data.origin) {
+        this.bot.sendMessage(chatId, '❌ Неверный код аэропорта. Попробуйте еще раз:');
+        return true;
+      }
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['SVX (Екатеринбург)', 'MOW (Москва)'],
+            ['LED (Санкт-Петербург)', 'DXB (Дубай)'],
+            ['DPS (Бали)'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        `✅ Вылет: ${data.origin}\n\nТеперь введите город назначения:`,
+        keyboard
+      );
+      state.step = 'destination';
+      return true;
+    }
+
+    if (step === 'destination') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      data.destination = Formatters.parseAirportCode(text);
+      if (!data.destination) {
+        this.bot.sendMessage(chatId, '❌ Неверный код аэропорта. Попробуйте еще раз:');
+        return true;
+      }
+
+      this.bot.sendMessage(
+        chatId,
+        `✅ Маршрут: ${data.origin} → ${data.destination}\n\n` +
+        `Введите дату вылета (ДД-ММ-ГГГГ), например: 25-02-2026`,
+        { reply_markup: { remove_keyboard: true } }
+      );
+      state.step = 'departure_date';
+      return true;
+    }
+
+    if (step === 'departure_date') {
+      const date = DateUtils.convertDateFormat(text);
+      if (!date) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД-ММ-ГГГГ, например, 25-02-2026');
+        return true;
+      }
+      data.departure_date = date;
+      this.bot.sendMessage(chatId, `✅ Вылет: ${DateUtils.formatDateDisplay(date)}\n\nТеперь введите дату возврата:`);
+      state.step = 'return_date';
+      return true;
+    }
+
+    if (step === 'return_date') {
+      const date = DateUtils.convertDateFormat(text);
+      if (!date) {
+        this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД-ММ-ГГГГ');
+        return true;
+      }
+      if (date <= data.departure_date) {
+        this.bot.sendMessage(chatId, '❌ Дата возврата должна быть позже даты вылета. Попробуйте еще раз:');
+        return true;
+      }
+      data.return_date = date;
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['1', '2'],
+            ['3', '4'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        `✅ Возврат: ${DateUtils.formatDateDisplay(date)}\n\nСколько взрослых?`,
+        keyboard
+      );
+      state.step = 'adults';
+      return true;
+    }
+
+    if (step === 'adults') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      const adults = parseInt(text);
+      if (isNaN(adults) || adults < 1 || adults > 9) {
+        this.bot.sendMessage(chatId, '❌ Количество взрослых от 1 до 9. Попробуйте еще раз:');
+        return true;
+      }
+
+      data.adults = adults;
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['0 (без детей)'],
+            ['1', '2'],
+            ['3', '4'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(chatId, `✅ Взрослых: ${adults}\n\nСколько детей?`, keyboard);
+      state.step = 'children';
+      return true;
+    }
+
+    if (step === 'children') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      let children = text.includes('без') ? 0 : parseInt(text);
+      if (isNaN(children) || children < 0 || children > 8) {
+        this.bot.sendMessage(chatId, '❌ Количество детей от 0 до 8. Попробуйте еще раз:');
+        return true;
+      }
+
+      data.children = children;
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['✅ Да'],
+            ['❌ Нет'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(chatId, '🧳 Нужен багаж?', keyboard);
+      state.step = 'baggage';
+      return true;
+    }
+
+    if (step === 'baggage') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      data.baggage = text.includes('Да') ? 1 : 0;
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['🌐 Аэрофлот (SU)', 'Etihad (EY)'],
+            ['Emirates (EK)', 'S7 (S7)'],
+            ['🌍 Любая авиакомпания'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        '✈️ Укажите авиакомпанию или "Любая":',
+        keyboard
+      );
+      state.step = 'airline';
+      return true;
+    }
+
+    if (step === 'airline') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      if (text.includes('Аэрофлот')) {
+        data.airline = 'SU';
+      } else if (text.includes('Etihad')) {
+        data.airline = 'EY';
+      } else if (text.includes('Emirates')) {
+        data.airline = 'EK';
+      } else if (text.includes('S7')) {
+        data.airline = 'S7';
+      } else if (text.includes('Любая')) {
+        data.airline = null;
+      } else {
+        data.airline = Formatters.parseAirportCode(text);
+      }
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['0 (только прямые)'],
+            ['1 пересадка'],
+            ['2 пересадки'],
+            ['🌍 Любое количество'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        '🔄 Сколько пересадок допустимо?',
+        keyboard
+      );
+      state.step = 'max_stops';
+      return true;
+    }
+
+    if (step === 'max_stops') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      if (text.includes('0') || text.includes('прямые')) {
+        data.max_stops = 0;
+        data.max_layover_hours = 0; // Нет пересадок = не нужно время
+      } else if (text.includes('1')) {
+        data.max_stops = 1;
+      } else if (text.includes('2')) {
+        data.max_stops = 2;
+      } else if (text.includes('Любое')) {
+        data.max_stops = 99;
+      } else {
+        data.max_stops = 99;
+      }
+
+      // Если выбраны прямые рейсы (0 пересадок), пропускаем вопрос о времени
+      if (data.max_stops === 0) {
+        this.bot.sendMessage(
+          chatId,
+          `✅ Только прямые рейсы\n\n💰 Теперь введите пороговую цену в рублях (например, 50000):`,
+          { reply_markup: { remove_keyboard: true } }
+        );
+        state.step = 'threshold';
+        return true;
+      }
+
+      // Если пересадки допустимы, спрашиваем о времени
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['5 часов', '10 часов'],
+            ['15 часов', '24 часа'],
+            ['🔙 Отмена']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(
+        chatId,
+        '⏱ Максимальная длительность пересадки (по умолчанию 5)?',
+        keyboard
+      );
+      state.step = 'max_layover';
+      return true;
+    }
+
+    if (step === 'max_layover') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      const hours = parseInt(text.replace(/\D/g, ''));
+      if (isNaN(hours) || hours <= 0 || hours > 48) {
+        this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48');
+        return true;
+      }
+
+      data.max_layover_hours = hours;
+
+      this.bot.sendMessage(
+        chatId,
+        `✅ Макс. пересадка: ${hours} часов\n\n💰 Теперь введите пороговую цену в рублях (например, 50000):`,
+        { reply_markup: { remove_keyboard: true } }
+      );
+      state.step = 'threshold';
+      return true;
+    }
+
+    if (step === 'max_layover') {
+      if (text === '🔙 Отмена') {
+        delete this.userStates[chatId];
+        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+        return true;
+      }
+
+      const hours = parseInt(text.replace(/\D/g, ''));
+      if (isNaN(hours) || hours <= 0 || hours > 48) {
+        this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48');
+        return true;
+      }
+
+      data.max_layover_hours = hours;
+
+      this.bot.sendMessage(
+        chatId,
+        `✅ Макс. пересадка: ${hours} часов\n\n💰 Теперь введите пороговую цену в рублях (например, 50000):`,
+        { reply_markup: { remove_keyboard: true } }
+      );
+      state.step = 'threshold';
+      return true;
+    }
+
+    if (step === 'threshold') {
+      const price = parseFloat(text);
+      if (isNaN(price) || price <= 0) {
+        this.bot.sendMessage(chatId, '❌ Неверная цена. Введите число:');
+        return true;
+      }
+
+      data.threshold_price = price;
+
+      Route.create(chatId, {
+        ...data,
+        max_stops: data.max_stops || 99,
+        max_layover_hours: data.max_layover_hours || 5
+      }).then(() => {
+        const stopsText = data.max_stops === 0 ? 'Только прямые' :
+          data.max_stops === 1 ? 'До 1 пересадки' :
+            data.max_stops === 2 ? 'До 2 пересадок' :
+              'Любое количество пересадок';
+
+        const layoverText = data.max_stops > 0 ? `\n⏱ Макс. пересадка: ${data.max_layover_hours}ч` : '';
+
+        const summary =
+          `✅ Маршрут создан!\n\n` +
+          `${data.origin} → ${data.destination}\n` +
+          `📅 ${DateUtils.formatDateDisplay(data.departure_date)} → ${DateUtils.formatDateDisplay(data.return_date)}\n` +
+          `👥 ${Formatters.formatPassengers(data.adults, data.children)}\n` +
+          `${data.baggage ? '🧳 С багажом' : '🎒 Без багажа'}\n` +
+          `✈️ ${data.airline || 'Любая авиакомпания'}\n` +
+          `🔄 ${stopsText}${layoverText}\n` +
+          `💰 ${Formatters.formatPrice(price, 'RUB')}\n\n` +
+          `Бот будет проверять цену каждые 2 часа и уведомит вас о снижении!`;
+
+        this.bot.sendMessage(chatId, summary, this.getMainMenuKeyboard());
+        delete this.userStates[chatId];
+      });
+
+      return true;
+    }
+
+    return false;
+  }
+
+  async handleEditRoute(chatId) {
+    const routes = await Route.findByUser(chatId);
+
+    if (!routes || routes.length === 0) {
+      this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов', this.getMainMenuKeyboard());
+      return;
+    }
+
+    let message = '✏️ Выберите маршрут для редактирования:\n\n';
+    const keyboard = {
+      reply_markup: {
+        keyboard: [],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    routes.forEach((route, index) => {
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
+      message += `${routeText}\n`;
+      keyboard.reply_markup.keyboard.push([routeText]);
+    });
+
+    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
+    this.bot.sendMessage(chatId, message, keyboard);
+    this.userStates[chatId] = { type: 'regular', step: 'edit_select', routes };
+  }
+
+  async handleDeleteRoute(chatId) {
+    const routes = await Route.findByUser(chatId);
+
+    if (!routes || routes.length === 0) {
+      this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов', this.getMainMenuKeyboard());
+      return;
+    }
+
+    let message = '🗑 Выберите маршрут для удаления:\n\n';
+    const keyboard = {
+      reply_markup: {
+        keyboard: [],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    routes.forEach((route, index) => {
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
+      message += `${routeText}\n`;
+      keyboard.reply_markup.keyboard.push([routeText]);
+    });
+
+    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
+    this.bot.sendMessage(chatId, message, keyboard);
+    this.userStates[chatId] = { type: 'regular', step: 'delete_confirm', routes };
+  }
+
   async handleShowHistory(chatId) {
+    const Route = require('../models/Route');
+    const FlexibleRoute = require('../models/FlexibleRoute');
+
     try {
       const routes = await Route.findByUser(chatId);
       const flexRoutes = await FlexibleRoute.findByUser(chatId);
@@ -132,6 +608,7 @@ class RouteHandlers {
       this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
     }
   }
+
   async showRegularRouteHistory(chatId, route) {
     try {
       const PriceAnalytics = require('../services/PriceAnalytics');
@@ -353,255 +830,6 @@ class RouteHandlers {
     }
   }
 
-  async handleAddRoute(chatId) {
-    this.bot.sendMessage(
-      chatId,
-      '✈️ Добавление обычного маршрута\n\nВведите город вылета (SVX, MOW и т.д.):',
-      { reply_markup: { remove_keyboard: true } }
-    );
-    this.userStates[chatId] = { type: 'regular', step: 'origin', data: {} };
-  }
-
-  handleRouteStep(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.type !== 'regular') return false;
-
-    const { step, data } = state;
-
-    if (step === 'origin') {
-      if (text.length !== 3) {
-        this.bot.sendMessage(chatId, '❌ Код аэропорта должен быть из 3 букв. Попробуйте еще раз:');
-        return true;
-      }
-      data.origin = text.toUpperCase();
-      this.bot.sendMessage(chatId, `✅ Вылет: ${data.origin}\n\nТеперь введите город назначения:`);
-      state.step = 'destination';
-      return true;
-    }
-
-    if (step === 'destination') {
-      if (text.length !== 3) {
-        this.bot.sendMessage(chatId, '❌ Код аэропорта должен быть из 3 букв. Попробуйте еще раз:');
-        return true;
-      }
-      data.destination = text.toUpperCase();
-      this.bot.sendMessage(
-        chatId,
-        `✅ Маршрут: ${data.origin} → ${data.destination}\n\nВведите дату вылета (ДД.ММ.ГГГГ или ДД-ММ-ГГГГ), например: 25.02.2026`
-      );
-      state.step = 'departure_date';
-      return true;
-    }
-
-    if (step === 'departure_date') {
-      const date = DateUtils.parseDate(text);
-      if (!date) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД.ММ.ГГГГ, например, 25.02.2026');
-        return true;
-      }
-      data.departure_date = date;
-      this.bot.sendMessage(chatId, `✅ Вылет: ${DateUtils.formatDateDisplay(date)}\n\nТеперь введите дату возврата:`);
-      state.step = 'return_date';
-      return true;
-    }
-
-    if (step === 'return_date') {
-      const date = DateUtils.parseDate(text);
-      if (!date) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД.ММ.ГГГГ');
-        return true;
-      }
-      if (date <= data.departure_date) {
-        this.bot.sendMessage(chatId, '❌ Дата возврата должна быть позже даты вылета. Попробуйте еще раз:');
-        return true;
-      }
-      data.return_date = date;
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['1 (без детей)', '2 (без детей)'],
-            ['1+1 (1 взр + 1 реб)', '2+2'],
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(
-        chatId,
-        `✅ Возврат: ${DateUtils.formatDateDisplay(date)}\n\nСколько пассажиров?`,
-        keyboard
-      );
-      state.step = 'passengers';
-      return true;
-    }
-
-    if (step === 'passengers') {
-      const match = text.match(/(\d+)(?:\+(\d+))?/);
-      if (!match) {
-        this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: 1, 2, 1+1 и т.д.');
-        return true;
-      }
-
-      data.adults = parseInt(match[1]) || 1;
-      data.children = parseInt(match[2]) || 0;
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [['✅ Да', '❌ Нет']],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(chatId, 'Нужен багаж?', keyboard);
-      state.step = 'baggage';
-      return true;
-    }
-
-    if (step === 'baggage') {
-      data.baggage = text.includes('Да') ? 1 : 0;
-
-      this.bot.sendMessage(
-        chatId,
-        'Укажите авиакомпанию (S7, SU и т.д.) или "Любая":',
-        { reply_markup: { remove_keyboard: true } }
-      );
-      state.step = 'airline';
-      return true;
-    }
-
-    if (step === 'airline') {
-      data.airline = text.toLowerCase().includes('люб') ? null : text.toUpperCase();
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['5 часов', '10 часов'],
-            ['15 часов', '24 часа']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(
-        chatId,
-        'Максимальная длительность пересадки (по умолчанию 5)?',
-        keyboard
-      );
-      state.step = 'max_layover';
-      return true;
-    }
-
-    if (step === 'max_layover') {
-      const hours = parseInt(text.replace(/\D/g, ''));
-      if (isNaN(hours) || hours <= 0 || hours > 48) {
-        this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48');
-        return true;
-      }
-
-      data.max_layover_hours = hours;
-
-      this.bot.sendMessage(
-        chatId,
-        `✅ Макс. пересадка: ${hours} часов\n\nТеперь введите пороговую цену в рублях (например, 50000):`,
-        { reply_markup: { remove_keyboard: true } }
-      );
-      state.step = 'threshold';
-      return true;
-    }
-
-    if (step === 'threshold') {
-      const price = parseFloat(text);
-      if (isNaN(price) || price <= 0) {
-        this.bot.sendMessage(chatId, '❌ Неверная цена. Введите число:');
-        return true;
-      }
-
-      data.threshold_price = price;
-
-      Route.create(chatId, data).then(() => {
-        const summary =
-          `✅ Маршрут создан!\n\n` +
-          `${data.origin} → ${data.destination}\n` +
-          `📅 ${DateUtils.formatDateDisplay(data.departure_date)} → ${DateUtils.formatDateDisplay(data.return_date)}\n` +
-          `👥 ${Formatters.formatPassengers(data.adults, data.children)}\n` +
-          `${data.baggage ? '🧳 С багажом' : '🎒 Без багажа'}\n` +
-          `✈️ ${data.airline || 'Любая авиакомпания'}\n` +
-          `⏱ Макс. пересадка: ${data.max_layover_hours}ч\n` +
-          `💰 ${Formatters.formatPrice(price, 'RUB')}\n\n` +
-          `Бот будет проверять цену каждые 2 часа и уведомит вас о снижении!`;
-
-        this.bot.sendMessage(chatId, summary, this.getMainMenuKeyboard());
-        delete this.userStates[chatId];
-      });
-
-      return true;
-    }
-
-    return false;
-  }
-
-  async handleEditRoute(chatId) {
-    const routes = await Route.findByUser(chatId);
-
-    if (!routes || routes.length === 0) {
-      this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов', this.getMainMenuKeyboard());
-      return;
-    }
-
-    let message = '✏️ Выберите маршрут для редактирования:\n\n';
-    const keyboard = {
-      reply_markup: {
-        keyboard: [],
-        one_time_keyboard: true,
-        resize_keyboard: true
-      }
-    };
-
-    routes.forEach((route, index) => {
-      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
-      message += `${routeText}\n`;
-      keyboard.reply_markup.keyboard.push([routeText]);
-    });
-
-    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
-
-    this.bot.sendMessage(chatId, message, keyboard);
-    this.userStates[chatId] = { type: 'regular', step: 'edit_select', routes };
-  }
-
-  async handleDeleteRoute(chatId) {
-    const routes = await Route.findByUser(chatId);
-
-    if (!routes || routes.length === 0) {
-      this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов', this.getMainMenuKeyboard());
-      return;
-    }
-
-    let message = '🗑 Выберите маршрут для удаления:\n\n';
-    const keyboard = {
-      reply_markup: {
-        keyboard: [],
-        one_time_keyboard: true,
-        resize_keyboard: true
-      }
-    };
-
-    routes.forEach((route, index) => {
-      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
-      message += `${routeText}\n`;
-      keyboard.reply_markup.keyboard.push([routeText]);
-    });
-
-    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
-
-    this.bot.sendMessage(chatId, message, keyboard);
-    this.userStates[chatId] = { type: 'regular', step: 'delete_confirm', routes };
-  }
-
   async handleCheckPrice(chatId, routeId) {
     await this.bot.sendMessage(chatId, '🔄 Проверяю цену...\n⏳ Это может занять 10-15 секунд...');
 
@@ -627,7 +855,7 @@ class RouteHandlers {
 
       // Puppeteer
       const puppeteer = new PuppeteerPricer(false);
-      const maxlayover_hours = route.max_layover_hours || 5;
+      const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
       const result = await puppeteer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours);
       await puppeteer.close();
 
