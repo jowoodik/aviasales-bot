@@ -37,49 +37,12 @@ class FlexibleHandlers {
           ['📊 Лучшие варианты', '📈 История цен'],
           ['✏️ Редактировать', '🗑 Удалить'],
           ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', '🎯 Проверить один'],  // 🔥 ИЗМЕНЕНО
-          ['ℹ️ Помощь']
+          ['✅ Проверить сейчас', 'ℹ️ Помощь'],  // 🔥 ИЗМЕНЕНО
         ],
         resize_keyboard: true,
         persistent: true
       }
     };
-  }
-
-  // 🔥 НОВЫЙ МЕТОД: Выбор маршрута для проверки
-  async handleCheckOne(chatId) {
-    try {
-      const routes = await FlexibleRoute.findByChatId(chatId);
-      if (!routes || routes.length === 0) {
-        this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов для проверки');
-        return;
-      }
-
-      let message = '🎯 ВЫБОРОЧНАЯ ПРОВЕРКА\n\n';
-      message += 'Выберите маршрут для проверки:\n\n';
-
-      const keyboard = { reply_markup: { keyboard: [], one_time_keyboard: true, resize_keyboard: true } };
-
-      routes.forEach((route, index) => {
-        const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
-        const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-        const airline = route.airline || 'Любая';
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
-
-        message += `${routeText}\n`;
-        message += `   📆 ${route.min_days}-${route.max_days} дней\n`;
-        message += `   💰 ${Formatters.formatPrice(route.threshold_price)}\n\n`;
-
-        keyboard.reply_markup.keyboard.push([routeText]);
-      });
-
-      keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
-
-      this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'flex_check_select', routes: routes };
-    } catch (error) {
-      this.bot.sendMessage(chatId, '❌ Ошибка: ' + error.message);
-    }
   }
 
   // 🔥 НОВЫЙ МЕТОД: Обработка выбора маршрута для проверки
