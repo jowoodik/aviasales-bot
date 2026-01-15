@@ -890,9 +890,10 @@ class RouteHandlers {
 
         if (result.screenshot && fs.existsSync(result.screenshot)) {
           await this.bot.sendPhoto(chatId, result.screenshot, {
+            contentType: 'image/png',
             caption: message,
             parse_mode: 'HTML',
-            reply_markup: keyboard
+            reply_markup: keyboard,
           });
         } else {
           await this.bot.sendMessage(chatId, message, {

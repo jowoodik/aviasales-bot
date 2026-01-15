@@ -673,9 +673,10 @@ class FlexibleHandlers {
       const fs = require('fs');
       if (r.screenshot_path && fs.existsSync(r.screenshot_path)) {
         await this.bot.sendPhoto(chatId, r.screenshot_path, {
+          contentType: 'image/png',
           caption: message,
           parse_mode: 'HTML',
-          reply_markup: keyboard
+          reply_markup: keyboard,
         });
       } else {
         await this.bot.sendMessage(chatId, message, {

@@ -140,8 +140,20 @@ bot.on('callback_query', async (query) => {
     if (data.startsWith('check_price_')) {
       const routeId = parseInt(data.replace('check_price_', ''));
       console.log(`📸 Запрос цены для маршрута ${routeId} от пользователя ${chatId}`);
-      await routeHandlers.handleCheckPrice(chatId, routeId);
-      bot.answerCallbackQuery(query.id, { text: '✅ Проверяю цену...' });
+
+      // 🔥 ОТВЕЧАЕМ СРАЗУ!
+      bot.answerCallbackQuery(query.id, { text: '🔄 Проверяю цены...' });
+
+      // Показываем прогресс
+      await bot.sendMessage(chatId, '⏳ Загружаю Aviasales...\n(10-40 сек)');
+
+      try {
+        await routeHandlers.handleCheckPrice(chatId, routeId);
+        await bot.sendMessage(chatId, '✅ Цены проверены!', getMainMenuKeyboard());
+      } catch (error) {
+        console.error('checkprice error:', error);
+        await bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
+      }
       return;
     }
 
@@ -172,29 +184,29 @@ bot.on('callback_query', async (query) => {
 
     if (data.startsWith('route_stats_')) {
       const routeId = parseInt(data.replace('route_stats_', ''));
-      await settingsHandlers.showRouteStatistics(chatId, routeId);
       bot.answerCallbackQuery(query.id);
+      await settingsHandlers.showRouteStatistics(chatId, routeId);
       return;
     }
 
     if (data.startsWith('flex_stats_')) {
       const routeId = parseInt(data.replace('flex_stats_', ''));
-      await settingsHandlers.showFlexibleRouteStatistics(chatId, routeId);
       bot.answerCallbackQuery(query.id);
+      await settingsHandlers.showFlexibleRouteStatistics(chatId, routeId);
       return;
     }
 
     if (data.startsWith('route_trend_')) {
       const routeId = parseInt(data.replace('route_trend_', ''));
-      await settingsHandlers.showPriceTrend(chatId, routeId, false);
       bot.answerCallbackQuery(query.id);
+      await settingsHandlers.showPriceTrend(chatId, routeId, false);
       return;
     }
 
     if (data.startsWith('flex_trend_')) {
       const routeId = parseInt(data.replace('flex_trend_', ''));
-      await settingsHandlers.showPriceTrend(chatId, routeId, true);
       bot.answerCallbackQuery(query.id);
+      await settingsHandlers.showPriceTrend(chatId, routeId, true);
       return;
     }
 

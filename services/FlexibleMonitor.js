@@ -266,7 +266,8 @@ class FlexibleMonitor {
         if (route.screenshot && fs.existsSync(route.screenshot)) {
           try {
             await this.bot.sendPhoto(chatId, route.screenshot, {
-              caption: `📸 ${route.origin} → ${route.destination}: ${route.bestPrice?.toLocaleString('ru-RU')} ₽`
+              contentType: 'image/png',
+              caption: `📸 ${route.origin} → ${route.destination}: ${route.bestPrice?.toLocaleString('ru-RU')} ₽`,
             });
           } catch (e) {
             console.error(`Ошибка отправки скриншота: ${e.message}`);
@@ -366,7 +367,8 @@ class FlexibleMonitor {
       if (routeStats.screenshot && require('fs').existsSync(routeStats.screenshot)) {
         try {
           await this.bot.sendPhoto(chatId, routeStats.screenshot, {
-            caption: `📸 ${route.origin} → ${route.destination}: ${routeStats.bestPrice?.toLocaleString('ru-RU')} ₽`
+            contentType: 'image/png',
+            caption: `📸 ${route.origin} → ${route.destination}: ${routeStats.bestPrice?.toLocaleString('ru-RU')} ₽`,
           });
         } catch (e) {
           console.error(`Ошибка отправки скриншота: ${e.message}`);

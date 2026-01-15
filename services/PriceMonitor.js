@@ -274,9 +274,10 @@ class PriceMonitor {
     try {
       if (screenshot && fs.existsSync(screenshot)) {
         await this.bot.sendPhoto(route.chat_id, screenshot, {
+          contentType: 'image/png',
           caption: message,
           parse_mode: 'HTML',
-          reply_markup: keyboard
+          reply_markup: keyboard,
         });
       } else {
         await this.bot.sendMessage(route.chat_id, message, {
@@ -353,7 +354,8 @@ class PriceMonitor {
         if (route.screenshot && fs.existsSync(route.screenshot)) {
           try {
             await this.bot.sendPhoto(chatId, route.screenshot, {
-              caption: `📸 ${route.origin} → ${route.destination}: ${route.bestPrice?.toLocaleString('ru-RU')} ₽`
+              contentType: 'image/png',
+              caption: `📸 ${route.origin} → ${route.destination}: ${route.bestPrice?.toLocaleString('ru-RU')} ₽`,
             });
           } catch (e) {
             console.error(`Ошибка отправки скриншота: ${e.message}`);

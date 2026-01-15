@@ -135,9 +135,10 @@ ${type === 'drop' ? `💵 Ваш порог: ${Formatters.formatPrice(route.thre
       // Если есть скриншот - отправляем его с подписью
       if (screenshot && fs.existsSync(screenshot)) {
         await this.bot.sendPhoto(route.chat_id, screenshot, {
+          contentType: 'image/png',
           caption: message,
           parse_mode: 'HTML',
-          reply_markup: keyboard
+          reply_markup: keyboard,
         });
       } else {
         // Иначе просто текст

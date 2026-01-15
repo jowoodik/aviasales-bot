@@ -361,6 +361,64 @@ class PuppeteerPricer {
     }
   }
 
+  async applyPriceSortAscending(page, index, total) {
+    console.log(`[${index}/${total}] 💰 Включение сортировки "Самые дешёвые"...`);
+    try {
+      // 1. SNAPSHOT ПЕРЕД сортировкой
+      const beforeSnapshot = await this.getPricesSnapshot(page);
+      console.log(`[${index}/${total}] 📊 До сортировки: ${beforeSnapshot.length} цен`);
+
+      if (beforeSnapshot.length === 0) {
+        throw new Error('Нет цен для сортировки');
+      }
+
+      // 2. Ждем появления селектора сортировки
+      await page.waitForSelector('[data-test-id="single-choice-filter-sort-price_asc"]', { timeout: 10000 });
+      await this.sleep(500);
+
+      // 3. Кликаем по label (лучше чем по input readonly)
+      const sortClicked = await page.evaluate(() => {
+        const sortContainer = document.querySelector('[data-test-id="single-choice-filter-sort-price_asc"]');
+        if (!sortContainer) {
+          console.error('❌ Контейнер сортировки не найден');
+          return false;
+        }
+
+        const label = sortContainer.querySelector('label');
+        if (!label) {
+          console.error('❌ Label не найден');
+          return false;
+        }
+
+        console.log(`Найден label сортировки, кликаем...`);
+        label.click();
+        return true;
+      });
+
+      if (!sortClicked) {
+        throw new Error('Не удалось кликнуть сортировку по цене');
+      }
+
+      console.log(`[${index}/${total}] ✅ Сортировка активирована`);
+
+      // 4. Ждем обновления результатов (как в других фильтрах)
+      await this.sleep(1500);
+      const changed = await this.waitForResultsChange(page, beforeSnapshot, index, total, 15000);
+
+      if (changed) {
+        await this.waitForStableResults(page, index, total, 3000);
+        console.log(`[${index}/${total}] ✅ Сортировка по цене применена! Первая цена теперь минимальная`);
+      } else {
+        console.warn(`[${index}/${total}] ⚠️ Результаты не изменились после сортировки`);
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`[${index}/${total}] ❌ Ошибка сортировки по цене:`, error.message);
+      return false;
+    }
+  }
+
   async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = null) {
     const startTime = Date.now();
 
@@ -500,6 +558,10 @@ class PuppeteerPricer {
         await this.applyAirlineFilter(page, airline, index, total);
       }
 
+      // 🔥 Шаг 3: СОРТИРОВКА ПО ЦЕНЕ (ПОСЛЕ авиакомпании)
+      console.log(`[${index}/${total}] 💰 Сортировка по цене (последний шаг)`);
+      await this.applyPriceSortAscending(page, index, total);
+
       console.log(`[${index}/${total}] 💰 Получение цены...`);
 
       const priceData = await page.evaluate(() => {
@@ -532,8 +594,7 @@ class PuppeteerPricer {
 
       await page.screenshot({
         path: screenshotPath,
-        fullPage: false,
-        clip: { x: 0, y: 0, width: 1200, height: 800 }
+        fullPage: false
       });
 
       console.log(`[${index}/${total}] 💰 Цена: ${priceData.price.toLocaleString('ru-RU')} ₽ (всего ${priceData.totalPrices} вариантов)`);
