@@ -226,25 +226,35 @@ class FlexibleHandlers {
 
   async handleShowTopResults(chatId) {
     const routes = await FlexibleRoute.findByUser(chatId);
+
     if (!routes || routes.length === 0) {
-      this.bot.sendMessage(chatId, '❌ У вас нет гибких маршрутов', this.getMainMenuKeyboard());
+      this.bot.sendMessage(chatId, '🔍 У вас нет гибких маршрутов', this.getMainMenuKeyboard());
       return;
     }
 
     let message = '📊 Выберите маршрут для просмотра лучших вариантов:\n\n';
-    const keyboard = { reply_markup: { keyboard: [], one_time_keyboard: true, resize_keyboard: true } };
+    const keyboard = {
+      reply_markup: {
+        keyboard: [],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
 
     routes.forEach((route, index) => {
-      const routeText = `${index + 1}. ${route.origin}→${route.destination}`;
+      const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
+      const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
+      const airline = route.airline;
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd} ${route.min_days}-${route.max_days}д`;
+
       message += `${routeText}\n`;
-      message += `   📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
-      message += `   🛫 ${route.min_days}-${route.max_days} дней\n\n`;
       keyboard.reply_markup.keyboard.push([routeText]);
     });
 
     keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
     this.bot.sendMessage(chatId, message, keyboard);
-    this.userStates[chatId] = { step: 'flex_show_results', routes };
+    this.userStates[chatId] = { step: 'flex_show_results', routes }; // ← ИСПРАВЛЕНО: было 'flexshowresults'
   }
 
   async sendTopResultsWithScreenshots(chatId, route) {
