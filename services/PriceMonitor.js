@@ -5,7 +5,7 @@ const NotificationService = require('./NotificationService');
 const db = require('../config/database');
 const DateUtils = require('../utils/dateUtils');
 const fs = require('fs');
-const PriceAnalytics = require('./PriceAnalytics'); // В начало файла
+const PriceAnalytics = require('./PriceAnalytics');
 
 class PriceMonitor {
   constructor(aviasalesToken, bot, debug = false) {
@@ -25,7 +25,6 @@ class PriceMonitor {
 
   async checkPrices() {
     this.stats.startTime = Date.now();
-
     console.log('\n========================================');
     console.log('⏰ ПРОВЕРКА ОБЫЧНЫХ МАРШРУТОВ (Puppeteer)');
     console.log(new Date().toLocaleString('ru-RU'));
@@ -35,7 +34,6 @@ class PriceMonitor {
 
     const routes = await Route.findActive();
     console.log(`📋 Найдено активных маршрутов: ${routes.length}\n`);
-
     this.stats.total = routes.length;
 
     for (let i = 0; i < routes.length; i++) {
@@ -43,9 +41,9 @@ class PriceMonitor {
       const canNotify = await this.notificationService.canSendNotification(route.chat_id);
 
       console.log(`\n[${i + 1}/${routes.length}] 🔍 ${route.origin} → ${route.destination}`);
-      console.log(`  📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}`);
-      console.log(`  👥 ${route.adults} взр., ${route.children} дет. | 🧳 ${route.baggage ? 'Да' : 'Нет'}`);
-      console.log(`  💵 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ${route.currency}`);
+      console.log(`   📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}`);
+      console.log(`   👥 ${route.adults} взр., ${route.children} дет. | 🧳 ${route.baggage ? 'Да' : 'Нет'}`);
+      console.log(`   💵 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ${route.currency}`);
 
       const routeStats = {
         origin: route.origin,
@@ -58,7 +56,6 @@ class PriceMonitor {
       };
 
       try {
-        // Генерируем ссылку на поиск
         const searchUrl = this.api.generateSearchLink({
           origin: route.origin,
           destination: route.destination,
@@ -71,38 +68,35 @@ class PriceMonitor {
           max_stops: route.max_stops
         });
 
-        // Используем Puppeteer для получения цены
         const priceResult = await this.puppeteerPricer.getPriceFromUrl(
           searchUrl,
           i + 1,
           routes.length,
           route.airline,
-          route.max_stops === 0 ? null : route.max_layover_hours
+          route.max_stops === 0 ? null : route.max_layover_hours,
+          route.baggage  // 🔥 ПАРАМЕТР БАГАЖА
         );
 
         if (priceResult && priceResult.price) {
           const totalPrice = priceResult.price;
-
-          console.log(`  ✅ Найдена цена: ${totalPrice.toLocaleString('ru-RU')} ${route.currency}`);
+          console.log(`   ✅ Найдена цена: ${totalPrice.toLocaleString('ru-RU')} ${route.currency}`);
 
           routeStats.success = true;
           routeStats.bestPrice = totalPrice;
           routeStats.screenshot = priceResult.screenshot;
           this.stats.success++;
 
-          // Обрабатываем результат
           const alert = await this.processPrice(route, totalPrice, searchUrl, canNotify, priceResult.screenshot);
-
           if (alert) {
             routeStats.alert = true;
             this.stats.alerts++;
           }
         } else {
-          console.log(`  ❌ Билеты не найдены`);
+          console.log(`   ❌ Билеты не найдены`);
           this.stats.failed++;
         }
       } catch (error) {
-        console.error(`  ❌ Ошибка: ${error.message}`);
+        console.error(`   ❌ Ошибка: ${error.message}`);
         this.stats.failed++;
       }
 
@@ -110,7 +104,7 @@ class PriceMonitor {
       this.updateUserStats(route.chat_id);
 
       if (i < routes.length - 1) {
-        console.log(`  ⏳ Ожидание 5 сек...`);
+        console.log(`   ⏳ Ожидание 5 сек...`);
         await this.sleep(5000);
       }
     }
@@ -125,12 +119,8 @@ class PriceMonitor {
   async checkExpiredRoutes() {
     return new Promise((resolve) => {
       const today = new Date().toISOString().split('T')[0];
-
-      // Напоминания за 3 дня
       db.all(
-        `SELECT * FROM routes
-         WHERE auto_delete = 1
-           AND date(departure_date, '-3 days') = date(?)`,
+        `SELECT * FROM routes WHERE auto_delete = 1 AND date(departure_date, '-3 days') = date(?)`,
         [today],
         (err, routes) => {
           if (!err && routes && routes.length > 0) {
@@ -146,7 +136,6 @@ class PriceMonitor {
         }
       );
 
-      // Удаление прошедших
       Route.deleteExpired().then(changes => {
         if (changes > 0) {
           console.log(`🗑️ Автоматически удалено ${changes} прошедших маршрутов`);
@@ -157,13 +146,11 @@ class PriceMonitor {
   }
 
   async processPrice(route, totalPrice, searchLink, canNotify, screenshot) {
-    // Сохранение в историю
     db.run(
       `INSERT INTO price_history (route_id, price, airline) VALUES (?, ?, ?)`,
       [route.id, totalPrice, route.airline || 'Multi']
     );
 
-    // 🔥 НОВОЕ: Сохранение в аналитику
     await PriceAnalytics.savePrice({
       routeType: 'regular',
       origin: route.origin,
@@ -173,7 +160,6 @@ class PriceMonitor {
       chatId: route.chat_id
     });
 
-    // Проверка на новый минимум
     return new Promise((resolve) => {
       db.get(
         'SELECT MIN(price) as min_price FROM best_prices WHERE route_id = ?',
@@ -187,7 +173,6 @@ class PriceMonitor {
 
           let alertSent = false;
 
-          // Уведомления
           if (canNotify) {
             db.get(
               'SELECT * FROM user_settings WHERE chat_id = ?',
@@ -196,9 +181,7 @@ class PriceMonitor {
                 const userSettings = settings || { notify_on_drop: 1, notify_on_new_min: 1 };
 
                 if (totalPrice <= route.threshold_price && userSettings.notify_on_drop) {
-                  console.log(`  🔥 ЦЕНА УПАЛА! ${totalPrice} <= ${route.threshold_price}`);
-
-                  // Формируем объект билета для уведомления
+                  console.log(`   🔥 ЦЕНА УПАЛА! ${totalPrice} <= ${route.threshold_price}`);
                   const ticket = {
                     estimated_total: totalPrice,
                     base_price: Math.floor(totalPrice / (route.adults + route.children * 0.75)),
@@ -206,16 +189,12 @@ class PriceMonitor {
                     transfers: route.max_stops,
                     search_link: searchLink
                   };
-
                   await this.sendRegularAlertWithScreenshot(route, ticket, 'drop', screenshot);
-
                   const savings = route.threshold_price - totalPrice;
                   this.updateSavings(route.chat_id, savings);
                   alertSent = true;
-
                 } else if (isNewMin && userSettings.notify_on_new_min) {
-                  console.log(`  ⭐ НОВЫЙ МИНИМУМ! ${totalPrice} (было: ${row?.min_price || 'N/A'})`);
-
+                  console.log(`   ⭐ НОВЫЙ МИНИМУМ! ${totalPrice} (было: ${row?.min_price || 'N/A'})`);
                   const ticket = {
                     estimated_total: totalPrice,
                     base_price: Math.floor(totalPrice / (route.adults + route.children * 0.75)),
@@ -223,7 +202,6 @@ class PriceMonitor {
                     transfers: route.max_stops,
                     search_link: searchLink
                   };
-
                   await this.sendRegularAlertWithScreenshot(route, ticket, 'new_min', screenshot);
                   alertSent = true;
                 }
@@ -232,7 +210,7 @@ class PriceMonitor {
               }
             );
           } else {
-            console.log(`  ⏸️ Уведомления отключены (cooldown)`);
+            console.log(`   ⏸️ Уведомления отключены (cooldown)`);
             resolve(false);
           }
         }
@@ -247,11 +225,10 @@ class PriceMonitor {
     const totalPrice = ticket.estimated_total;
 
     let header = type === 'drop' ? '🔥 ЦЕНА УПАЛА!' : '⭐ НОВЫЙ МИНИМУМ!';
-
-    let message = `<b>${header}</b>\n\n`;
+    let message = `${header}\n\n`;
     message += `📍 Маршрут: ${route.origin} → ${route.destination}\n`;
-    message += `💰 <b>${Formatters.formatPrice(totalPrice, route.currency)}</b>\n`;
-    message += `✅ <i>Проверено через браузер</i>\n\n`;
+    message += `💰 ${Formatters.formatPrice(totalPrice, route.currency)}\n`;
+    message += `✅ Проверено через браузер\n\n`;
     message += `✈️ Авиакомпания: ${ticket.airline}\n`;
     message += `👥 Пассажиры: ${passengersText}\n`;
     message += `🧳 Багаж: ${baggageText}\n`;
@@ -315,11 +292,10 @@ class PriceMonitor {
     });
   }
 
-  // Отправка отчета в бот
   async sendReport(chatId) {
     const elapsed = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
 
-    let report = `📊 <b>ОТЧЕТ О ПРОВЕРКЕ</b>\n\n`;
+    let report = `📊 ОТЧЕТ О ПРОВЕРКЕ\n\n`;
     report += `⏱️ Время: ${elapsed} мин\n`;
     report += `📋 Всего маршрутов: ${this.stats.total}\n`;
     report += `✅ Успешно: ${this.stats.success}\n`;
@@ -332,10 +308,8 @@ class PriceMonitor {
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '❌';
         report += `\n${emoji} ${route.origin} → ${route.destination}\n`;
-
         if (route.success && route.bestPrice) {
           report += `   💰 ${route.bestPrice.toLocaleString('ru-RU')} ₽`;
-
           if (route.alert) {
             report += ` 🔥 <i>алерт отправлен</i>`;
           }
@@ -349,7 +323,6 @@ class PriceMonitor {
     try {
       await this.bot.sendMessage(chatId, report, { parse_mode: 'HTML' });
 
-      // Отправляем скриншоты
       for (const route of this.stats.routes) {
         if (route.screenshot && fs.existsSync(route.screenshot)) {
           try {

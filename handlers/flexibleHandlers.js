@@ -691,6 +691,66 @@ class FlexibleHandlers {
     const summaryMessage = `\n💵 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`;
     await this.bot.sendMessage(chatId, summaryMessage, this.getMainMenuKeyboard());
   }
+
+  async handleEditFlexible(chatId) {
+    const FlexibleRoute = require('../models/FlexibleRoute');
+    const routes = await FlexibleRoute.findByUser(chatId);
+
+    if (!routes || routes.length === 0) {
+      this.bot.sendMessage(chatId, '🔍 У вас нет гибких маршрутов', this.getMainMenuKeyboard());
+      return;
+    }
+
+    let message = '✏️ Выберите гибкий маршрут для редактирования:\n\n';
+    const keyboard = {
+      reply_markup: {
+        keyboard: [],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    routes.forEach((route, index) => {
+      const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
+      const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${depStart}-${depEnd}`;
+      message += `${routeText}\n`;
+      keyboard.reply_markup.keyboard.push([routeText]);
+    });
+    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
+    this.bot.sendMessage(chatId, message, keyboard);
+    this.userStates[chatId] = { step: 'flex_edit_select', routes };
+  }
+
+  async handleDeleteFlexible(chatId) {
+    const FlexibleRoute = require('../models/FlexibleRoute');
+    const routes = await FlexibleRoute.findByUser(chatId);
+
+    if (!routes || routes.length === 0) {
+      this.bot.sendMessage(chatId, '🔍 У вас нет гибких маршрутов', this.getMainMenuKeyboard());
+      return;
+    }
+
+    let message = '🗑 Выберите гибкий маршрут для удаления:\n\n';
+    const keyboard = {
+      reply_markup: {
+        keyboard: [],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    routes.forEach((route, index) => {
+      const routeText = `${index + 1}. ${route.origin}→${route.destination}`;
+      message += `${routeText}\n`;
+      keyboard.reply_markup.keyboard.push([routeText]);
+    });
+    keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
+
+    this.bot.sendMessage(chatId, message, keyboard);
+    this.userStates[chatId] = { step: 'flex_delete_confirm', routes };
+  }
 }
 
 module.exports = FlexibleHandlers;

@@ -785,21 +785,20 @@ bot.on('message', async (msg) => {
 
   if (state.step === 'show_top_results') {
     if (text === '◀️ Отмена') {
-      delete this.userStates[chatId];
-      this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
+      delete userStates[chatId];  // ✅ ГЛОБАЛЬНЫЙ userStates
+      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
       return;
     }
-
     const match = text.match(/^(\d+)\./);
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
       if (route) {
         await flexibleHandlers.sendTopResultsWithScreenshots(chatId, route);
-        delete this.userStates[chatId];
+        delete userStates[chatId];  // ✅
+        return;
       }
     }
-    return;
   }
 
   // Удаление гибкого маршрута
