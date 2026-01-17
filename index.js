@@ -12,9 +12,7 @@ const Route = require('./models/Route');
 const DateUtils = require('./utils/dateUtils');
 const Formatters = require('./utils/formatters');
 const db = require('./config/database');
-const PriceAnalytics = require('./services/PriceAnalytics');
 const FlexibleRoute = require('./models/FlexibleRoute');
-
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const userStates = {};
@@ -31,10 +29,10 @@ function getMainMenuKeyboard() {
       keyboard: [
         ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
         ['📋 Мои маршруты', '🔍 Мои гибкие'],
-        ['📊 Лучшие варианты', '📈 История цен'],
-        ['✏️ Редактировать', '🗑 Удалить'],
-        ['📊 Статистика', '⚙️ Настройки'],
-        ['✅ Проверить сейчас', 'ℹ️ Помощь'],
+        ['💎 Лучшее сейчас', '✏️ Редактировать'],
+        ['📊 Статистика', '🗑 Удалить'],
+        ['⚙️ Настройки', '✅ Проверить сейчас'],
+        ['ℹ️ Помощь'],
       ],
       resize_keyboard: true,
       persistent: true
@@ -45,8 +43,8 @@ function getMainMenuKeyboard() {
 function initUserSettings(chatId) {
   db.run(`INSERT OR IGNORE INTO user_settings (chat_id) VALUES (?)`, [chatId]);
   db.run(
-    `INSERT OR IGNORE INTO user_stats (chat_id, total_routes, total_flexible) 
-     VALUES (?, 
+    `INSERT OR IGNORE INTO user_stats (chat_id, total_routes, total_flexible)
+     VALUES (?,
        (SELECT COUNT(*) FROM routes WHERE chat_id = ?),
        (SELECT COUNT(*) FROM flexible_routes WHERE chat_id = ?)
      )`,
@@ -65,10 +63,10 @@ bot.onText(/\/start/, (msg) => {
     'Конкретные даты вылета и возврата\n\n' +
     '🔍 ГИБКИЙ ПОИСК:\n' +
     'Задайте диапазон дат вылета (25 фев - 10 мар) и пребывания (27-30 дней)\n' +
-    '→ Бот найдет все комбинации и покажет топ-5 лучших!\n\n' +
+    '→ Бот найдет все комбинации и покажет топ-3 лучших!\n\n' +
     '⚡ Автопроверка каждые 2 часа\n' +
     '🔔 Уведомления о снижении цен\n' +
-    '📊 История лучших предложений\n\n' +
+    '💎 Лучшие предложения прямо сейчас\n\n' +
     'Используйте кнопки меню ниже 👇';
 
   bot.sendMessage(chatId, welcomeMessage, getMainMenuKeyboard());
@@ -101,22 +99,18 @@ bot.onText(/\/settings/, (msg) => {
 bot.onText(/\/check/, async (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, '🔄 Запускаю проверку всех маршрутов...');
-
   await priceMonitor.checkPrices();
   await flexibleMonitor.checkAllRoutes();
-
   bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard());
 });
 
 bot.onText(/\/check_prices/, async (msg) => {
   const chatId = msg.chat.id;
-
   try {
     await bot.sendMessage(chatId, '🔍 Запускаю проверку цен...\n⏳ Это может занять несколько минут.');
 
     const FlexibleMonitor = require('./services/FlexibleMonitor');
     const monitor = new FlexibleMonitor(process.env.AVIASALES_TOKEN, bot);
-
     await monitor.checkAllRoutes();
     await monitor.close();
 
@@ -141,10 +135,7 @@ bot.on('callback_query', async (query) => {
       const routeId = parseInt(data.replace('check_price_', ''));
       console.log(`📸 Запрос цены для маршрута ${routeId} от пользователя ${chatId}`);
 
-      // 🔥 ОТВЕЧАЕМ СРАЗУ!
       bot.answerCallbackQuery(query.id, { text: '🔄 Проверяю цены...' });
-
-      // Показываем прогресс
       await bot.sendMessage(chatId, '⏳ Загружаю Aviasales...\n(10-40 сек)');
 
       try {
@@ -154,16 +145,11 @@ bot.on('callback_query', async (query) => {
         console.error('checkprice error:', error);
         await bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
       }
+
       return;
     }
 
-    // 🔥 НОВЫЕ ОБРАБОТЧИКИ ДЛЯ СТАТИСТИКИ
-    if (data === 'general_analytics') {
-      await settingsHandlers.handleGeneralAnalytics(chatId);
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
-
+    // Обработчики статистики
     if (data === 'regular_route_stats') {
       await settingsHandlers.handleRegularRouteStats(chatId);
       bot.answerCallbackQuery(query.id);
@@ -172,12 +158,6 @@ bot.on('callback_query', async (query) => {
 
     if (data === 'flexible_route_stats') {
       await settingsHandlers.handleFlexibleRouteStats(chatId);
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
-
-    if (data === 'price_trends_menu') {
-      await settingsHandlers.handlePriceTrendsMenu(chatId);
       bot.answerCallbackQuery(query.id);
       return;
     }
@@ -196,64 +176,13 @@ bot.on('callback_query', async (query) => {
       return;
     }
 
-    if (data.startsWith('route_trend_')) {
-      const routeId = parseInt(data.replace('route_trend_', ''));
-      bot.answerCallbackQuery(query.id);
-      await settingsHandlers.showPriceTrend(chatId, routeId, false);
-      return;
-    }
-
-    if (data.startsWith('flex_trend_')) {
-      const routeId = parseInt(data.replace('flex_trend_', ''));
-      bot.answerCallbackQuery(query.id);
-      await settingsHandlers.showPriceTrend(chatId, routeId, true);
-      return;
-    }
-
-    // Детальная аналитика (старый обработчик, можно оставить)
-    if (data === 'detailed_analytics') {
-      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeek(chatId);
-      const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-      let message = '📊 ДЕТАЛЬНАЯ АНАЛИТИКА\n\n';
-      message += 'Средние цены по дням недели:\n\n';
-
-      if (dayAnalysis.length === 0) {
-        message += 'Недостаточно данных. Продолжайте использовать бота!';
-      } else {
-        dayAnalysis.forEach(day => {
-          const dayName = days[day.day_of_week];
-          const icon = day.is_weekend ? '🏖' : '💼';
-          message += `${icon} ${dayName}: ${Math.floor(day.avg_price).toLocaleString('ru-RU')} ₽\n`;
-          message += `  └ от ${Math.floor(day.min_price).toLocaleString('ru-RU')} до ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-      }
-
-      await bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
-
-    if (data === 'price_trends') {
-      await bot.sendMessage(chatId, '📈 Выберите маршрут для просмотра трендов:', {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '◀️ Назад к статистике', callback_data: 'back_to_stats' }
-          ]]
-        }
-      });
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
-
     if (data === 'back_to_stats') {
       await settingsHandlers.handleStats(chatId);
       bot.answerCallbackQuery(query.id);
       return;
     }
 
-    // Если ничего не подошло
     bot.answerCallbackQuery(query.id);
-
   } catch (error) {
     console.error('Ошибка callback:', error);
     bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
@@ -288,13 +217,8 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  if (text === '📊 Лучшие варианты') {
+  if (text === '💎 Лучшее сейчас') {
     flexibleHandlers.handleShowTopResults(chatId);
-    return;
-  }
-
-  if (text === '📈 История цен') {
-    routeHandlers.handleShowHistory(chatId);
     return;
   }
 
@@ -351,13 +275,13 @@ bot.on('message', async (msg) => {
       '✈️ ОБЫЧНЫЕ МАРШРУТЫ:\n' +
       '• Конкретные даты вылета/возврата\n' +
       '• Редактирование порога цены\n' +
-      '• История топ-3 лучших цен\n' +
+      '• Топ-3 лучших цен\n' +
       '• Автоудаление прошедших\n\n' +
       '🔍 ГИБКИЙ ПОИСК:\n' +
       '• Диапазон дат вылета (25.02-10.03)\n' +
       '• Диапазон пребывания (27-30 дней)\n' +
       '• Автоматический поиск всех комбинаций\n' +
-      '• Топ-5 лучших вариантов\n\n' +
+      '• Топ-3 лучших вариантов\n\n' +
       '💡 Коды аэропортов:\n' +
       '• SVX - Екатеринбург\n' +
       '• MOW - Москва\n' +
@@ -395,7 +319,7 @@ bot.on('message', async (msg) => {
       routeHandlers.handleEditRoute(chatId);
     } else if (text === '🔍 Гибкий маршрут') {
       delete userStates[chatId];
-      flexibleHandlers.handleEditFlexible(chatId); // <-- ФИКС: Добавили
+      flexibleHandlers.handleEditFlexible(chatId);
     }
     return;
   }
@@ -431,6 +355,7 @@ bot.on('message', async (msg) => {
   }
 
   // Обработка настроек
+
   if (state.step === 'settings_menu') {
     if (settingsHandlers.handleSettingsStep(chatId, text)) {
       return;
@@ -451,6 +376,12 @@ bot.on('message', async (msg) => {
 
   if (state.step === 'settings_notify') {
     if (settingsHandlers.handleNotifications(chatId, text)) {
+      return;
+    }
+  }
+
+  if (state.step === 'stats_select_type') {
+    if (settingsHandlers.handleStatsTypeSelect(chatId, text)) {
       return;
     }
   }
@@ -503,34 +434,6 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  if (state.step === 'route_stats_detail' || state.step === 'flex_stats_detail') {
-    if (text === '📈 Посмотреть тренд') {
-      await settingsHandlers.showPriceTrend(chatId, state.route, state.step === 'flex_stats_detail');
-      return;
-    }
-    if (text === '◀️ Назад к статистике') {
-      settingsHandlers.handleStats(chatId);
-      return;
-    }
-  }
-
-  if (state.step === 'trend_select') {
-    if (text === '◀️ Назад к статистике') {
-      settingsHandlers.handleStats(chatId);
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        await settingsHandlers.showPriceTrend(chatId, route, route.isFlexible);
-      }
-    }
-    return;
-  }
-
   // Редактирование гибкого маршрута - выбор маршрута
   if (state.step === 'flex_edit_select') {
     if (text === '◀️ Отмена') {
@@ -543,7 +446,6 @@ bot.on('message', async (msg) => {
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
-
       if (route) {
         const keyboard = {
           reply_markup: {
@@ -631,7 +533,6 @@ bot.on('message', async (msg) => {
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
-
       if (route) {
         const keyboard = {
           reply_markup: {
@@ -721,7 +622,6 @@ bot.on('message', async (msg) => {
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
-
       if (route) {
         Route.delete(route.id, chatId).then(() => {
           bot.sendMessage(
@@ -736,66 +636,20 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Просмотр истории - выбор маршрута
-  if (state.step === 'history_select') {
-    if (text === '◀️ Главное меню') {
-      delete userStates[chatId];
-      bot.sendMessage(chatId, 'Главное меню:', getMainMenuKeyboard());
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-
-      if (route) {
-        delete userStates[chatId];
-
-        if (route.type === 'regular') {
-          await routeHandlers.showRegularRouteHistory(chatId, route);
-        } else if (route.type === 'flexible') {
-          await routeHandlers.showFlexibleRouteHistory(chatId, route);
-        }
-      }
-    }
-    return;
-  }
-
-  // Выбор типа истории для гибкого маршрута
-  if (state.step === 'flex_history_type') {
-    if (text === '◀️ Главное меню') {
-      delete userStates[chatId];
-      bot.sendMessage(chatId, 'Главное меню:', getMainMenuKeyboard());
-      return;
-    }
-
-    if (text === '📊 Сводка по дням') {
-      delete userStates[chatId];
-      await routeHandlers.showFlexibleRouteDailySummary(chatId, state.route);
-      return;
-    }
-
-    if (text === '📋 Детальная история') {
-      delete userStates[chatId];
-      await routeHandlers.showFlexibleRouteDetailedHistory(chatId, state.route);
-      return;
-    }
-  }
-
   if (state.step === 'show_top_results') {
     if (text === '◀️ Отмена') {
-      delete userStates[chatId];  // ✅ ГЛОБАЛЬНЫЙ userStates
+      delete userStates[chatId];
       bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
       return;
     }
+
     const match = text.match(/^(\d+)\./);
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
       if (route) {
         await flexibleHandlers.sendTopResultsWithScreenshots(chatId, route);
-        delete userStates[chatId];  // ✅
+        delete userStates[chatId];
         return;
       }
     }
@@ -813,7 +667,6 @@ bot.on('message', async (msg) => {
     if (match) {
       const index = parseInt(match[1]) - 1;
       const route = state.routes[index];
-
       if (route) {
         const FlexibleRoute = require('./models/FlexibleRoute');
         FlexibleRoute.delete(route.id, chatId).then(() => {
@@ -829,7 +682,6 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // 🔥 ДОБАВЬТЕ ЭТО: Выборочная проверка гибкого маршрута
   if (state.step === 'flex_check_select') {
     if (await flexibleHandlers.handleCheckSelectStep(chatId, text)) {
       return;
@@ -839,13 +691,11 @@ bot.on('message', async (msg) => {
 
 // Graceful shutdown
 let isShuttingDown = false;
-
 const shutdown = async () => {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
   console.log('\n⚠️ Получен сигнал остановки, завершаем работу...');
-
   if (global.flexibleMonitor) {
     await global.flexibleMonitor.close();
   }
@@ -858,14 +708,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 process.on('SIGQUIT', shutdown);
 
-// Сохраняем экземпляр монитора глобально
 global.flexibleMonitor = flexibleMonitor;
 
-
-// Запуск планировщика
 setupScheduler(priceMonitor, flexibleMonitor);
 
-// Запуск веб-интерфейса
 if (process.env.ENABLE_WEB === 'true') {
   require('./web/server');
 }

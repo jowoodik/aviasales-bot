@@ -1,9 +1,9 @@
-const PriceAnalytics = require('../services/PriceAnalytics');
+const db = require('../config/database');
 const Route = require('../models/Route');
 const FlexibleRoute = require('../models/FlexibleRoute');
+const PriceAnalytics = require('../services/PriceAnalytics');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
-const db = require('../config/database');
 
 class SettingsHandlers {
   constructor(bot, userStates) {
@@ -17,10 +17,10 @@ class SettingsHandlers {
         keyboard: [
           ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
           ['📋 Мои маршруты', '🔍 Мои гибкие'],
-          ['📊 Лучшие варианты', '📈 История цен'],
-          ['✏️ Редактировать', '🗑 Удалить'],
-          ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', 'ℹ️ Помощь'],
+          ['💎 Лучшее сейчас', '✏️ Редактировать'],
+          ['📊 Статистика', '🗑 Удалить'],
+          ['⚙️ Настройки', '✅ Проверить сейчас'],
+          ['ℹ️ Помощь'],
         ],
         resize_keyboard: true,
         persistent: true
@@ -30,28 +30,26 @@ class SettingsHandlers {
 
   async handleStats(chatId) {
     try {
-      const baseStats = await this.getBaseStats(chatId);
+      const routes = await Route.findByUser(chatId);
+      const flexRoutes = await FlexibleRoute.findByUser(chatId);
 
-      let message = '📊 СТАТИСТИКА\n\n';
-
-      if (baseStats) {
-        message += `🎯 Ваши маршруты:\n`;
-        message += `✈️ Обычных: ${baseStats.routes}\n`;
-        message += `🔍 Гибких: ${baseStats.flexible}\n`;
-        message += `🔔 Отправлено алертов: ${baseStats.alerts}\n`;
-        if (baseStats.savings > 0) {
-          message += `💰 Сэкономлено: ${baseStats.savings.toLocaleString('ru-RU')} ₽\n`;
-        }
+      if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
+        await this.bot.sendMessage(
+          chatId,
+          '📊 У вас нет маршрутов для просмотра статистики',
+          this.getMainMenuKeyboard()
+        );
+        return;
       }
 
-      message += `\nВыберите действие:`;
+      let message = '📊 СТАТИСТИКА\n\nВыберите тип маршрута:';
 
+      // 🔥 КНОПКИ ПОД ПОЛЕМ ВВОДА (reply_markup)
       const keyboard = {
         reply_markup: {
           keyboard: [
-            ['📊 Общая аналитика'],
-            ['✈️ По обычному маршруту', '🔍 По гибкому маршруту'],
-            ['📈 Тренды цен'],
+            ['✈️ Статистика обычных маршрутов'],
+            ['🔍 Статистика гибких маршрутов'],
             ['◀️ Главное меню']
           ],
           one_time_keyboard: true,
@@ -60,34 +58,24 @@ class SettingsHandlers {
       };
 
       await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'stats_menu' };
+      this.userStates[chatId] = { step: 'stats_select_type' };
     } catch (error) {
       console.error('Ошибка статистики:', error);
       await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
     }
   }
 
-  async handleStatsMenuStep(chatId, text) {
+  async handleStatsTypeSelect(chatId, text) {
     const state = this.userStates[chatId];
-    if (!state || state.step !== 'stats_menu') return false;
+    if (!state || state.step !== 'stats_select_type') return false;
 
-    if (text === '📊 Общая аналитика') {
-      await this.handleGeneralAnalytics(chatId);
-      return true;
-    }
-
-    if (text === '✈️ По обычному маршруту') {
+    if (text === '✈️ Статистика обычных маршрутов') {
       await this.handleRegularRouteStats(chatId);
       return true;
     }
 
-    if (text === '🔍 По гибкому маршруту') {
+    if (text === '🔍 Статистика гибких маршрутов') {
       await this.handleFlexibleRouteStats(chatId);
-      return true;
-    }
-
-    if (text === '📈 Тренды цен') {
-      await this.handlePriceTrendsMenu(chatId);
       return true;
     }
 
@@ -100,80 +88,21 @@ class SettingsHandlers {
     return false;
   }
 
-  async handleGeneralAnalytics(chatId) {
-    try {
-      const userStats = await PriceAnalytics.getUserStats(chatId);
-      const hourAnalysis = await PriceAnalytics.analyzeByHour(chatId);
-      const weekdayAnalysis = await PriceAnalytics.compareWeekdaysVsWeekends(chatId);
-
-      let message = '📊 ОБЩАЯ АНАЛИТИКА\n\n';
-
-      if (userStats && userStats.total_prices > 0) {
-        message += `📈 Найдено цен: ${userStats.total_prices}\n`;
-        message += `💎 Лучшая: ${Math.floor(userStats.best_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя: ${Math.floor(userStats.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
-      }
-
-      if (hourAnalysis.length > 0) {
-        const bestHours = hourAnalysis
-          .filter(h => h.count >= 3)
-          .sort((a, b) => a.avg_price - b.avg_price)
-          .slice(0, 3);
-
-        if (bestHours.length > 0) {
-          message += `⏰ Лучшее время для поиска:\n`;
-          bestHours.forEach((h, i) => {
-            const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-            const timeRange = `${h.hour_of_day}:00-${(h.hour_of_day + 1)}:00`;
-            message += `${emoji} ${timeRange} → ${Math.floor(h.avg_price).toLocaleString('ru-RU')} ₽\n`;
-          });
-          message += `\n`;
-        }
-      }
-
-      if (weekdayAnalysis.length === 2) {
-        message += `📅 Будни vs Выходные:\n`;
-        weekdayAnalysis.forEach(day => {
-          const icon = day.period === 'Будни' ? '💼' : '🏖';
-          message += `${icon} ${day.period}: ${Math.floor(day.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-
-        const weekday = weekdayAnalysis.find(d => d.period === 'Будни');
-        const weekend = weekdayAnalysis.find(d => d.period === 'Выходные');
-        if (weekday && weekend) {
-          const diff = Math.abs(weekday.avg_price - weekend.avg_price);
-          const cheaper = weekday.avg_price < weekend.avg_price ? 'будни' : 'выходные';
-          message += `\n💡 В ${cheaper} дешевле на ${Math.floor(diff).toLocaleString('ru-RU')} ₽\n`;
-        }
-      }
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [['◀️ Назад к статистике']],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'stats_back' };
-    } catch (error) {
-      console.error('Ошибка общей аналитики:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки аналитики');
-    }
-  }
-
   async handleRegularRouteStats(chatId) {
     try {
       const routes = await Route.findByUser(chatId);
 
       if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов');
-        await this.handleStats(chatId);
+        await this.bot.sendMessage(
+          chatId,
+          '✈️ У вас нет обычных маршрутов',
+          this.getMainMenuKeyboard()
+        );
         return;
       }
 
-      let message = '✈️ Выберите маршрут для просмотра статистики:\n\n';
+      let message = '📊 ВЫБЕРИТЕ ОБЫЧНЫЙ МАРШРУТ\n\n';
+
       const keyboard = {
         reply_markup: {
           keyboard: [],
@@ -183,7 +112,12 @@ class SettingsHandlers {
       };
 
       routes.forEach((route, index) => {
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
+        // 🔥 ПОДРОБНОЕ НАЗВАНИЕ КАК ВЕЗДЕ
+        const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
+        const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
+        const airline = route.airline || 'Все';
+        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depDate}-${retDate}`;
+
         message += `${routeText}\n`;
         keyboard.reply_markup.keyboard.push([routeText]);
       });
@@ -203,12 +137,16 @@ class SettingsHandlers {
       const routes = await FlexibleRoute.findByUser(chatId);
 
       if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(chatId, '🔍 У вас нет гибких маршрутов');
-        await this.handleStats(chatId);
+        await this.bot.sendMessage(
+          chatId,
+          '🔍 У вас нет гибких маршрутов',
+          this.getMainMenuKeyboard()
+        );
         return;
       }
 
-      let message = '🔍 Выберите гибкий маршрут для просмотра статистики:\n\n';
+      let message = '📊 ВЫБЕРИТЕ ГИБКИЙ МАРШРУТ\n\n';
+
       const keyboard = {
         reply_markup: {
           keyboard: [],
@@ -218,10 +156,12 @@ class SettingsHandlers {
       };
 
       routes.forEach((route, index) => {
+        // 🔥 ПОДРОБНОЕ НАЗВАНИЕ КАК ВЕЗДЕ
         const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
         const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-        const airline = route.airline;
+        const airline = route.airline || 'Все';
         const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd} ${route.min_days}-${route.max_days}д`;
+
         message += `${routeText}\n`;
         keyboard.reply_markup.keyboard.push([routeText]);
       });
@@ -238,119 +178,66 @@ class SettingsHandlers {
 
   async showRouteStatistics(chatId, route) {
     try {
-      const stats = await PriceAnalytics.getRouteStats(route.origin, route.destination, chatId);
-      const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.origin, route.destination, chatId);
-      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.origin, route.destination, chatId);
+      const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
+      const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
+      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
+      const monthDayAnalysis = await PriceAnalytics.analyzeByDayOfMonthForRoute(route.id, chatId);
 
-      let message = `📊 СТАТИСТИКА МАРШРУТА\n\n`;
+      // 🔥 НОВОЕ: Топ-5 дней с минимальными/максимальными ценами
+      const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
+
+      let message = `📊 СТАТИСТИКА МАРШРУТА #${route.id}\n\n`;
       message += `✈️ ${route.origin} → ${route.destination}\n`;
       message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
 
       if (stats && stats.total_checks > 0) {
-        message += `📈 Проверок: ${stats.total_checks}\n`;
+        message += `📈 Всего проверок: ${stats.total_checks}\n`;
         message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
+      } else {
+        message += `📊 Недостаточно данных\n\n`;
       }
 
+      // Лучшее время
       if (hourAnalysis.length > 0) {
         const bestHour = hourAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
         message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   Средняя цена: ${Math.floor(bestHour.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `   Средняя: ${Math.floor(bestHour.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
+      // Лучший день недели
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
         const bestDay = dayAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
-        message += `📅 Лучший день: ${days[bestDay.day_of_week]}\n`;
-        message += `   Средняя цена: ${Math.floor(bestDay.avg_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
+        message += `   Средняя: ${Math.floor(bestDay.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['📈 Посмотреть тренд'],
-            ['◀️ Назад к статистике']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'route_stats_detail', route };
-    } catch (error) {
-      console.error('Ошибка статистики маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
-    }
-  }
-
-  async showFlexibleRouteStatistics(chatId, route) {
-    try {
-      const stats = await PriceAnalytics.getRouteStats(route.origin, route.destination, chatId);
-
-      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА\n\n`;
-      message += `🔍 ${route.origin} → ${route.destination}\n`;
-      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
-      message += `🛬 Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
-
-      if (stats && stats.total_checks > 0) {
-        message += `📈 Проверок: ${stats.total_checks}\n`;
-        message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n`;
-      } else {
-        message += `📊 Недостаточно данных для статистики`;
-      }
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['📈 Посмотреть тренд'],
-            ['◀️ Назад к статистике']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'flex_stats_detail', route };
-    } catch (error) {
-      console.error('Ошибка статистики гибкого маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
-    }
-  }
-
-  async showPriceTrend(chatId, route, isFlexible = false) {
-    try {
-      const trend = await PriceAnalytics.getPriceTrend(route.origin, route.destination, 30);
-
-      if (!trend || trend.length === 0) {
-        await this.bot.sendMessage(chatId, '📈 Недостаточно данных для построения тренда');
-        return;
-      }
-
-      let message = `📈 ТРЕНД ЦЕН (30 ДНЕЙ)\n\n`;
-      message += `${route.origin} → ${route.destination}\n\n`;
-
-      trend.slice(-10).forEach(day => {
-        const date = new Date(day.date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-        const avgPrice = Math.floor(day.avg_price);
-        const minPrice = Math.floor(day.min_price);
-        message += `${date}: ${avgPrice.toLocaleString('ru-RU')} ₽`;
-        if (minPrice < avgPrice) {
-          message += ` (мин: ${minPrice.toLocaleString('ru-RU')} ₽)`;
-        }
+      // 🔥 ТОП-5 дней с минимальными ценами
+      if (dailyStats.minDays && dailyStats.minDays.length > 0) {
+        message += `📅 Лучшие дни (мин. цены):\n`;
+        dailyStats.minDays.slice(0, 5).forEach((day, i) => {
+          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📅';
+          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
+        });
         message += `\n`;
-      });
+      }
 
-      const avgAll = trend.reduce((sum, d) => sum + d.avg_price, 0) / trend.length;
-      message += `\n📊 Средняя за период: ${Math.floor(avgAll).toLocaleString('ru-RU')} ₽`;
+      // 🔥 ТОП-5 дней с максимальными ценами
+      if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
+        message += `📈 Худшие дни (макс. цены):\n`;
+        dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
+          const emoji = i === 0 ? '🔥' : i === 1 ? '📈' : '📈';
+          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
+        });
+      }
 
       const keyboard = {
         reply_markup: {
-          keyboard: [['◀️ Назад к статистике']],
+          keyboard: [
+            ['◀️ Назад к статистике']
+          ],
           one_time_keyboard: true,
           resize_keyboard: true
         }
@@ -359,164 +246,202 @@ class SettingsHandlers {
       await this.bot.sendMessage(chatId, message, keyboard);
       this.userStates[chatId] = { step: 'stats_back' };
     } catch (error) {
-      console.error('Ошибка тренда:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки тренда');
+      console.error('Ошибка статистики маршрута:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
     }
   }
 
-  async handlePriceTrendsMenu(chatId) {
+  async showFlexibleRouteStatistics(chatId, route) {
     try {
-      const routes = await Route.findByUser(chatId);
-      const flexRoutes = await FlexibleRoute.findByUser(chatId);
+      const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
+      const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
+      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
+      const monthDayAnalysis = await PriceAnalytics.analyzeByDayOfMonthForRoute(route.id, chatId);
 
-      if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
-        await this.bot.sendMessage(chatId, '📈 У вас нет маршрутов для просмотра трендов');
-        return;
+      // 🔥 Топ дней для гибкого маршрута
+      const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
+
+      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА #${route.id}\n\n`;
+      message += `🔍 ${route.origin} → ${route.destination}\n`;
+      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
+      message += `🛬 Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
+
+      if (stats && stats.total_checks > 0) {
+        message += `📈 Всего проверок: ${stats.total_checks}\n`;
+        message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
+      } else {
+        message += `📊 Недостаточно данных\n\n`;
       }
 
-      let message = '📈 Выберите маршрут для просмотра тренда:\n\n';
+      // Лучшее время
+      if (hourAnalysis.length > 0) {
+        const bestHour = hourAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
+        message += `   Средняя: ${Math.floor(bestHour.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+      }
+
+      // Лучший день недели
+      if (dayAnalysis.length > 0) {
+        const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+        const bestDay = dayAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
+        message += `   Средняя: ${Math.floor(bestDay.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+      }
+
+      // 🔥 ТОП-5 лучших дней (мин. цены)
+      if (dailyStats.minDays && dailyStats.minDays.length > 0) {
+        message += `📅 Лучшие дни (мин. цены):\n`;
+        dailyStats.minDays.slice(0, 5).forEach((day, i) => {
+          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📅';
+          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
+        });
+        message += `\n`;
+      }
+
+      // 🔥 ТОП-5 худших дней (макс. цены)
+      if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
+        message += `📈 Худшие дни (макс. цены):\n`;
+        dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
+          const emoji = i === 0 ? '🔥' : i === 1 ? '📈' : '📈';
+          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
+        });
+      }
+
       const keyboard = {
         reply_markup: {
-          keyboard: [],
+          keyboard: [
+            ['◀️ Назад к статистике']
+          ],
           one_time_keyboard: true,
           resize_keyboard: true
         }
       };
 
-      const allRoutes = [];
-
-      if (routes && routes.length > 0) {
-        routes.forEach((route, index) => {
-          const routeText = `${allRoutes.length + 1}. ✈️ ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
-          message += `${routeText}\n`;
-          keyboard.reply_markup.keyboard.push([routeText]);
-          allRoutes.push({ ...route, isFlexible: false });
-        });
-      }
-
-      if (flexRoutes && flexRoutes.length > 0) {
-        flexRoutes.forEach((route, index) => {
-          const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
-          const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-          const airline = route.airline;
-          const routeText = `${allRoutes.length + 1}. 🔍 ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
-          message += `${routeText}\n`;
-          keyboard.reply_markup.keyboard.push([routeText]);
-          allRoutes.push({ ...route, isFlexible: true });
-        });
-      }
-
-      keyboard.reply_markup.keyboard.push(['◀️ Назад к статистике']);
-
       await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'trend_select', routes: allRoutes };
+      this.userStates[chatId] = { step: 'stats_back' };
     } catch (error) {
-      console.error('Ошибка:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
+      console.error('Ошибка статистики гибкого маршрута:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
     }
   }
 
-  async getBaseStats(chatId) {
-    return new Promise((resolve) => {
-      db.get(`
-                SELECT
-                    (SELECT COUNT(*) FROM routes WHERE chat_id = ?) as routes,
-                    (SELECT COUNT(*) FROM flexible_routes WHERE chat_id = ?) as flexible,
-                    (SELECT COALESCE(total_alerts, 0) FROM user_stats WHERE chat_id = ?) as alerts,
-                    (SELECT COALESCE(total_savings, 0) FROM user_stats WHERE chat_id = ?) as savings
-            `, [chatId, chatId, chatId, chatId], (err, row) => {
-        resolve(row || { routes: 0, flexible: 0, alerts: 0, savings: 0 });
+  async handleSettings(chatId) {
+    return new Promise((resolve, reject) => {
+      db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, settings) => {
+        if (err) {
+          this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
+          reject(err);
+          return;
+        }
+
+        const s = settings || {
+          notify_on_drop: 1,
+          notify_on_new_min: 1,
+          quiet_hours_start: null,
+          quiet_hours_end: null,
+          check_frequency: 2
+        };
+
+        const message =
+          '⚙️ НАСТРОЙКИ\n\n' +
+          `🔔 Уведомления при падении цены: ${s.notify_on_drop ? '✅ Вкл' : '❌ Выкл'}\n` +
+          `⭐ Уведомления о новом минимуме: ${s.notify_on_new_min ? '✅ Вкл' : '❌ Выкл'}\n` +
+          `🌙 Тихие часы: ${s.quiet_hours_start && s.quiet_hours_end ? `${s.quiet_hours_start}:00 - ${s.quiet_hours_end}:00` : 'Не установлены'}\n` +
+          `⏰ Частота проверки: каждые ${s.check_frequency} часа\n\n` +
+          'Что изменить?';
+
+        const keyboard = {
+          reply_markup: {
+            keyboard: [
+              ['🔔 Уведомления'],
+              ['🌙 Тихие часы'],
+              ['⏰ Частота проверки'],
+              ['◀️ Главное меню']
+            ],
+            one_time_keyboard: true,
+            resize_keyboard: true
+          }
+        };
+
+        this.bot.sendMessage(chatId, message, keyboard);
+        this.userStates[chatId] = { step: 'settings_menu' };
+        resolve();
       });
     });
   }
 
-  handleSettings(chatId) {
-    db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, settings) => {
-      const s = settings || {
-        quiet_hours_start: 23,
-        quiet_hours_end: 8,
-        check_frequency: 2,
-        notify_on_drop: 1,
-        notify_on_new_min: 1,
-        notify_on_check: 0
-      };
+  handleSettingsStep(chatId, text) {
+    if (text === '🔔 Уведомления') {
+      this.handleNotifications(chatId, null);
+      return true;
+    }
 
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['🔕 Тихие часы', '⏰ Частота проверок'],
-            ['🔔 Уведомления'],
-            ['◀️ Главное меню']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
+    if (text === '🌙 Тихие часы') {
+      this.handleQuietHours(chatId, null);
+      return true;
+    }
 
-      const message =
-        `⚙️ НАСТРОЙКИ\n\n` +
-        `🔕 Тихие часы: ${s.quiet_hours_start}:00 - ${s.quiet_hours_end}:00\n` +
-        `⏰ Частота проверок: каждые ${s.check_frequency} ч\n` +
-        `🔔 Уведомления:\n` +
-        `  ${s.notify_on_drop ? '✅' : '⬜'} Цена ниже порога\n` +
-        `  ${s.notify_on_new_min ? '✅' : '⬜'} Новый минимум\n` +
-        `  ${s.notify_on_check ? '✅' : '⬜'} Каждая проверка\n\n` +
-        `Выберите что изменить:`;
+    if (text === '⏰ Частота проверки') {
+      this.handleFrequency(chatId, null);
+      return true;
+    }
 
-      this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'settings_menu', settings: s };
-    });
+    if (text === '◀️ Главное меню') {
+      delete this.userStates[chatId];
+      this.bot.sendMessage(chatId, 'Главное меню:', this.getMainMenuKeyboard());
+      return true;
+    }
+
+    return false;
   }
 
-  handleSettingsStep(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.step !== 'settings_menu') return false;
+  handleNotifications(chatId, text) {
+    if (!text) {
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['✅ Включить все'],
+            ['❌ Выключить все'],
+            ['◀️ Назад к настройкам']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
 
-    if (text === '🔕 Тихие часы') {
-      this.bot.sendMessage(
-        chatId,
-        `🔕 Настройка тихих часов\n\n` +
-        `Текущие: ${state.settings.quiet_hours_start}:00 - ${state.settings.quiet_hours_end}:00\n\n` +
-        `Введите новые часы в формате: ЧЧ-ЧЧ\n` +
-        `Например: 23-08 (с 23:00 до 08:00)`,
-        { reply_markup: { remove_keyboard: true } }
+      this.bot.sendMessage(chatId, '🔔 Управление уведомлениями:', keyboard);
+      this.userStates[chatId] = { step: 'settings_notify' };
+      return true;
+    }
+
+    if (text === '✅ Включить все') {
+      db.run(
+        'UPDATE user_settings SET notify_on_drop = 1, notify_on_new_min = 1 WHERE chat_id = ?',
+        [chatId],
+        () => {
+          this.bot.sendMessage(chatId, '✅ Все уведомления включены', this.getMainMenuKeyboard());
+          delete this.userStates[chatId];
+        }
       );
-      state.step = 'settings_quiet';
       return true;
     }
 
-    if (text === '⏰ Частота проверок') {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['Каждые 2 часа', 'Каждые 4 часа'],
-            ['Каждые 6 часов'],
-            ['◀️ Отмена']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
+    if (text === '❌ Выключить все') {
+      db.run(
+        'UPDATE user_settings SET notify_on_drop = 0, notify_on_new_min = 0 WHERE chat_id = ?',
+        [chatId],
+        () => {
+          this.bot.sendMessage(chatId, '❌ Все уведомления выключены', this.getMainMenuKeyboard());
+          delete this.userStates[chatId];
         }
-      };
-      this.bot.sendMessage(chatId, '⏰ Выберите частоту проверок:', keyboard);
-      state.step = 'settings_frequency';
+      );
       return true;
     }
 
-    if (text === '🔔 Уведомления') {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            [`${state.settings.notify_on_drop ? '✅' : '⬜'} Цена ниже порога`],
-            [`${state.settings.notify_on_new_min ? '✅' : '⬜'} Новый минимум`],
-            [`${state.settings.notify_on_check ? '✅' : '⬜'} Каждая проверка`],
-            ['◀️ Назад']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-      this.bot.sendMessage(chatId, '🔔 Переключите нужные уведомления:', keyboard);
-      state.step = 'settings_notify';
+    if (text === '◀️ Назад к настройкам') {
+      this.handleSettings(chatId);
       return true;
     }
 
@@ -524,138 +449,115 @@ class SettingsHandlers {
   }
 
   handleQuietHours(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.step !== 'settings_quiet') return false;
-
-    const match = text.match(/^(\d{1,2})-(\d{1,2})$/);
-    if (!match) {
-      this.bot.sendMessage(chatId, '❌ Неверный формат. Используйте: ЧЧ-ЧЧ (например, 23-08)');
-      return true;
-    }
-
-    const start = parseInt(match[1]);
-    const end = parseInt(match[2]);
-
-    if (start < 0 || start > 23 || end < 0 || end > 23) {
-      this.bot.sendMessage(chatId, '❌ Часы должны быть от 0 до 23');
-      return true;
-    }
-
-    db.run(
-      `INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end)
-       VALUES (?, ?, ?)
-           ON CONFLICT(chat_id) DO
-      UPDATE SET quiet_hours_start = ?, quiet_hours_end = ?`,
-      [chatId, start, end, start, end],
-      (err) => {
-        if (!err) {
-          this.bot.sendMessage(chatId, `✅ Тихие часы обновлены: ${start}:00 - ${end}:00`);
+    if (!text) {
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['22:00 - 08:00'],
+            ['23:00 - 09:00'],
+            ['❌ Отключить тихие часы'],
+            ['◀️ Назад к настройкам']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
         }
-        delete this.userStates[chatId];
-      }
-    );
-    return true;
-  }
+      };
 
-  handleFrequency(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.step !== 'settings_frequency') return false;
-
-    if (text === '◀️ Отмена') {
-      delete this.userStates[chatId];
-      this.bot.sendMessage(chatId, 'Отменено');
+      this.bot.sendMessage(chatId, '🌙 Установите тихие часы (время Екатеринбурга):', keyboard);
+      this.userStates[chatId] = { step: 'settings_quiet' };
       return true;
     }
 
-    let freq = 2;
-    if (text.includes('4')) freq = 4;
-    else if (text.includes('6')) freq = 6;
-
-    db.run(
-      `INSERT INTO user_settings (chat_id, check_frequency)
-             VALUES (?, ?)
-             ON CONFLICT(chat_id) DO
-             UPDATE SET check_frequency = ?`,
-      [chatId, freq, freq],
-      (err) => {
-        if (!err) {
-          this.bot.sendMessage(
-            chatId,
-            `✅ Частота проверок: каждые ${freq} часа\n\n⚠️ Требуется перезапуск бота`
-          );
+    if (text === '❌ Отключить тихие часы') {
+      db.run(
+        'UPDATE user_settings SET quiet_hours_start = NULL, quiet_hours_end = NULL WHERE chat_id = ?',
+        [chatId],
+        () => {
+          this.bot.sendMessage(chatId, '✅ Тихие часы отключены', this.getMainMenuKeyboard());
+          delete this.userStates[chatId];
         }
-        delete this.userStates[chatId];
-      }
-    );
-    return true;
-  }
+      );
+      return true;
+    }
 
-  handleNotifications(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.step !== 'settings_notify') return false;
-
-    if (text === '◀️ Назад') {
+    if (text === '◀️ Назад к настройкам') {
       this.handleSettings(chatId);
       return true;
     }
 
-    let field = '';
-    let value = 0;
+    const match = text.match(/(\d{2}):00 - (\d{2}):00/);
+    if (match) {
+      const start = parseInt(match[1]);
+      const end = parseInt(match[2]);
 
-    if (text.includes('Цена ниже порога')) {
-      field = 'notify_on_drop';
-      value = text.includes('✅') ? 0 : 1;
-    } else if (text.includes('Новый минимум')) {
-      field = 'notify_on_new_min';
-      value = text.includes('✅') ? 0 : 1;
-    } else if (text.includes('Каждая проверка')) {
-      field = 'notify_on_check';
-      value = text.includes('✅') ? 0 : 1;
-    }
-
-    if (field) {
       db.run(
-        `INSERT INTO user_settings (chat_id, ${field})
-                 VALUES (?, ?)
-                 ON CONFLICT(chat_id) DO
-                 UPDATE SET ${field} = ?`,
-        [chatId, value, value],
-        (err) => {
-          if (err) {
-            console.error('Ошибка обновления настроек:', err);
-            this.bot.sendMessage(chatId, '❌ Ошибка сохранения настроек');
-            return;
-          }
-
-          db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, freshSettings) => {
-            if (err || !freshSettings) {
-              console.error('Ошибка чтения настроек:', err);
-              this.bot.sendMessage(chatId, '❌ Ошибка чтения настроек');
-              return;
-            }
-
-            state.settings = freshSettings;
-
-            const keyboard = {
-              reply_markup: {
-                keyboard: [
-                  [`${freshSettings.notify_on_drop ? '✅' : '⬜'} Цена ниже порога`],
-                  [`${freshSettings.notify_on_new_min ? '✅' : '⬜'} Новый минимум`],
-                  [`${freshSettings.notify_on_check ? '✅' : '⬜'} Каждая проверка`],
-                  ['◀️ Назад']
-                ],
-                one_time_keyboard: true,
-                resize_keyboard: true
-              }
-            };
-
-            this.bot.sendMessage(chatId, '✅ Обновлено!\n\n🔔 Переключите нужные уведомления:', keyboard);
-          });
+        'UPDATE user_settings SET quiet_hours_start = ?, quiet_hours_end = ? WHERE chat_id = ?',
+        [start, end, chatId],
+        () => {
+          this.bot.sendMessage(
+            chatId,
+            `✅ Тихие часы установлены: ${start}:00 - ${end}:00`,
+            this.getMainMenuKeyboard()
+          );
+          delete this.userStates[chatId];
         }
       );
+      return true;
     }
 
-    return true;
+    return false;
+  }
+
+  handleFrequency(chatId, text) {
+    if (!text) {
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['⏰ Каждый час'],
+            ['⏰ Каждые 2 часа'],
+            ['⏰ Каждые 3 часа'],
+            ['⏰ Каждые 6 часов'],
+            ['◀️ Назад к настройкам']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      this.bot.sendMessage(chatId, '⏰ Как часто проверять цены?', keyboard);
+      this.userStates[chatId] = { step: 'settings_frequency' };
+      return true;
+    }
+
+    if (text === '◀️ Назад к настройкам') {
+      this.handleSettings(chatId);
+      return true;
+    }
+
+    const match = text.match(/(\d+)/);
+    if (match) {
+      const hours = parseInt(match[1]);
+
+      db.run(
+        'UPDATE user_settings SET check_frequency = ? WHERE chat_id = ?',
+        [hours, chatId],
+        () => {
+          this.bot.sendMessage(
+            chatId,
+            `✅ Частота проверки установлена: каждые ${hours} часа`,
+            this.getMainMenuKeyboard()
+          );
+          delete this.userStates[chatId];
+        }
+      );
+      return true;
+    }
+
+    return false;
+  }
+
+  handleStatsMenuStep(chatId, text) {
+    return false;
   }
 }
 

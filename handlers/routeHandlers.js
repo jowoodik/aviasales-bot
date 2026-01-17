@@ -19,11 +19,10 @@ class RouteHandlers {
         keyboard: [
           ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
           ['📋 Мои маршруты', '🔍 Мои гибкие'],
-          ['📊 Лучшие варианты', '📈 История цен'],
-          ['✏️ Редактировать', '🗑 Удалить'],
-          ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', '🎯 Проверить один'],
-          ['ℹ️ Помощь']
+          ['💎 Лучшее сейчас', '✏️ Редактировать'],
+          ['📊 Статистика', '🗑 Удалить'],
+          ['⚙️ Настройки', '✅ Проверить сейчас'],
+          ['ℹ️ Помощь'],
         ],
         resize_keyboard: true,
         persistent: true
@@ -39,20 +38,22 @@ class RouteHandlers {
       return;
     }
 
-    let message = '✈️ <b>ВАШИ МАРШРУТЫ</b>\n\n';
+    let message = '✈️ ВАШИ МАРШРУТЫ\n\n';
 
     routes.forEach((route, index) => {
       const status = route.is_paused ? '⏸️' : '✅';
       const passengersText = Formatters.formatPassengers(route.adults, route.children);
       const baggageIcon = route.baggage ? '🧳' : '';
 
-      message += `${index + 1}. ${status} <b>${route.origin} → ${route.destination}</b>\n`;
+      message += `${index + 1}. ${status} ${route.origin} → ${route.destination}\n`;
       message += `   📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}\n`;
       message += `   👥 ${passengersText} ${baggageIcon}\n`;
       message += `   💰 ${Formatters.formatPrice(route.threshold_price, route.currency)}\n`;
+
       if (route.airline) {
         message += `   ✈️ ${route.airline}\n`;
       }
+
       message += '\n';
     });
 
@@ -134,6 +135,7 @@ class RouteHandlers {
         `✅ Вылет: ${data.origin}\n\nТеперь введите город назначения:`,
         keyboard
       );
+
       state.step = 'destination';
       return true;
     }
@@ -157,6 +159,7 @@ class RouteHandlers {
         `Введите дату вылета (ДД-ММ-ГГГГ), например: 25-02-2026`,
         { reply_markup: { remove_keyboard: true } }
       );
+
       state.step = 'departure_date';
       return true;
     }
@@ -167,6 +170,7 @@ class RouteHandlers {
         this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД-ММ-ГГГГ, например, 25-02-2026');
         return true;
       }
+
       data.departure_date = date;
       this.bot.sendMessage(chatId, `✅ Вылет: ${DateUtils.formatDateDisplay(date)}\n\nТеперь введите дату возврата:`);
       state.step = 'return_date';
@@ -179,10 +183,12 @@ class RouteHandlers {
         this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте формат ДД-ММ-ГГГГ');
         return true;
       }
+
       if (date <= data.departure_date) {
         this.bot.sendMessage(chatId, '❌ Дата возврата должна быть позже даты вылета. Попробуйте еще раз:');
         return true;
       }
+
       data.return_date = date;
 
       const keyboard = {
@@ -202,6 +208,7 @@ class RouteHandlers {
         `✅ Возврат: ${DateUtils.formatDateDisplay(date)}\n\nСколько взрослых?`,
         keyboard
       );
+
       state.step = 'adults';
       return true;
     }
@@ -298,6 +305,7 @@ class RouteHandlers {
         '✈️ Укажите авиакомпанию или "Любая":',
         keyboard
       );
+
       state.step = 'airline';
       return true;
     }
@@ -342,6 +350,7 @@ class RouteHandlers {
         '🔄 Сколько пересадок допустимо?',
         keyboard
       );
+
       state.step = 'max_stops';
       return true;
     }
@@ -355,7 +364,7 @@ class RouteHandlers {
 
       if (text.includes('0') || text.includes('прямые')) {
         data.max_stops = 0;
-        data.max_layover_hours = 0; // Нет пересадок = не нужно время
+        data.max_layover_hours = 0;
       } else if (text.includes('1')) {
         data.max_stops = 1;
       } else if (text.includes('2')) {
@@ -366,7 +375,6 @@ class RouteHandlers {
         data.max_stops = 99;
       }
 
-      // Если выбраны прямые рейсы (0 пересадок), пропускаем вопрос о времени
       if (data.max_stops === 0) {
         this.bot.sendMessage(
           chatId,
@@ -377,7 +385,6 @@ class RouteHandlers {
         return true;
       }
 
-      // Если пересадки допустимы, спрашиваем о времени
       const keyboard = {
         reply_markup: {
           keyboard: [
@@ -395,6 +402,7 @@ class RouteHandlers {
         '⏱ Максимальная длительность пересадки (по умолчанию 5)?',
         keyboard
       );
+
       state.step = 'max_layover';
       return true;
     }
@@ -419,30 +427,7 @@ class RouteHandlers {
         `✅ Макс. пересадка: ${hours} часов\n\n💰 Теперь введите пороговую цену в рублях (например, 50000):`,
         { reply_markup: { remove_keyboard: true } }
       );
-      state.step = 'threshold';
-      return true;
-    }
 
-    if (step === 'max_layover') {
-      if (text === '🔙 Отмена') {
-        delete this.userStates[chatId];
-        this.bot.sendMessage(chatId, 'Отменено', this.getMainMenuKeyboard());
-        return true;
-      }
-
-      const hours = parseInt(text.replace(/\D/g, ''));
-      if (isNaN(hours) || hours <= 0 || hours > 48) {
-        this.bot.sendMessage(chatId, '❌ Неверное значение. Введите число от 1 до 48');
-        return true;
-      }
-
-      data.max_layover_hours = hours;
-
-      this.bot.sendMessage(
-        chatId,
-        `✅ Макс. пересадка: ${hours} часов\n\n💰 Теперь введите пороговую цену в рублях (например, 50000):`,
-        { reply_markup: { remove_keyboard: true } }
-      );
       state.step = 'threshold';
       return true;
     }
@@ -498,6 +483,7 @@ class RouteHandlers {
     }
 
     let message = '✏️ Выберите маршрут для редактирования:\n\n';
+
     const keyboard = {
       reply_markup: {
         keyboard: [],
@@ -527,6 +513,7 @@ class RouteHandlers {
     }
 
     let message = '🗑 Выберите маршрут для удаления:\n\n';
+
     const keyboard = {
       reply_markup: {
         keyboard: [],
@@ -545,289 +532,6 @@ class RouteHandlers {
 
     this.bot.sendMessage(chatId, message, keyboard);
     this.userStates[chatId] = { type: 'regular', step: 'delete_confirm', routes };
-  }
-
-  async handleShowHistory(chatId) {
-    const Route = require('../models/Route');
-    const FlexibleRoute = require('../models/FlexibleRoute');
-
-    try {
-      const routes = await Route.findByUser(chatId);
-      const flexRoutes = await FlexibleRoute.findByUser(chatId);
-
-      if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
-        this.bot.sendMessage(chatId, '📈 У вас нет маршрутов для просмотра истории', this.getMainMenuKeyboard());
-        return;
-      }
-
-      let message = '📈 Выберите маршрут для просмотра истории цен:\n\n';
-      const keyboard = {
-        reply_markup: {
-          keyboard: [],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      const allRoutes = [];
-
-      // Добавляем обычные маршруты
-      if (routes && routes.length > 0) {
-        routes.forEach((route, index) => {
-          const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
-          const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
-          const routeText = `${allRoutes.length + 1}. ✈️ ${route.origin}→${route.destination} ${depDate}-${retDate}`;
-          message += `${routeText}\n`;
-          keyboard.reply_markup.keyboard.push([routeText]);
-          allRoutes.push({ ...route, type: 'regular' });
-        });
-      }
-
-      // Добавляем гибкие маршруты
-      if (flexRoutes && flexRoutes.length > 0) {
-        flexRoutes.forEach((route, index) => {
-          const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
-          const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-          const airline = route.airline;
-          const routeText = `${allRoutes.length + 1}. 🔍 ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
-          message += `${routeText}\n`;
-          keyboard.reply_markup.keyboard.push([routeText]);
-          allRoutes.push({ ...route, type: 'flexible' });
-        });
-      }
-
-      keyboard.reply_markup.keyboard.push(['◀️ Главное меню']);
-
-      this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = {
-        step: 'history_select',
-        routes: allRoutes
-      };
-    } catch (error) {
-      console.error('Ошибка истории цен:', error);
-      this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
-    }
-  }
-
-  async showRegularRouteHistory(chatId, route) {
-    try {
-      const PriceAnalytics = require('../services/PriceAnalytics');
-      const history = await PriceAnalytics.getRegularRoutePriceHistory(route.id, chatId, 30);
-
-      if (!history || history.length === 0) {
-        await this.bot.sendMessage(chatId, '📈 Нет истории цен для этого маршрута.\n\nИстория начнет собираться после первой проверки.', this.getMainMenuKeyboard());
-        return;
-      }
-
-      let message = `📈 ИСТОРИЯ ИЗМЕНЕНИЯ ЦЕН\n\n`;
-      message += `✈️ ${route.origin} → ${route.destination}\n`;
-      message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
-
-      // Показываем последние 15 изменений
-      message += `📊 Последние ${Math.min(history.length, 15)} проверок:\n\n`;
-
-      history.slice(0, 15).forEach((h, i) => {
-        const date = new Date(h.found_at).toLocaleString('ru-RU', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-        const priceChange = i < history.length - 1 ?
-          (h.price - history[i + 1].price) : 0;
-
-        let changeIcon = '';
-        if (priceChange > 0) changeIcon = '📈 ';
-        else if (priceChange < 0) changeIcon = '📉 ';
-        else changeIcon = '➖ ';
-
-        message += `${changeIcon}${Formatters.formatPrice(h.price, route.currency)}\n`;
-        message += `   ✈️ ${h.airline} | 🕒 ${date}\n`;
-
-        if (priceChange !== 0) {
-          message += `   ${priceChange > 0 ? '⬆️' : '⬇️'} ${Math.abs(priceChange).toLocaleString('ru-RU')} ₽\n`;
-        }
-        message += `\n`;
-      });
-
-      // Статистика
-      const prices = history.map(h => h.price);
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-
-      message += `📊 Статистика:\n`;
-      message += `   💎 Минимум: ${minPrice.toLocaleString('ru-RU')} ₽\n`;
-      message += `   📈 Максимум: ${maxPrice.toLocaleString('ru-RU')} ₽\n`;
-      message += `   📊 Средняя: ${Math.floor(avgPrice).toLocaleString('ru-RU')} ₽\n`;
-      message += `   🎯 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}`;
-
-      await this.bot.sendMessage(chatId, message, this.getMainMenuKeyboard());
-    } catch (error) {
-      console.error('Ошибка истории обычного маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
-    }
-  }
-
-  async showFlexibleRouteHistory(chatId, route) {
-    try {
-      const PriceAnalytics = require('../services/PriceAnalytics');
-
-      // Сначала спросим - сводная по дням или детальная
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['📊 Сводка по дням'],
-            ['📋 Детальная история'],
-            ['◀️ Главное меню']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      await this.bot.sendMessage(
-        chatId,
-        `📈 История цен для гибкого маршрута:\n\n` +
-        `🔍 ${route.origin} → ${route.destination}\n` +
-        `📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n` +
-        `🛬 ${route.min_days}-${route.max_days} дней\n\n` +
-        `Выберите формат:`,
-        keyboard
-      );
-
-      this.userStates[chatId] = {
-        step: 'flex_history_type',
-        route: route
-      };
-    } catch (error) {
-      console.error('Ошибка истории гибкого маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
-    }
-  }
-
-  async showFlexibleRouteDailySummary(chatId, route) {
-    try {
-      const PriceAnalytics = require('../services/PriceAnalytics');
-      const history = await PriceAnalytics.getFlexibleRoutePriceHistory(route.id, 30);
-
-      if (!history || history.length === 0) {
-        await this.bot.sendMessage(chatId, '📈 Нет истории цен для этого маршрута.\n\nИстория начнет собираться после первой проверки.', this.getMainMenuKeyboard());
-        return;
-      }
-
-      let message = `📈 ИСТОРИЯ ИЗМЕНЕНИЯ ЦЕН (СВОДКА ПО ДНЯМ)\n\n`;
-      message += `🔍 ${route.origin} → ${route.destination}\n`;
-      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n\n`;
-
-      message += `📊 Последние ${Math.min(history.length, 20)} дней:\n\n`;
-
-      history.slice(0, 20).forEach((h, i) => {
-        const date = new Date(h.date).toLocaleDateString('ru-RU', {
-          day: '2-digit',
-          month: '2-digit'
-        });
-
-        const priceChange = i < history.length - 1 ?
-          (h.min_price - history[i + 1].min_price) : 0;
-
-        let changeIcon = '';
-        if (priceChange > 0) changeIcon = '📈';
-        else if (priceChange < 0) changeIcon = '📉';
-        else changeIcon = '➖';
-
-        message += `${changeIcon} ${date}:\n`;
-        message += `   💎 Мин: ${Math.floor(h.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `   📊 Ср: ${Math.floor(h.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `   📈 Макс: ${Math.floor(h.max_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `   🔍 Проверок: ${h.checks_count}\n`;
-
-        if (priceChange !== 0) {
-          message += `   ${priceChange > 0 ? '⬆️' : '⬇️'} ${Math.abs(Math.floor(priceChange)).toLocaleString('ru-RU')} ₽\n`;
-        }
-        message += `\n`;
-      });
-
-      // Статистика
-      const minPrices = history.map(h => h.min_price);
-      const overallMin = Math.min(...minPrices);
-      const overallMax = Math.max(...minPrices);
-      const avgMin = minPrices.reduce((a, b) => a + b, 0) / minPrices.length;
-
-      message += `📊 Общая статистика:\n`;
-      message += `   💎 Лучшая цена: ${Math.floor(overallMin).toLocaleString('ru-RU')} ₽\n`;
-      message += `   📈 Худшая цена: ${Math.floor(overallMax).toLocaleString('ru-RU')} ₽\n`;
-      message += `   📊 Средняя: ${Math.floor(avgMin).toLocaleString('ru-RU')} ₽\n`;
-      message += `   🎯 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}`;
-
-      await this.bot.sendMessage(chatId, message, this.getMainMenuKeyboard());
-    } catch (error) {
-      console.error('Ошибка сводки:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
-    }
-  }
-
-  async showFlexibleRouteDetailedHistory(chatId, route) {
-    try {
-      const PriceAnalytics = require('../services/PriceAnalytics');
-      const history = await PriceAnalytics.getFlexibleRouteDetailedHistory(route.id, 20);
-
-      if (!history || history.length === 0) {
-        await this.bot.sendMessage(chatId, '📈 Нет истории цен для этого маршрута.\n\nИстория начнет собираться после первой проверки.', this.getMainMenuKeyboard());
-        return;
-      }
-
-      let message = `📈 ДЕТАЛЬНАЯ ИСТОРИЯ ЦЕН\n\n`;
-      message += `🔍 ${route.origin} → ${route.destination}\n\n`;
-
-      message += `📋 Последние ${Math.min(history.length, 15)} найденных вариантов:\n\n`;
-
-      history.slice(0, 15).forEach((h, i) => {
-        const foundDate = new Date(h.found_at).toLocaleString('ru-RU', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit'
-        });
-
-        const priceChange = i < history.length - 1 ?
-          (h.total_price - history[i + 1].total_price) : 0;
-
-        let changeIcon = '';
-        if (priceChange > 0) changeIcon = '📈';
-        else if (priceChange < 0) changeIcon = '📉';
-        else changeIcon = '➖';
-
-        message += `${changeIcon} ${h.total_price.toLocaleString('ru-RU')} ₽\n`;
-        message += `   ✈️ ${h.airline}\n`;
-        message += `   📅 ${DateUtils.formatDateDisplay(h.departure_date)} → ${DateUtils.formatDateDisplay(h.return_date)}\n`;
-        message += `   🏝 ${h.days_in_country} дней\n`;
-        message += `   🕒 ${foundDate}\n`;
-
-        if (priceChange !== 0) {
-          message += `   ${priceChange > 0 ? '⬆️' : '⬇️'} ${Math.abs(priceChange).toLocaleString('ru-RU')} ₽\n`;
-        }
-        message += `\n`;
-      });
-
-      // Статистика
-      const prices = history.map(h => h.total_price);
-      const minPrice = Math.min(...prices);
-      const maxPrice = Math.max(...prices);
-      const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-
-      message += `📊 Статистика:\n`;
-      message += `   💎 Минимум: ${Math.floor(minPrice).toLocaleString('ru-RU')} ₽\n`;
-      message += `   📈 Максимум: ${Math.floor(maxPrice).toLocaleString('ru-RU')} ₽\n`;
-      message += `   📊 Средняя: ${Math.floor(avgPrice).toLocaleString('ru-RU')} ₽\n`;
-      message += `   🎯 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}`;
-
-      await this.bot.sendMessage(chatId, message, this.getMainMenuKeyboard());
-    } catch (error) {
-      console.error('Ошибка детальной истории:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки истории', this.getMainMenuKeyboard());
-    }
   }
 
   async handleCheckPrice(chatId, routeId) {
@@ -853,7 +557,6 @@ class RouteHandlers {
         max_stops: route.max_stops
       });
 
-      // Puppeteer
       const puppeteer = new PuppeteerPricer(false);
       const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
       const result = await puppeteer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours);
@@ -863,9 +566,9 @@ class RouteHandlers {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);
         const baggageText = route.baggage ? '🧳 С багажом' : '🎒 Без багажа';
 
-        let message = `💰 <b>ТЕКУЩАЯ ЦЕНА</b>\n\n`;
+        let message = `💰 ТЕКУЩАЯ ЦЕНА\n\n`;
         message += `✈️ ${route.origin} → ${route.destination}\n`;
-        message += `💵 <b>${Formatters.formatPrice(result.price, route.currency)}</b>\n\n`;
+        message += `💵 ${Formatters.formatPrice(result.price, route.currency)}\n\n`;
         message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}\n`;
         message += `👥 ${passengersText}\n`;
         message += `${baggageText}\n`;
@@ -873,12 +576,13 @@ class RouteHandlers {
         if (route.airline) {
           message += `✈️ ${route.airline}\n`;
         }
+
         message += `⏱ Макс. пересадка: ${maxlayover_hours || 5}ч\n\n`;
         message += `🎯 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n`;
 
         if (result.price <= route.threshold_price) {
           const savings = route.threshold_price - result.price;
-          message += `\n🎉 <b>ЦЕНА НИЖЕ ПОРОГА!</b>\n`;
+          message += `\n🎉 ЦЕНА НИЖЕ ПОРОГА!\n`;
           message += `💰 Экономия: ${Formatters.formatPrice(savings, route.currency)}`;
         }
 

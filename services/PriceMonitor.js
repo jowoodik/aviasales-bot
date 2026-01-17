@@ -152,6 +152,7 @@ class PriceMonitor {
     );
 
     await PriceAnalytics.savePrice({
+      routeId: route.id,  // 🔥 ДОБАВЛЯЕМ route.id
       routeType: 'regular',
       origin: route.origin,
       destination: route.destination,

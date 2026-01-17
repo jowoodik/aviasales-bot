@@ -1,17 +1,28 @@
 const cron = require('node-cron');
-const db = require('./config/database');  // Твой путь к database.js
+const db = require('./config/database');
 
 function setupScheduler(priceMonitor, flexibleMonitor) {
   // Каждые 2 часа
   cron.schedule('0 */2 * * *', async () => {
     console.log('\n⏰ Запуск автоматической проверки...');
+
     try {
       // 1️⃣ Обычные маршруты
       console.log('🔍 Проверяем обычные маршруты...');
       await priceMonitor.checkPrices();
 
-      // 🔥 ОТПРАВЛЯЕМ ОТЧЕТЫ
+      // 🔥 Отправляем отчет СРАЗУ с актуальной статистикой
       await sendReportsToUsers(priceMonitor, 'regular');
+
+      // 🔥 СБРОС СТАТИСТИКИ после отправки
+      priceMonitor.stats = {
+        total: 0,
+        success: 0,
+        failed: 0,
+        alerts: 0,
+        startTime: null,
+        routes: []
+      };
 
       await priceMonitor.close();
 
@@ -19,13 +30,22 @@ function setupScheduler(priceMonitor, flexibleMonitor) {
       console.log('🔍 Проверяем гибкие маршруты...');
       await flexibleMonitor.checkAllRoutes();
 
-      // 🔥 ОТПРАВЛЯЕМ ОТЧЕТЫ
+      // 🔥 Отправляем отчет СРАЗУ с актуальной статистикой
       await sendReportsToUsers(flexibleMonitor, 'flexible');
+
+      // 🔥 СБРОС СТАТИСТИКИ после отправки
+      flexibleMonitor.stats = {
+        total: 0,
+        success: 0,
+        failed: 0,
+        alerts: 0,
+        startTime: null,
+        routes: []
+      };
 
       await flexibleMonitor.close();
 
       console.log('✅ Автопроверка завершена');
-
     } catch (error) {
       console.error('Ошибка проверки:', error);
     }
@@ -59,6 +79,7 @@ async function sendReportsToUsers(monitor, type) {
         } catch (e) {
           console.error(`❌ Ошибка отчета ${user.chat_id}:`, e.message);
         }
+
         // Пауза 500мс между пользователями
         await new Promise(r => setTimeout(r, 500));
       }

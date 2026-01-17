@@ -29,11 +29,10 @@ class FlexibleHandlers {
         keyboard: [
           ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
           ['📋 Мои маршруты', '🔍 Мои гибкие'],
-          ['📊 Лучшие варианты', '📈 История цен'],
-          ['✏️ Редактировать', '🗑 Удалить'],
-          ['📊 Статистика', '⚙️ Настройки'],
-          ['✅ Проверить сейчас', '🎯 Проверить один'],
-          ['ℹ️ Помощь']
+          ['💎 Лучшее сейчас', '✏️ Редактировать'],
+          ['📊 Статистика', '🗑 Удалить'],
+          ['⚙️ Настройки', '✅ Проверить сейчас'],
+          ['ℹ️ Помощь'],
         ],
         resize_keyboard: true,
         persistent: true
@@ -86,7 +85,6 @@ class FlexibleHandlers {
         }
 
         state.step = 'flex_destination';
-
         const destKeyboard = {
           reply_markup: {
             keyboard: [
@@ -117,7 +115,6 @@ class FlexibleHandlers {
         }
 
         state.step = 'flex_departure_start';
-
         this.bot.sendMessage(
           chatId,
           `✅ Маршрут: ${state.origin} → ${state.destination}\n\n` +
@@ -336,7 +333,7 @@ class FlexibleHandlers {
 
         if (text.includes('0') || text.includes('прямые')) {
           state.max_stops = 0;
-          state.max_layover_hours = 0; // Нет пересадок = не нужно время
+          state.max_layover_hours = 0;
         } else if (text.includes('1')) {
           state.max_stops = 1;
         } else if (text.includes('2')) {
@@ -347,7 +344,6 @@ class FlexibleHandlers {
           state.max_stops = 99;
         }
 
-        // Если выбраны прямые рейсы, пропускаем вопрос о времени пересадки
         if (state.max_stops === 0) {
           state.step = 'flex_threshold';
           this.bot.sendMessage(
@@ -358,7 +354,6 @@ class FlexibleHandlers {
           return true;
         }
 
-        // Если пересадки допустимы, спрашиваем о времени
         state.step = 'flex_max_layover';
         this.bot.sendMessage(chatId, '⏱️ Максимальное время пересадки в часах:', {
           reply_markup: {
@@ -443,6 +438,7 @@ class FlexibleHandlers {
               `🔍 Бот будет искать лучшие комбинации дат автоматически!`,
               this.getMainMenuKeyboard()
             );
+
             delete this.userStates[chatId];
           })
           .catch(error => {
@@ -455,19 +451,16 @@ class FlexibleHandlers {
     return false;
   }
 
-  // Остальные методы остаются без изменений...
   async handleCheckNow(chatId) {
     try {
       await this.bot.sendMessage(chatId, '🔍 Запускаю проверку ВСЕХ маршрутов...\n⏳ Это может занять несколько минут.');
 
-      // Проверяем гибкие маршруты
       const FlexibleMonitor = require('../services/FlexibleMonitor');
       const flexMonitor = new FlexibleMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
       await flexMonitor.checkAllRoutes();
       await flexMonitor.sendReport(chatId);
       await flexMonitor.close();
 
-      // Проверяем обычные маршруты
       const PriceMonitor = require('../services/PriceMonitor');
       const priceMonitor = new PriceMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
       await priceMonitor.checkPrices();
@@ -529,11 +522,12 @@ class FlexibleHandlers {
     const flexRoutes = await FlexibleRoute.findByUser(chatId);
 
     if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
-      this.bot.sendMessage(chatId, '🔍 У вас нет маршрутов для просмотра лучших вариантов', this.getMainMenuKeyboard());
+      this.bot.sendMessage(chatId, '💎 У вас нет маршрутов для просмотра лучших предложений', this.getMainMenuKeyboard());
       return;
     }
 
-    let message = '📊 Выберите маршрут для просмотра лучших вариантов:\n\n';
+    let message = '💎 ЛУЧШЕЕ СЕЙЧАС\n\nВыберите маршрут:\n\n';
+
     const keyboard = {
       reply_markup: {
         keyboard: [],
@@ -580,18 +574,18 @@ class FlexibleHandlers {
   }
 
   async showRegularTopResults(chatId, route) {
-    const BestPrice = require('../models/BestPrice'); // Нужно создать модель
-    const bestPrices = await BestPrice.findByRouteId(route.id, 3);
+    const BestPrice = require('../models/BestPrice');
+    const bestPrices = await BestPrice.findByRouteId(route.id, 3); // 🔥 ИЗМЕНЕНО С 5 НА 3
 
     if (!bestPrices || bestPrices.length === 0) {
       this.bot.sendMessage(chatId, '❌ Пока нет сохраненных лучших цен для этого маршрута', this.getMainMenuKeyboard());
       return;
     }
 
-    let headerMessage = `📊 ЛУЧШИЕ ЦЕНЫ (ОБЫЧНЫЙ МАРШРУТ)\n\n`;
+    let headerMessage = `💎 ЛУЧШЕЕ СЕЙЧАС (ОБЫЧНЫЙ МАРШРУТ)\n\n`;
     headerMessage += `${route.origin} → ${route.destination}\n`;
     headerMessage += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
-    headerMessage += `🏆 Найдено ${bestPrices.length} лучших цен:\n`;
+    headerMessage += `🏆 Топ-${bestPrices.length}:\n`;
 
     await this.bot.sendMessage(chatId, headerMessage, { parse_mode: 'HTML' });
 
@@ -601,6 +595,7 @@ class FlexibleHandlers {
 
       let message = `${icon} ${bp.price.toLocaleString('ru-RU')} ₽\n\n`;
       message += `✈️ ${bp.airline}\n`;
+
       if (bp.found_at) {
         message += `🕐 Найдено: ${formatTimeAgo(bp.found_at)}\n`;
       }
@@ -622,7 +617,7 @@ class FlexibleHandlers {
         reply_markup: keyboard
       });
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 🔥 ИЗМЕНЕНО С 500 НА 1000
     }
 
     const summaryMessage = `\n💵 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`;
@@ -631,18 +626,18 @@ class FlexibleHandlers {
 
   async showFlexibleTopResults(chatId, route) {
     const FlexibleResult = require('../models/FlexibleResult');
-    const results = await FlexibleResult.getTopResults(route.id, 5);
+    const results = await FlexibleResult.getTopResults(route.id, 3); // 🔥 ИЗМЕНЕНО С 5 НА 3
 
     if (!results || results.length === 0) {
       this.bot.sendMessage(chatId, '❌ Пока нет результатов поиска', this.getMainMenuKeyboard());
       return;
     }
 
-    let headerMessage = `📊 ЛУЧШИЕ ВАРИАНТЫ (ГИБКИЙ ПОИСК)\n\n`;
+    let headerMessage = `💎 ЛУЧШЕЕ СЕЙЧАС (ГИБКИЙ ПОИСК)\n\n`;
     headerMessage += `${route.origin} → ${route.destination}\n`;
     headerMessage += `Диапазон вылета: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
     headerMessage += `Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
-    headerMessage += `🏆 Найдено ${results.length} вариантов:\n`;
+    headerMessage += `🏆 Топ-${results.length}:\n`;
 
     await this.bot.sendMessage(chatId, headerMessage, { parse_mode: 'HTML' });
 
@@ -654,6 +649,7 @@ class FlexibleHandlers {
       message += `✈️ ${r.airline}\n`;
       message += `📅 ${DateUtils.formatDateDisplay(r.departure_date)} → ${DateUtils.formatDateDisplay(r.return_date)}\n`;
       message += `📆 В стране: ${r.days_in_country} дней\n`;
+
       if (r.found_at) {
         message += `🕐 Найдено: ${formatTimeAgo(r.found_at)}\n`;
       }
@@ -685,7 +681,7 @@ class FlexibleHandlers {
         });
       }
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 🔥 ИЗМЕНЕНО С 500 НА 1000
     }
 
     const summaryMessage = `\n💵 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`;
@@ -702,6 +698,7 @@ class FlexibleHandlers {
     }
 
     let message = '✏️ Выберите гибкий маршрут для редактирования:\n\n';
+
     const keyboard = {
       reply_markup: {
         keyboard: [],
@@ -717,6 +714,7 @@ class FlexibleHandlers {
       message += `${routeText}\n`;
       keyboard.reply_markup.keyboard.push([routeText]);
     });
+
     keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
 
     this.bot.sendMessage(chatId, message, keyboard);
@@ -733,6 +731,7 @@ class FlexibleHandlers {
     }
 
     let message = '🗑 Выберите гибкий маршрут для удаления:\n\n';
+
     const keyboard = {
       reply_markup: {
         keyboard: [],
@@ -746,6 +745,7 @@ class FlexibleHandlers {
       message += `${routeText}\n`;
       keyboard.reply_markup.keyboard.push([routeText]);
     });
+
     keyboard.reply_markup.keyboard.push(['◀️ Отмена']);
 
     this.bot.sendMessage(chatId, message, keyboard);

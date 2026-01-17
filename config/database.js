@@ -92,6 +92,21 @@ db.serialize(() => {
       )
   `);
 
+  // 🔥 МИГРАЦИЯ: Добавляем колонку route_id
+  db.run(`ALTER TABLE price_analytics ADD COLUMN route_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Ошибка миграции price_analytics:', err.message);
+    } else {
+      console.log('✅ Миграция: добавлена колонка route_id в price_analytics');
+    }
+  });
+
+  // 🔥 ИНДЕКС для быстрого поиска по route_id
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_route_id ON price_analytics(route_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_date ON price_analytics(found_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_route ON price_analytics(origin, destination, route_id)`);
+
+
   // История цен
   db.run(`
       CREATE TABLE IF NOT EXISTS price_history (

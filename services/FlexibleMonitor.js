@@ -159,6 +159,7 @@ class FlexibleMonitor {
         });
 
         await PriceAnalytics.savePrice({
+          routeId: route.id,  // 🔥 ДОБАВЛЯЕМ route.id
           routeType: 'flexible',
           origin: route.origin,
           destination: route.destination,
