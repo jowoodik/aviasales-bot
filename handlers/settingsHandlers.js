@@ -181,17 +181,14 @@ class SettingsHandlers {
       const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
       const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
       const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
-      const monthDayAnalysis = await PriceAnalytics.analyzeByDayOfMonthForRoute(route.id, chatId);
-
-      // 🔥 НОВОЕ: Топ-5 дней с минимальными/максимальными ценами
       const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
 
-      let message = `📊 СТАТИСТИКА МАРШРУТА #${route.id}\n\n`;
-      message += `✈️ ${route.origin} → ${route.destination}\n`;
-      message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
+      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА #${route.id}\n\n`;
+      message += `🔍 ${route.origin} → ${route.destination}\n`;
+      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
 
       if (stats && stats.total_checks > 0) {
-        message += `📈 Всего проверок: ${stats.total_checks}\n`;
+        message += `📊 Всего проверок: ${stats.total_checks}\n`;
         message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
@@ -199,22 +196,22 @@ class SettingsHandlers {
         message += `📊 Недостаточно данных\n\n`;
       }
 
-      // Лучшее время
+      // 🔥 Лучшее время - по MIN цене
       if (hourAnalysis.length > 0) {
-        const bestHour = hourAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
         message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   Средняя: ${Math.floor(bestHour.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `   Минимальная: ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
-      // Лучший день недели
+      // 🔥 Лучший день недели - по MIN цене
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-        const bestDay = dayAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
         message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
-        message += `   Средняя: ${Math.floor(bestDay.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `   Минимальная: ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
-      // 🔥 ТОП-5 дней с минимальными ценами
+      // Лучшие дни
       if (dailyStats.minDays && dailyStats.minDays.length > 0) {
         message += `📅 Лучшие дни (мин. цены):\n`;
         dailyStats.minDays.slice(0, 5).forEach((day, i) => {
@@ -224,7 +221,7 @@ class SettingsHandlers {
         message += `\n`;
       }
 
-      // 🔥 ТОП-5 дней с максимальными ценами
+      // Худшие дни
       if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
         message += `📈 Худшие дни (макс. цены):\n`;
         dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
@@ -235,9 +232,7 @@ class SettingsHandlers {
 
       const keyboard = {
         reply_markup: {
-          keyboard: [
-            ['◀️ Назад к статистике']
-          ],
+          keyboard: [['◀️ Назад к статистике']],
           one_time_keyboard: true,
           resize_keyboard: true
         }
@@ -256,9 +251,6 @@ class SettingsHandlers {
       const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
       const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
       const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
-      const monthDayAnalysis = await PriceAnalytics.analyzeByDayOfMonthForRoute(route.id, chatId);
-
-      // 🔥 Топ дней для гибкого маршрута
       const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
 
       let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА #${route.id}\n\n`;
@@ -267,7 +259,7 @@ class SettingsHandlers {
       message += `🛬 Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
 
       if (stats && stats.total_checks > 0) {
-        message += `📈 Всего проверок: ${stats.total_checks}\n`;
+        message += `📊 Всего проверок: ${stats.total_checks}\n`;
         message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
         message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
@@ -275,22 +267,22 @@ class SettingsHandlers {
         message += `📊 Недостаточно данных\n\n`;
       }
 
-      // Лучшее время
+      // 🔥 Лучшее время - по MIN цене
       if (hourAnalysis.length > 0) {
-        const bestHour = hourAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
         message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   Средняя: ${Math.floor(bestHour.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `   Минимальная: ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
-      // Лучший день недели
+      // 🔥 Лучший день недели - по MIN цене
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-        const bestDay = dayAnalysis.sort((a, b) => a.avg_price - b.avg_price)[0];
+        const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
         message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
-        message += `   Средняя: ${Math.floor(bestDay.avg_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `   Минимальная: ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n\n`;
       }
 
-      // 🔥 ТОП-5 лучших дней (мин. цены)
+      // Лучшие дни
       if (dailyStats.minDays && dailyStats.minDays.length > 0) {
         message += `📅 Лучшие дни (мин. цены):\n`;
         dailyStats.minDays.slice(0, 5).forEach((day, i) => {
@@ -300,7 +292,7 @@ class SettingsHandlers {
         message += `\n`;
       }
 
-      // 🔥 ТОП-5 худших дней (макс. цены)
+      // Худшие дни
       if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
         message += `📈 Худшие дни (макс. цены):\n`;
         dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
@@ -311,9 +303,7 @@ class SettingsHandlers {
 
       const keyboard = {
         reply_markup: {
-          keyboard: [
-            ['◀️ Назад к статистике']
-          ],
+          keyboard: [['◀️ Назад к статистике']],
           one_time_keyboard: true,
           resize_keyboard: true
         }
@@ -326,6 +316,7 @@ class SettingsHandlers {
       await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
     }
   }
+
 
   async handleSettings(chatId) {
     return new Promise((resolve, reject) => {

@@ -708,9 +708,12 @@ class FlexibleHandlers {
     };
 
     routes.forEach((route, index) => {
+      // 🔥 ПОЛНОЕ НАЗВАНИЕ с авиакомпанией и продолжительностью
       const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
       const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${depStart}-${depEnd}`;
+      const airline = route.airline || 'Все';
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd} ${route.min_days}-${route.max_days}д`;
+
       message += `${routeText}\n`;
       keyboard.reply_markup.keyboard.push([routeText]);
     });

@@ -478,7 +478,7 @@ class RouteHandlers {
     const routes = await Route.findByUser(chatId);
 
     if (!routes || routes.length === 0) {
-      this.bot.sendMessage(chatId, '✈️ У вас нет обычных маршрутов', this.getMainMenuKeyboard());
+      this.bot.sendMessage(chatId, '✈️ У вас нет маршрутов', this.getMainMenuKeyboard());
       return;
     }
 
@@ -493,7 +493,12 @@ class RouteHandlers {
     };
 
     routes.forEach((route, index) => {
-      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${DateUtils.formatDateDisplay(route.departure_date)}`;
+      // 🔥 ПОЛНОЕ НАЗВАНИЕ с авиакомпанией и датами
+      const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
+      const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
+      const airline = route.airline || 'Все';
+      const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depDate}-${retDate}`;
+
       message += `${routeText}\n`;
       keyboard.reply_markup.keyboard.push([routeText]);
     });

@@ -7,7 +7,7 @@ class PuppeteerPricer {
     this.browser = null;
     this.cache = new Map();
     this.cacheTimeout = 60 * 60 * 1000; // 1 час
-    this.maxConcurrent = 1;
+    this.maxConcurrent = 2;
     this.debug = debug;
 
     const tempDir = path.join(__dirname, '../temp');
