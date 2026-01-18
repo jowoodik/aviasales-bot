@@ -236,37 +236,53 @@ class SettingsHandlers {
 
       await this.bot.sendMessage(chatId, message);
 
-      // 🔥 Генерация графика
+      // График динамики цен (min/max)
       try {
         await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
 
         const chartBuffer = await this.chartGenerator.generateRegularRoutePriceChart(route, chatId);
 
-        if (!chartBuffer) {
-          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для построения графика', this.getMainMenuKeyboard());
-        } else {
+        if (chartBuffer) {
           await this.bot.sendPhoto(chatId, chartBuffer, {
             caption: `📊 График изменения цен`,
             contentType: 'image/png'
           });
-
-          await this.bot.sendMessage(chatId, 'График готов!', {
-            reply_markup: {
-              keyboard: [
-                ['◀️ Назад к статистике'],
-                ['◀️ Главное меню']
-              ],
-              one_time_keyboard: true,
-              resize_keyboard: true
-            }
-          });
-
-          this.userStates[chatId] = { step: 'stats_back' };
         }
       } catch (chartError) {
         console.error('Ошибка генерации графика:', chartError);
-        await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика', this.getMainMenuKeyboard());
       }
+
+      // 🔥 Тепловая карта (МИНИМАЛЬНЫЕ ЦЕНЫ)
+      try {
+        await this.bot.sendMessage(chatId, '⏳ Генерирую тепловую карту...');
+
+        const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, 'regular');
+
+        if (!heatmapBuffer) {
+          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для тепловой карты');
+        } else {
+          await this.bot.sendPhoto(chatId, heatmapBuffer, {
+            caption: `🔥 Тепловая карта: лучшие часы и дни для покупки (мин. цены)`,
+            contentType: 'image/png'
+          });
+        }
+      } catch (heatmapError) {
+        console.error('Ошибка генерации тепловой карты:', heatmapError);
+      }
+
+      // Кнопки возврата
+      await this.bot.sendMessage(chatId, 'Графики готовы!', {
+        reply_markup: {
+          keyboard: [
+            ['◀️ Назад к статистике'],
+            ['◀️ Главное меню']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      });
+
+      this.userStates[chatId] = { step: 'stats_back' };
 
     } catch (error) {
       console.error('Ошибка показа статистики:', error);
@@ -296,7 +312,6 @@ class SettingsHandlers {
         message += `⚠️ Недостаточно данных\n`;
       }
 
-      // Лучший час для покупки (MIN)
       if (hourAnalysis.length > 0) {
         const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
         message += `\n⏰ Лучший час для покупки:\n`;
@@ -304,7 +319,6 @@ class SettingsHandlers {
         message += `   ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽ - MIN\n`;
       }
 
-      // Лучший день недели (MIN)
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
         const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
@@ -313,7 +327,6 @@ class SettingsHandlers {
         message += `   ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n`;
       }
 
-      // Топ-5 дней с минимальными ценами
       if (dailyStats.minDays && dailyStats.minDays.length > 0) {
         message += `\n💚 Топ-5 дней с MIN ценами:\n`;
         dailyStats.minDays.slice(0, 5).forEach((day, i) => {
@@ -323,7 +336,6 @@ class SettingsHandlers {
         message += `\n`;
       }
 
-      // Топ-5 дней с максимальными ценами
       if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
         message += `💔 Топ-5 дней с MAX ценами:\n`;
         dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
@@ -334,37 +346,53 @@ class SettingsHandlers {
 
       await this.bot.sendMessage(chatId, message);
 
-      // 🔥 Генерация графика
+      // График динамики цен
       try {
         await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
 
         const chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
 
-        if (!chartBuffer) {
-          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для построения графика', this.getMainMenuKeyboard());
-        } else {
+        if (chartBuffer) {
           await this.bot.sendPhoto(chatId, chartBuffer, {
             caption: `📊 График изменения цен (гибкий поиск)`,
             contentType: 'image/png'
           });
-
-          await this.bot.sendMessage(chatId, 'График готов!', {
-            reply_markup: {
-              keyboard: [
-                ['◀️ Назад к статистике'],
-                ['◀️ Главное меню']
-              ],
-              one_time_keyboard: true,
-              resize_keyboard: true
-            }
-          });
-
-          this.userStates[chatId] = { step: 'stats_back' };
         }
       } catch (chartError) {
         console.error('Ошибка генерации графика:', chartError);
-        await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика', this.getMainMenuKeyboard());
       }
+
+      // 🔥 Тепловая карта
+      try {
+        await this.bot.sendMessage(chatId, '⏳ Генерирую тепловую карту...');
+
+        const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, 'flexible');
+
+        if (!heatmapBuffer) {
+          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для тепловой карты');
+        } else {
+          await this.bot.sendPhoto(chatId, heatmapBuffer, {
+            caption: `🔥 Тепловая карта: лучшие часы и дни для покупки`,
+            contentType: 'image/png'
+          });
+        }
+      } catch (heatmapError) {
+        console.error('Ошибка генерации тепловой карты:', heatmapError);
+      }
+
+      // Кнопки возврата
+      await this.bot.sendMessage(chatId, 'Графики готовы!', {
+        reply_markup: {
+          keyboard: [
+            ['◀️ Назад к статистике'],
+            ['◀️ Главное меню']
+          ],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      });
+
+      this.userStates[chatId] = { step: 'stats_back' };
 
     } catch (error) {
       console.error('Ошибка показа статистики:', error);
