@@ -4,11 +4,13 @@ const FlexibleRoute = require('../models/FlexibleRoute');
 const PriceAnalytics = require('../services/PriceAnalytics');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
+const ChartGenerator = require('../services/ChartGenerator');
 
 class SettingsHandlers {
   constructor(bot, userStates) {
     this.bot = bot;
     this.userStates = userStates;
+    this.chartGenerator = new ChartGenerator();
   }
 
   getMainMenuKeyboard() {
@@ -183,66 +185,92 @@ class SettingsHandlers {
       const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
       const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
 
-      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА #${route.id}\n\n`;
-      message += `🔍 ${route.origin} → ${route.destination}\n`;
-      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
+      let message = `📊 СТАТИСТИКА МАРШРУТА #${route.id}\n\n`;
+      message += `📍 ${route.origin} → ${route.destination}\n`;
+      message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
 
       if (stats && stats.total_checks > 0) {
-        message += `📊 Всего проверок: ${stats.total_checks}\n`;
-        message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `📈 Проверок: ${stats.total_checks}\n`;
+        message += `💰 Мин. цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📊 Средняя: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n`;
       } else {
-        message += `📊 Недостаточно данных\n\n`;
+        message += `⚠️ Недостаточно данных\n`;
       }
 
-      // 🔥 Лучшее время - по MIN цене
+      // Лучший час для покупки (MIN)
       if (hourAnalysis.length > 0) {
         const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   Минимальная: ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `\n⏰ Лучший час для покупки:\n`;
+        message += `   ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
+        message += `   ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽ - MIN\n`;
       }
 
-      // 🔥 Лучший день недели - по MIN цене
+      // Лучший день недели (MIN)
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
         const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
-        message += `   Минимальная: ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `\n📅 Лучший день для покупки:\n`;
+        message += `   ${days[bestDay.day_of_week]}\n`;
+        message += `   ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n`;
       }
 
-      // Лучшие дни
+      // Топ-5 дней с минимальными ценами
       if (dailyStats.minDays && dailyStats.minDays.length > 0) {
-        message += `📅 Лучшие дни (мин. цены):\n`;
+        message += `\n💚 Топ-5 дней с MIN ценами:\n`;
         dailyStats.minDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📅';
+          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
           message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
         });
         message += `\n`;
       }
 
-      // Худшие дни
+      // Топ-5 дней с максимальными ценами
       if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
-        message += `📈 Худшие дни (макс. цены):\n`;
+        message += `💔 Топ-5 дней с MAX ценами:\n`;
         dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🔥' : i === 1 ? '📈' : '📈';
+          const emoji = i === 0 ? '💀' : '  ';
           message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
         });
       }
 
-      const keyboard = {
-        reply_markup: {
-          keyboard: [['◀️ Назад к статистике']],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
+      await this.bot.sendMessage(chatId, message);
 
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'stats_back' };
+      // 🔥 Генерация графика
+      try {
+        await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
+
+        const chartBuffer = await this.chartGenerator.generateRegularRoutePriceChart(route, chatId);
+
+        if (!chartBuffer) {
+          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для построения графика', this.getMainMenuKeyboard());
+        } else {
+          await this.bot.sendPhoto(chatId, chartBuffer, {
+            caption: `📊 График изменения цен`,
+            contentType: 'image/png'
+          });
+
+          await this.bot.sendMessage(chatId, 'График готов!', {
+            reply_markup: {
+              keyboard: [
+                ['◀️ Назад к статистике'],
+                ['◀️ Главное меню']
+              ],
+              one_time_keyboard: true,
+              resize_keyboard: true
+            }
+          });
+
+          this.userStates[chatId] = { step: 'stats_back' };
+        }
+      } catch (chartError) {
+        console.error('Ошибка генерации графика:', chartError);
+        await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика', this.getMainMenuKeyboard());
+      }
+
     } catch (error) {
-      console.error('Ошибка статистики маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
+      console.error('Ошибка показа статистики:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики', this.getMainMenuKeyboard());
     }
   }
 
@@ -253,70 +281,96 @@ class SettingsHandlers {
       const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
       const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
 
-      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА #${route.id}\n\n`;
-      message += `🔍 ${route.origin} → ${route.destination}\n`;
+      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА\n\n`;
+      message += `📍 ${route.origin} → ${route.destination}\n`;
       message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
-      message += `🛬 Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
+      message += `🛫 Пребывание: ${route.min_days}-${route.max_days} дней\n`;
+      message += `✈️ ${route.airline || 'EY'}\n\n`;
 
       if (stats && stats.total_checks > 0) {
-        message += `📊 Всего проверок: ${stats.total_checks}\n`;
-        message += `💎 Лучшая цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя цена: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Максимальная: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `📈 Проверок: ${stats.total_checks}\n`;
+        message += `💰 Мин. цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📊 Средняя: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
+        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n`;
       } else {
-        message += `📊 Недостаточно данных\n\n`;
+        message += `⚠️ Недостаточно данных\n`;
       }
 
-      // 🔥 Лучшее время - по MIN цене
+      // Лучший час для покупки (MIN)
       if (hourAnalysis.length > 0) {
         const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `⏰ Лучшее время: ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   Минимальная: ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `\n⏰ Лучший час для покупки:\n`;
+        message += `   ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
+        message += `   ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽ - MIN\n`;
       }
 
-      // 🔥 Лучший день недели - по MIN цене
+      // Лучший день недели (MIN)
       if (dayAnalysis.length > 0) {
         const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
         const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `📅 Лучший день недели: ${days[bestDay.day_of_week]}\n`;
-        message += `   Минимальная: ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n\n`;
+        message += `\n📅 Лучший день для покупки:\n`;
+        message += `   ${days[bestDay.day_of_week]}\n`;
+        message += `   ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n`;
       }
 
-      // Лучшие дни
+      // Топ-5 дней с минимальными ценами
       if (dailyStats.minDays && dailyStats.minDays.length > 0) {
-        message += `📅 Лучшие дни (мин. цены):\n`;
+        message += `\n💚 Топ-5 дней с MIN ценами:\n`;
         dailyStats.minDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '📅';
+          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
           message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
         });
         message += `\n`;
       }
 
-      // Худшие дни
+      // Топ-5 дней с максимальными ценами
       if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
-        message += `📈 Худшие дни (макс. цены):\n`;
+        message += `💔 Топ-5 дней с MAX ценами:\n`;
         dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🔥' : i === 1 ? '📈' : '📈';
+          const emoji = i === 0 ? '💀' : '  ';
           message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
         });
       }
 
-      const keyboard = {
-        reply_markup: {
-          keyboard: [['◀️ Назад к статистике']],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
+      await this.bot.sendMessage(chatId, message);
 
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'stats_back' };
+      // 🔥 Генерация графика
+      try {
+        await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
+
+        const chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
+
+        if (!chartBuffer) {
+          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для построения графика', this.getMainMenuKeyboard());
+        } else {
+          await this.bot.sendPhoto(chatId, chartBuffer, {
+            caption: `📊 График изменения цен (гибкий поиск)`,
+            contentType: 'image/png'
+          });
+
+          await this.bot.sendMessage(chatId, 'График готов!', {
+            reply_markup: {
+              keyboard: [
+                ['◀️ Назад к статистике'],
+                ['◀️ Главное меню']
+              ],
+              one_time_keyboard: true,
+              resize_keyboard: true
+            }
+          });
+
+          this.userStates[chatId] = { step: 'stats_back' };
+        }
+      } catch (chartError) {
+        console.error('Ошибка генерации графика:', chartError);
+        await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика', this.getMainMenuKeyboard());
+      }
+
     } catch (error) {
-      console.error('Ошибка статистики гибкого маршрута:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
+      console.error('Ошибка показа статистики:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики', this.getMainMenuKeyboard());
     }
   }
-
 
   async handleSettings(chatId) {
     return new Promise((resolve, reject) => {
@@ -549,6 +603,288 @@ class SettingsHandlers {
 
   handleStatsMenuStep(chatId, text) {
     return false;
+  }
+
+  /**
+   * 🔥 НОВЫЙ МЕТОД: Обработка запроса графика
+   */
+  async handleChartRequest(chatId, text) {
+    const state = this.userStates[chatId];
+
+    if (text === '📊 График цен') {
+      await this.showChartMenu(chatId);
+      return true;
+    }
+
+    if (state && state.step === 'chart_type_select') {
+      if (text === '✈️ Обычный маршрут') {
+        await this.handleRegularRouteChartSelect(chatId);
+        return true;
+      }
+
+      if (text === '🔍 Гибкий маршрут') {
+        await this.handleFlexibleRouteChartSelect(chatId);
+        return true;
+      }
+
+      if (text === '◀️ Главное меню') {
+        delete this.userStates[chatId];
+        await this.bot.sendMessage(chatId, 'Главное меню:', this.getMainMenuKeyboard());
+        return true;
+      }
+    }
+
+    if (state && state.step === 'chart_route_select') {
+      return await this.handleRouteChartGeneration(chatId, text);
+    }
+
+    if (state && state.step === 'chart_flex_route_select') {
+      return await this.handleFlexRouteChartGeneration(chatId, text);
+    }
+
+    return false;
+  }
+
+  /**
+   * Меню выбора типа графика
+   */
+  async showChartMenu(chatId) {
+    const routes = await Route.findByUser(chatId);
+    const flexRoutes = await FlexibleRoute.findByUser(chatId);
+
+    if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
+      await this.bot.sendMessage(
+        chatId,
+        '📊 У вас нет маршрутов для построения графиков',
+        this.getMainMenuKeyboard()
+      );
+      return;
+    }
+
+    const keyboard = {
+      reply_markup: {
+        keyboard: [
+          ['✈️ Обычный маршрут'],
+          ['🔍 Гибкий маршрут'],
+          ['◀️ Главное меню']
+        ],
+        one_time_keyboard: true,
+        resize_keyboard: true
+      }
+    };
+
+    await this.bot.sendMessage(
+      chatId,
+      '📊 ГРАФИКИ ЦЕН\n\nВыберите тип маршрута:',
+      keyboard
+    );
+
+    this.userStates[chatId] = { step: 'chart_type_select' };
+  }
+
+  /**
+   * Выбор обычного маршрута для графика
+   */
+  async handleRegularRouteChartSelect(chatId) {
+    try {
+      const routes = await Route.findByUser(chatId);
+
+      if (!routes || routes.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          '✈️ У вас нет обычных маршрутов',
+          this.getMainMenuKeyboard()
+        );
+        return;
+      }
+
+      let message = '📊 ВЫБЕРИТЕ МАРШРУТ ДЛЯ ГРАФИКА\n\n';
+      const keyboard = {
+        reply_markup: {
+          keyboard: [],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      routes.forEach((route, index) => {
+        const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
+        const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
+        const airline = route.airline || 'Все';
+        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depDate}-${retDate}`;
+
+        message += `${routeText}\n`;
+        keyboard.reply_markup.keyboard.push([routeText]);
+      });
+
+      keyboard.reply_markup.keyboard.push(['◀️ Назад']);
+
+      await this.bot.sendMessage(chatId, message, keyboard);
+      this.userStates[chatId] = { step: 'chart_route_select', routes };
+
+    } catch (error) {
+      console.error('Ошибка:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
+    }
+  }
+
+  /**
+   * Выбор гибкого маршрута для графика
+   */
+  async handleFlexibleRouteChartSelect(chatId) {
+    try {
+      const routes = await FlexibleRoute.findByUser(chatId);
+
+      if (!routes || routes.length === 0) {
+        await this.bot.sendMessage(
+          chatId,
+          '🔍 У вас нет гибких маршрутов',
+          this.getMainMenuKeyboard()
+        );
+        return;
+      }
+
+      let message = '📊 ВЫБЕРИТЕ ГИБКИЙ МАРШРУТ\n\n';
+      const keyboard = {
+        reply_markup: {
+          keyboard: [],
+          one_time_keyboard: true,
+          resize_keyboard: true
+        }
+      };
+
+      routes.forEach((route, index) => {
+        const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
+        const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
+        const airline = route.airline || 'Все';
+        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
+
+        message += `${routeText}\n`;
+        keyboard.reply_markup.keyboard.push([routeText]);
+      });
+
+      keyboard.reply_markup.keyboard.push(['◀️ Назад']);
+
+      await this.bot.sendMessage(chatId, message, keyboard);
+      this.userStates[chatId] = { step: 'chart_flex_route_select', routes };
+
+    } catch (error) {
+      console.error('Ошибка:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
+    }
+  }
+
+  /**
+   * Генерация графика для обычного маршрута
+   */
+  async handleRouteChartGeneration(chatId, text) {
+    const state = this.userStates[chatId];
+
+    if (text === '◀️ Назад') {
+      await this.showChartMenu(chatId);
+      return true;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (!match) return false;
+
+    const index = parseInt(match[1]) - 1;
+    const route = state.routes[index];
+
+    if (!route) {
+      await this.bot.sendMessage(chatId, '❌ Маршрут не найден');
+      return true;
+    }
+
+    try {
+      await this.bot.sendMessage(chatId, '⏳ Генерирую график...');
+
+      const chartBuffer = await this.chartGenerator.generateRegularRoutePriceChart(route, chatId);
+
+      if (!chartBuffer) {
+        await this.bot.sendMessage(
+          chatId,
+          '⚠️ Недостаточно данных для построения графика.\nНужно минимум 2 проверки цен.',
+          this.getMainMenuKeyboard()
+        );
+        delete this.userStates[chatId];
+        return true;
+      }
+
+      const caption = `📊 График цен\n${route.origin} → ${route.destination}\n` +
+        `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}`;
+
+      await this.bot.sendPhoto(chatId, chartBuffer, {
+        caption: caption,
+        contentType: 'image/png'
+      });
+
+      await this.bot.sendMessage(chatId, '✅ График готов!', this.getMainMenuKeyboard());
+      delete this.userStates[chatId];
+
+    } catch (error) {
+      console.error('Ошибка генерации графика:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика');
+    }
+
+    return true;
+  }
+
+  /**
+   * Генерация графика для гибкого маршрута
+   */
+  async handleFlexRouteChartGeneration(chatId, text) {
+    const state = this.userStates[chatId];
+
+    if (text === '◀️ Назад') {
+      await this.showChartMenu(chatId);
+      return true;
+    }
+
+    const match = text.match(/^(\d+)\./);
+    if (!match) return false;
+
+    const index = parseInt(match[1]) - 1;
+    const route = state.routes[index];
+
+    if (!route) {
+      await this.bot.sendMessage(chatId, '❌ Маршрут не найден');
+      return true;
+    }
+
+    try {
+      await this.bot.sendMessage(chatId, '⏳ Генерирую график...');
+
+      const chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
+
+      if (!chartBuffer) {
+        await this.bot.sendMessage(
+          chatId,
+          '⚠️ Недостаточно данных для построения графика.\nНужно минимум 2 проверки цен.',
+          this.getMainMenuKeyboard()
+        );
+        delete this.userStates[chatId];
+        return true;
+      }
+
+      const caption = `📊 График цен (гибкий поиск)\n${route.origin} → ${route.destination}\n` +
+        `📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n` +
+        `🛫 ${route.min_days}-${route.max_days} дней`;
+
+      await this.bot.sendPhoto(chatId, chartBuffer, {
+        caption: caption,
+        contentType: 'image/png'
+      });
+
+      await this.bot.sendMessage(chatId, '✅ График готов!', this.getMainMenuKeyboard());
+      delete this.userStates[chatId];
+
+    } catch (error) {
+      console.error('Ошибка генерации графика:', error);
+      await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика');
+    }
+
+    return true;
   }
 }
 
