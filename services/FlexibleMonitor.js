@@ -99,7 +99,6 @@ class FlexibleMonitor {
 
       this.stats.routes.push(routeStats);
       await FlexibleRoute.updateLastCheck(route.id);
-      this.puppeteerPricer.cleanCache();
 
       if (i < routes.length - 1) {
         const pause = Math.floor(Math.random() * 30000 + 30000); // 30-60 сек
@@ -318,7 +317,6 @@ class FlexibleMonitor {
 
     this.stats.routes.push(routeStats);
     await FlexibleRoute.updateLastCheck(route.id);
-    this.puppeteerPricer.cleanCache();
 
     console.log('\n========================================');
     console.log('✅ Проверка завершена');

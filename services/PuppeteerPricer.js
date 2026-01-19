@@ -5,8 +5,6 @@ const path = require('path');
 class PuppeteerPricer {
   constructor(debug = false) {
     this.browser = null;
-    this.cache = new Map();
-    this.cacheTimeout = 60 * 60 * 1000; // 1 час
     this.maxConcurrent = 2;
     this.debug = debug;
 
@@ -462,14 +460,6 @@ class PuppeteerPricer {
     }
     console.log('='.repeat(80));
 
-    const cacheKey = `${url}|${airline || 'all'}|${maxLayoverHours || 'default'}|${baggage ? 'baggage' : 'nobaggage'}`;
-    const cached = this.cache.get(cacheKey);
-
-    if (cached && (Date.now() - cached.timestamp < this.cacheTimeout)) {
-      console.log(`[${index}/${total}] 💾 Из кэша: ${cached.price.toLocaleString('ru-RU')} ₽`);
-      return { price: cached.price, screenshot: cached.screenshot };
-    }
-
     await this.init();
     const page = await this.browser.newPage();
     let screenshotPath = null;
@@ -643,12 +633,6 @@ class PuppeteerPricer {
       console.log(`[${index}/${total}] 💰 Цена: ${priceData.price.toLocaleString('ru-RU')} ₽ (всего ${priceData.totalPrices} вариантов)`);
       console.log(`[${index}/${total}] 📸 Скриншот: ${screenshotPath}`);
 
-      this.cache.set(cacheKey, {
-        price: priceData.price,
-        screenshot: screenshotPath,
-        timestamp: Date.now()
-      });
-
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`[${index}/${total}] ✅ ЗАВЕРШЕНО за ${elapsed}с`);
 
@@ -716,22 +700,6 @@ class PuppeteerPricer {
     console.log(`✅ Обработка завершена за ${elapsed}с. Успешно: ${validResults.length}/${total}`);
 
     return results;
-  }
-
-  cleanCache() {
-    const now = Date.now();
-    let removed = 0;
-
-    for (const [url, data] of this.cache.entries()) {
-      if (now - data.timestamp > this.cacheTimeout) {
-        this.cache.delete(url);
-        removed++;
-      }
-    }
-
-    if (removed > 0) {
-      console.log(`🧹 Очищен кэш: удалено ${removed} записей`);
-    }
   }
 
   async init() {
