@@ -1,6 +1,5 @@
 const Route = require('../models/Route');
-const AviasalesAPI = require('./AviasalesAPI');
-const PuppeteerPricer = require('./PuppeteerPricer');
+const KupibiletPricer = require('./KupibiletPricer');
 const NotificationService = require('./NotificationService');
 const db = require('../config/database');
 const DateUtils = require('../utils/dateUtils');
@@ -9,8 +8,8 @@ const PriceAnalytics = require('./PriceAnalytics');
 
 class PriceMonitor {
   constructor(aviasalesToken, bot, debug = false) {
-    this.api = new AviasalesAPI(aviasalesToken);
-    this.puppeteerPricer = new PuppeteerPricer(debug);
+    // aviasalesToken больше не используется, но оставляем параметр для совместимости
+    this.kupibiletPricer = new KupibiletPricer(debug);
     this.notificationService = new NotificationService(bot);
     this.bot = bot;
     this.stats = {
@@ -26,7 +25,7 @@ class PriceMonitor {
   async checkPrices() {
     this.stats.startTime = Date.now();
     console.log('\n========================================');
-    console.log('⏰ ПРОВЕРКА ОБЫЧНЫХ МАРШРУТОВ (Puppeteer)');
+    console.log('⏰ ПРОВЕРКА ОБЫЧНЫХ МАРШРУТОВ (Kupibilet)');
     console.log(new Date().toLocaleString('ru-RU'));
     console.log('========================================\n');
 
@@ -34,6 +33,7 @@ class PriceMonitor {
 
     const routes = await Route.findActive();
     console.log(`📋 Найдено активных маршрутов: ${routes.length}\n`);
+
     this.stats.total = routes.length;
 
     for (let i = 0; i < routes.length; i++) {
@@ -56,7 +56,8 @@ class PriceMonitor {
       };
 
       try {
-        const searchUrl = this.api.generateSearchLink({
+        // Генерируем URL через KupibiletPricer
+        const searchUrl = KupibiletPricer.generateSearchUrl({
           origin: route.origin,
           destination: route.destination,
           departure_date: route.departure_date,
@@ -65,16 +66,29 @@ class PriceMonitor {
           children: route.children,
           airline: route.airline,
           baggage: route.baggage,
-          max_stops: route.max_stops
+          max_stops: route.max_stops,
+          max_layover_hours: route.max_stops === 0 ? null : route.max_layover_hours
         });
 
-        const priceResult = await this.puppeteerPricer.getPriceFromUrl(
+        // Передаем параметры маршрута для KupibiletPricer
+        const routeParams = {
+          origin: route.origin,
+          destination: route.destination,
+          departure_date: route.departure_date,
+          return_date: route.return_date,
+          adults: route.adults,
+          children: route.children,
+          max_stops: route.max_stops
+        };
+
+        const priceResult = await this.kupibiletPricer.getPriceFromUrl(
           searchUrl,
           i + 1,
           routes.length,
           route.airline,
           route.max_stops === 0 ? null : route.max_layover_hours,
-          route.baggage  // 🔥 ПАРАМЕТР БАГАЖА
+          route.baggage,
+          routeParams
         );
 
         if (priceResult && priceResult.price) {
@@ -86,7 +100,7 @@ class PriceMonitor {
           routeStats.screenshot = priceResult.screenshot;
           this.stats.success++;
 
-          const alert = await this.processPrice(route, totalPrice, searchUrl, canNotify, priceResult.screenshot);
+          const alert = await this.processPrice(route, totalPrice, priceResult.search_link || searchUrl, canNotify, priceResult.screenshot);
           if (alert) {
             routeStats.alert = true;
             this.stats.alerts++;
@@ -152,7 +166,7 @@ class PriceMonitor {
     );
 
     await PriceAnalytics.savePrice({
-      routeId: route.id,  // 🔥 ДОБАВЛЯЕМ route.id
+      routeId: route.id,
       routeType: 'regular',
       origin: route.origin,
       destination: route.destination,
@@ -190,7 +204,9 @@ class PriceMonitor {
                     transfers: route.max_stops,
                     search_link: searchLink
                   };
+
                   await this.sendRegularAlertWithScreenshot(route, ticket, 'drop', screenshot);
+
                   const savings = route.threshold_price - totalPrice;
                   this.updateSavings(route.chat_id, savings);
                   alertSent = true;
@@ -203,6 +219,7 @@ class PriceMonitor {
                     transfers: route.max_stops,
                     search_link: searchLink
                   };
+
                   await this.sendRegularAlertWithScreenshot(route, ticket, 'new_min', screenshot);
                   alertSent = true;
                 }
@@ -229,7 +246,7 @@ class PriceMonitor {
     let message = `${header}\n\n`;
     message += `📍 Маршрут: ${route.origin} → ${route.destination}\n`;
     message += `💰 ${Formatters.formatPrice(totalPrice, route.currency)}\n`;
-    message += `✅ Проверено через браузер\n\n`;
+    message += `✅ Проверено через Kupibilet\n\n`;
     message += `✈️ Авиакомпания: ${ticket.airline}\n`;
     message += `👥 Пассажиры: ${passengersText}\n`;
     message += `🧳 Багаж: ${baggageText}\n`;
@@ -295,7 +312,6 @@ class PriceMonitor {
 
   async sendReport(chatId) {
     const elapsed = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
-
     let report = `📊 ОТЧЕТ О ПРОВЕРКЕ\n\n`;
     report += `⏱️ Время: ${elapsed} мин\n`;
     report += `📋 Всего маршрутов: ${this.stats.total}\n`;
@@ -304,15 +320,14 @@ class PriceMonitor {
     report += `🔥 Отправлено алертов: ${this.stats.alerts}\n\n`;
 
     if (this.stats.routes.length > 0) {
-      report += `<b>Детали:</b>\n`;
-
+      report += `Детали:\n`;
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '❌';
         report += `\n${emoji} ${route.origin} → ${route.destination}\n`;
         if (route.success && route.bestPrice) {
           report += `   💰 ${route.bestPrice.toLocaleString('ru-RU')} ₽`;
           if (route.alert) {
-            report += ` 🔥 <i>алерт отправлен</i>`;
+            report += ` 🔥 алерт отправлен`;
           }
           report += `\n`;
         } else {
@@ -345,7 +360,7 @@ class PriceMonitor {
     db.run(
       `INSERT INTO user_stats (chat_id, last_check)
        VALUES (?, datetime('now'))
-           ON CONFLICT(chat_id) 
+           ON CONFLICT(chat_id)
        DO UPDATE SET last_check = datetime('now')`,
       [chatId]
     );
@@ -398,7 +413,7 @@ class PriceMonitor {
   }
 
   async close() {
-    await this.puppeteerPricer.close();
+    await this.kupibiletPricer.close();
   }
 }
 

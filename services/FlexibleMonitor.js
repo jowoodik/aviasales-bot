@@ -1,17 +1,16 @@
 const FlexibleRoute = require('../models/FlexibleRoute');
 const FlexibleResult = require('../models/FlexibleResult');
-const AviasalesAPI = require('./AviasalesAPI');
+const KupibiletPricer = require('./KupibiletPricer');
 const NotificationService = require('./NotificationService');
 const DateUtils = require('../utils/dateUtils');
-const PuppeteerPricer = require('./PuppeteerPricer');
 const fs = require('fs');
 const PriceAnalytics = require('./PriceAnalytics');
 
 class FlexibleMonitor {
   constructor(aviasalesToken, bot, debug = false) {
-    this.api = new AviasalesAPI(aviasalesToken);
+    // aviasalesToken больше не используется, но оставляем параметр для совместимости
     this.notificationService = new NotificationService(bot);
-    this.puppeteerPricer = new PuppeteerPricer(debug);
+    this.kupibiletPricer = new KupibiletPricer(debug);
     this.bot = bot;
     this.stats = {
       total: 0,
@@ -49,17 +48,17 @@ class FlexibleMonitor {
   async checkAllRoutes() {
     this.stats.startTime = Date.now();
     console.log('\n========================================');
-    console.log('🔍 ПРОВЕРКА ГИБКИХ МАРШРУТОВ (Puppeteer)');
+    console.log('🔍 ПРОВЕРКА ГИБКИХ МАРШРУТОВ (Kupibilet)');
     console.log(new Date().toLocaleString('ru-RU'));
     console.log('========================================\n');
 
     const routes = await FlexibleRoute.findActive();
     console.log(`📋 Найдено маршрутов: ${routes.length}\n`);
+
     this.stats.total = routes.length;
 
     for (let i = 0; i < routes.length; i++) {
       const route = routes[i];
-
       console.log(`\n[${i + 1}/${routes.length}] 🔍 ${route.origin} → ${route.destination}`);
       console.log(`   📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
       console.log(`   🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
@@ -80,12 +79,14 @@ class FlexibleMonitor {
 
       try {
         const result = await this.analyzeRoute(route, canNotify);
+
         if (result && result.success) {
           routeStats.success = true;
           routeStats.bestPrice = result.bestPrice;
           routeStats.alert = result.alert;
           routeStats.screenshot = result.screenshot;
           this.stats.success++;
+
           if (result.alert) {
             this.stats.alerts++;
           }
@@ -122,7 +123,8 @@ class FlexibleMonitor {
     const combinations = this.generateDateCombinations(route);
     console.log(`   🔍 Комбинаций для проверки: ${combinations.length}`);
 
-    const urls = combinations.map(c => this.api.generateSearchLink({
+    // Генерируем URLs через KupibiletPricer (не используются, но нужны для совместимости)
+    const urls = combinations.map(c => KupibiletPricer.generateSearchUrl({
       origin: route.origin,
       destination: route.destination,
       departure_date: c.departure,
@@ -131,14 +133,27 @@ class FlexibleMonitor {
       children: route.children,
       airline: route.airline,
       baggage: route.baggage,
+      max_stops: route.max_stops,
+      max_layover_hours: route.max_stops === 0 ? null : route.max_layover_hours
+    }));
+
+    // Создаем массив параметров для KupibiletPricer
+    const routeParamsArray = combinations.map(c => ({
+      origin: route.origin,
+      destination: route.destination,
+      departure_date: c.departure,
+      return_date: c.return,
+      adults: route.adults,
+      children: route.children,
       max_stops: route.max_stops
     }));
 
-    const priceResults = await this.puppeteerPricer.getPricesFromUrls(
+    const priceResults = await this.kupibiletPricer.getPricesFromUrls(
       urls,
       route.airline,
       route.max_stops === 0 ? null : route.max_layover_hours,
-      route.baggage  // 🔥 ПАРАМЕТР БАГАЖА
+      route.baggage,
+      routeParamsArray
     );
 
     const results = [];
@@ -153,12 +168,12 @@ class FlexibleMonitor {
           days_in_country: combo.days,
           total_price: priceResult.price,
           airline: route.airline || 'Multi',
-          search_link: urls[i],
+          search_link: priceResult.search_link || urls[i],
           screenshot_path: priceResult.screenshot
         });
 
         await PriceAnalytics.savePrice({
-          routeId: route.id,  // 🔥 ДОБАВЛЯЕМ route.id
+          routeId: route.id,
           routeType: 'flexible',
           origin: route.origin,
           destination: route.destination,
@@ -189,6 +204,7 @@ class FlexibleMonitor {
 
     const previousBest = await FlexibleResult.getBestPrice(route.id);
     const currentBest = topResults[0].total_price;
+
     let alertSent = false;
 
     if (canNotify) {
@@ -225,7 +241,6 @@ class FlexibleMonitor {
 
   async sendReport(chatId) {
     const elapsed = ((Date.now() - this.stats.startTime) / 1000 / 60).toFixed(1);
-
     let report = `📊 ОТЧЕТ О ПРОВЕРКЕ\n`;
     report += `Тип: 🔄 Гибкие маршруты\n\n`;
     report += `⏱ Время: ${elapsed} мин\n`;
@@ -298,12 +313,14 @@ class FlexibleMonitor {
 
     try {
       const result = await this.analyzeRoute(route, canNotify);
+
       if (result && result.success) {
         routeStats.success = true;
         routeStats.bestPrice = result.bestPrice;
         routeStats.alert = result.alert;
         routeStats.screenshot = result.screenshot;
         this.stats.success++;
+
         if (result.alert) {
           this.stats.alerts++;
         }
@@ -330,8 +347,8 @@ class FlexibleMonitor {
   }
 
   async close() {
-    if (this.puppeteerPricer) {
-      await this.puppeteerPricer.close();
+    if (this.kupibiletPricer) {
+      await this.kupibiletPricer.close();
     }
   }
 }

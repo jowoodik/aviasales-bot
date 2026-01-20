@@ -3,7 +3,7 @@ const db = require('./config/database');
 
 function setupScheduler(priceMonitor, flexibleMonitor) {
   // Каждые 2 часа
-  cron.schedule('0 */2 * * *', async () => {
+  cron.schedule('0 */1 * * *', async () => {
     console.log('\n⏰ Запуск автоматической проверки...');
 
     try {
