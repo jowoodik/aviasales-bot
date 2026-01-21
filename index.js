@@ -23,6 +23,7 @@ const routeHandlers = new RouteHandlers(bot, userStates);
 const flexibleHandlers = new FlexibleHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
 
+// проверка деплоя
 function getMainMenuKeyboard() {
   return {
     reply_markup: {
