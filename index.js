@@ -23,6 +23,7 @@ const routeHandlers = new RouteHandlers(bot, userStates);
 const flexibleHandlers = new FlexibleHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
 
+// проверка деплоя
 function getMainMenuKeyboard() {
   return {
     reply_markup: {
@@ -720,3 +721,4 @@ console.log('\n========================================');
 console.log('🤖 Бот v3.0 запущен успешно!');
 console.log('✈️ Обычные маршруты + 🔍 Гибкий поиск');
 console.log('========================================\n');
+// Test deploy notification Wed Jan 21 14:23:23 +05 2026
