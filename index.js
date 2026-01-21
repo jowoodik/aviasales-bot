@@ -24,6 +24,7 @@ const flexibleHandlers = new FlexibleHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
 
 // проверка деплоя
+// проверка деплоя 2
 function getMainMenuKeyboard() {
   return {
     reply_markup: {
