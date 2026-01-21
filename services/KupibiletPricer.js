@@ -110,13 +110,15 @@ class KupibiletPricer {
       filters.transfers = { "TwoTransfers": true };
     }
     if (max_layover_hours && max_stops > 0) {
-      const maxSeconds = max_layover_hours * 3600;
-      filters.transferTimeRange = { "TransferTimeRange": [60, maxSeconds] };
+      const maxMinutes = max_layover_hours * 60;
+      filters.transferTimeRange = { "TransferTimeRange": [60, maxMinutes] };
     }
     if (airline) {
       filters.airlines = {};
       filters.airlines[`Airline-${airline}`] = true;
     }
+
+    filters.transportKind = { "Airplane": true };
 
     if (Object.keys(filters).length > 0) {
       urlParams.push(`filter=${encodeURIComponent(JSON.stringify(filters))}`);
