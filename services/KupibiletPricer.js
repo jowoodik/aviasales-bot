@@ -8,7 +8,7 @@ class KupibiletPricer {
     this.debug = debug;
     this.lastRequestTime = 0;
     this.minDelayBetweenRequests = 3000;
-    this.maxConcurrent = 3;
+    this.maxConcurrent = 2;
 
     // 🔥 НОВОЕ: Счетчик страниц для мониторинга
     this.activePages = 0;
@@ -509,7 +509,7 @@ class KupibiletPricer {
       }
 
       if (i + batchSize < total) {
-        const pause = this.getRandomDelay(2000, 4000); // 🔥 Увеличил паузу
+        const pause = this.getRandomDelay(5000, 7000); // 🔥 Увеличил паузу
         this.log(`⏸️ Пауза ${Math.round(pause/1000)}с перед следующим батчем`);
         await this.sleep(pause);
       }
