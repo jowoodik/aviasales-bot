@@ -7,21 +7,47 @@ class KupibiletPricer {
     this.browser = null;
     this.debug = debug;
     this.lastRequestTime = 0;
-    this.minDelayBetweenRequests = 3000; // 3 секунды между запросами
-    this.maxConcurrent = 2; // 🔥 2 браузера параллельно
+    this.minDelayBetweenRequests = 3000;
+    this.maxConcurrent = 3;
 
-    // Создаем папку для скриншотов
+    // 🔥 НОВОЕ: Счетчик страниц для мониторинга
+    this.activePages = 0;
+    this.maxPages = 10; // Лимит открытых страниц
+
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
-      console.log(`[Kupibilet] Создана папка для скриншотов: ${tempDir}`);
     }
     this.screenshotDir = tempDir;
+
+    // 🔥 НОВОЕ: Автоочистка старых скриншотов
+    this.cleanupOldScreenshots();
+  }
+
+  // 🔥 НОВОЕ: Очистка скриншотов старше 24 часов
+  cleanupOldScreenshots() {
+    try {
+      const files = fs.readdirSync(this.screenshotDir);
+      const now = Date.now();
+      const maxAge = 24 * 60 * 60 * 1000; // 24 часа
+
+      files.forEach(file => {
+        const filePath = path.join(this.screenshotDir, file);
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > maxAge) {
+          fs.unlinkSync(filePath);
+          console.log(`🗑️ Удален старый скриншот: ${file}`);
+        }
+      });
+    } catch (error) {
+      console.error('Ошибка очистки скриншотов:', error);
+    }
   }
 
   log(message, index = null, total = null) {
     const prefix = index && total ? `[Kupibilet ${index}/${total}]` : '[Kupibilet]';
-    console.log(`${prefix} ${message}`);
+    const pagesInfo = this.activePages > 0 ? ` [Pages: ${this.activePages}]` : '';
+    console.log(`${prefix}${pagesInfo} ${message}`);
   }
 
   getRandomDelay(min = 500, max = 1500) {
@@ -38,7 +64,17 @@ class KupibiletPricer {
   }
 
   async init() {
-    if (this.browser) return;
+    if (this.browser) {
+      // 🔥 НОВОЕ: Проверяем что браузер еще живой
+      try {
+        await this.browser.version(); // Проверка связи
+        return;
+      } catch (error) {
+        console.log('⚠️ Браузер умер, перезапускаем...');
+        this.browser = null;
+      }
+    }
+
     console.log('🚀 Запуск браузера (Kupibilet)...');
     this.browser = await puppeteer.launch({
       headless: !this.debug,
@@ -48,15 +84,67 @@ class KupibiletPricer {
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage', // 🔥 ВАЖНО для контейнеров
+        '--disable-gpu',
+        '--disable-software-rasterizer',
         '--window-size=1920,1080',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        '--single-process', // 🔥 НОВОЕ: меньше процессов
+        '--no-zygote', // 🔥 НОВОЕ: экономия RAM
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       ],
       ignoreDefaultArgs: ['--enable-automation'],
       ignoreHTTPSErrors: true,
       dumpio: this.debug
     });
+
+    // 🔥 НОВОЕ: Мониторинг disconnected
+    this.browser.on('disconnected', () => {
+      console.log('⚠️ Браузер отключился');
+      this.browser = null;
+      this.activePages = 0;
+    });
+
     console.log('✅ Браузер запущен (Kupibilet)');
+  }
+
+  // 🔥 НОВОЕ: Безопасное создание страницы
+  async createPage() {
+    if (this.activePages >= this.maxPages) {
+      throw new Error(`Достигнут лимит страниц: ${this.maxPages}`);
+    }
+
+    const page = await this.browser.newPage();
+    this.activePages++;
+
+    // 🔥 ВАЖНО: Отслеживание закрытия
+    page.once('close', () => {
+      this.activePages--;
+    });
+
+    return page;
+  }
+
+  // 🔥 НОВОЕ: Безопасное закрытие страницы
+  async closePage(page) {
+    if (!page || page.isClosed()) return;
+
+    try {
+      // Таймаут на закрытие
+      await Promise.race([
+        page.close(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout closing page')), 5000)
+        )
+      ]);
+    } catch (error) {
+      console.error('⚠️ Ошибка закрытия страницы:', error.message);
+      // Принудительное закрытие
+      try {
+        await page.close();
+      } catch (e) {
+        // ignore
+      }
+    }
   }
 
   static generateSearchUrl(params) {
@@ -79,25 +167,19 @@ class KupibiletPricer {
     let url = 'https://www.kupibilet.ru/search?';
     const urlParams = [];
 
-    // Пассажиры
     urlParams.push(`adult=${adultsCount}`);
     urlParams.push(`child=${childrenCount}`);
     urlParams.push(`infant=${infants}`);
 
-    // Возраста детей
     if (childrenCount > 0) {
       const ages = Array(childrenCount).fill(10);
       urlParams.push(`childrenAges=[${ages.join(',')}]`);
     }
 
-    // Класс обслуживания
     urlParams.push('cabinClass=Y');
-
-    // Маршрут
     urlParams.push(`route[0]=iatax:${origin}_${depDateFormatted}_date_${depDateFormatted}_iatax:${destination}`);
     urlParams.push(`route[1]=iatax:${destination}_${retDateFormatted}_date_${retDateFormatted}_iatax:${origin}`);
 
-    // Фильтры
     const filters = {};
     if (baggage === true || baggage === 1) {
       filters.baggages = { "WithBaggages": true };
@@ -129,23 +211,26 @@ class KupibiletPricer {
     return url;
   }
 
-  /**
-   * 🔥 ГЛАВНЫЙ МЕТОД - совместимость с PuppeteerPricer
-   * Принимает URL (игнорируется), но использует параметры route
-   */
   async getPriceFromUrl(urlIgnored, index, total, airline = null, maxLayoverHours = null, baggage = false, routeParams = null) {
     if (!routeParams) {
-      console.error(`[${index}/${total}] ❌ ОШИБКА: routeParams не переданы в KupibiletPricer.getPriceFromUrl`);
+      console.error(`[${index}/${total}] ❌ ОШИБКА: routeParams не переданы`);
       return null;
     }
 
     const startTime = Date.now();
     await this.init();
-    const page = await this.browser.newPage();
+
+    // 🔥 ИЗМЕНЕНО: Используем новый метод
+    let page = null;
     let screenshotPath = null;
     let searchUrl = null;
 
+    // 🔥 НОВОЕ: Переменная для request handler
+    let requestHandler = null;
+
     try {
+      page = await this.createPage(); // 🔥 Вместо browser.newPage()
+
       this.log('='.repeat(80), index, total);
       this.log(`🎯 ${routeParams.origin} → ${routeParams.destination}`, index, total);
       this.log(`📅 ${routeParams.departure_date} → ${routeParams.return_date}`, index, total);
@@ -154,19 +239,11 @@ class KupibiletPricer {
       if (baggage) this.log(`🧳 Багаж: 20 кг`, index, total);
       this.log('='.repeat(80), index, total);
 
-      // Антифрод настройки
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
       await page.setViewport({ width: 1920, height: 1080 });
 
       await page.evaluateOnNewDocument(() => {
         delete Object.getPrototypeOf(navigator).webdriver;
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = function (parameters) {
-          if (parameters.name === 'notifications') {
-            return Promise.resolve({ state: Notification.permission });
-          }
-          return originalQuery.apply(window.navigator.permissions, parameters);
-        };
         window.chrome = { runtime: {}, loadTimes: function () {}, csi: function () {}, app: {} };
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
@@ -181,9 +258,9 @@ class KupibiletPricer {
         'Upgrade-Insecure-Requests': '1'
       });
 
-      // Блокировка рекламы
+      // 🔥 ИЗМЕНЕНО: Сохраняем handler для удаления
       await page.setRequestInterception(true);
-      page.on('request', (request) => {
+      requestHandler = (request) => {
         const url = request.url();
         if (url.includes('recaptcha') || url.includes('google-analytics') ||
           url.includes('googletagmanager') || url.includes('mc.yandex') ||
@@ -192,7 +269,8 @@ class KupibiletPricer {
         } else {
           request.continue();
         }
-      });
+      };
+      page.on('request', requestHandler);
 
       // Антиспам задержка
       const timeSinceLastRequest = Date.now() - this.lastRequestTime;
@@ -203,11 +281,9 @@ class KupibiletPricer {
       }
 
       const randomDelay = this.getRandomDelay(500, 1000);
-      this.log(`⏳ Задержка ${randomDelay}мс`, index, total);
       await this.sleep(randomDelay);
       this.lastRequestTime = Date.now();
 
-      // Генерируем URL для Kupibilet
       searchUrl = KupibiletPricer.generateSearchUrl({
         origin: routeParams.origin,
         destination: routeParams.destination,
@@ -230,10 +306,8 @@ class KupibiletPricer {
       });
 
       const jsWait = this.getRandomDelay(1000, 2500);
-      this.log(`⏳ JavaScript инициализация ${jsWait}мс...`, index, total);
       await this.sleep(jsWait);
 
-      // Поиск билетов
       this.log(`🔍 Поиск билетов...`, index, total);
       let found = false;
       let attempts = 0;
@@ -260,14 +334,10 @@ class KupibiletPricer {
 
       await this.randomWait(500, 1000);
 
-      // Сортировка по цене
-      this.log(`🔍 Поиск дропдауна сортировки...`, index, total);
+      // Сортировка (опционально - можно отключить для скорости)
       try {
         const sortDropdown = await page.$('[data-testid="sort-dropdown"]');
-        if (!sortDropdown) {
-          this.log(`⚠️ Дропдаун не найден`, index, total);
-        } else {
-          this.log(`✅ Открываю дропдаун...`, index, total);
+        if (sortDropdown) {
           await page.evaluate(() => {
             const dropdown = document.querySelector('[data-testid="sort-dropdown"]');
             const firstDiv = dropdown.querySelector(':scope > div:first-child');
@@ -281,7 +351,6 @@ class KupibiletPricer {
           }, { timeout: 3000 });
 
           await this.randomWait(300, 600);
-          this.log(`🔍 Поиск "По цене" в меню...`, index, total);
 
           const sortSelected = await page.evaluate(() => {
             const list = document.querySelector('[data-testid="sort-dropdown-list"]');
@@ -297,12 +366,7 @@ class KupibiletPricer {
           });
 
           if (sortSelected) {
-            this.log(`✅ Выбрана сортировка "По цене"`, index, total);
-            this.log(`⏳ Обновление списка...`, index, total);
             await this.sleep(1000);
-            this.log(`✅ Список обновлен`, index, total);
-          } else {
-            this.log(`⚠️ Опция "По цене" не найдена в списке`, index, total);
           }
         }
       } catch (error) {
@@ -329,20 +393,31 @@ class KupibiletPricer {
         throw new Error(priceData.error);
       }
 
-      // Скриншот успеха
+      // 🔥 ИЗМЕНЕНО: Скриншот только по необходимости (сэкономит диск)
       const timestamp = Date.now();
       const airlineStr = airline || 'all';
       screenshotPath = path.join(this.screenshotDir, `success_${airlineStr}_${timestamp}.png`);
-      await page.screenshot({ path: screenshotPath, fullPage: false });
+
+      // Скриншот с таймаутом
+      try {
+        await Promise.race([
+          page.screenshot({ path: screenshotPath, fullPage: false }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Screenshot timeout')), 5000)
+          )
+        ]);
+      } catch (e) {
+        this.log(`⚠️ Ошибка скриншота: ${e.message}`, index, total);
+        screenshotPath = null;
+      }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.log('='.repeat(80), index, total);
       this.log(`✅ УСПЕХ! ${priceData.price.toLocaleString('ru-RU')} ₽`, index, total);
       this.log(`⏱️ ${elapsed}с`, index, total);
-      this.log(`📸 ${screenshotPath}`, index, total);
+      if (screenshotPath) this.log(`📸 ${screenshotPath}`, index, total);
       this.log('='.repeat(80), index, total);
 
-      // Возвращаем в формате PuppeteerPricer: { price, screenshot }
       return {
         price: priceData.price,
         screenshot: screenshotPath
@@ -352,26 +427,40 @@ class KupibiletPricer {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       this.log(`❌ ОШИБКА (${elapsed}с): ${error.message}`, index, total);
 
-      // Скриншот ошибки
-      try {
-        const timestamp = Date.now();
-        const airlineStr = airline || 'all';
-        screenshotPath = path.join(this.screenshotDir, `error_${airlineStr}_${timestamp}.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        this.log(`📸 ${screenshotPath}`, index, total);
-      } catch (e) {
-        // ignore
+      // Скриншот ошибки (опционально)
+      if (page && !page.isClosed()) {
+        try {
+          const timestamp = Date.now();
+          const airlineStr = airline || 'all';
+          screenshotPath = path.join(this.screenshotDir, `error_${airlineStr}_${timestamp}.png`);
+          await Promise.race([
+            page.screenshot({ path: screenshotPath, fullPage: true }),
+            new Promise((_, reject) => setTimeout(() => reject(), 5000))
+          ]);
+        } catch (e) {
+          // ignore
+        }
       }
 
       return null;
     } finally {
-      await page.close();
+      // 🔥 НОВОЕ: Очистка обработчиков
+      if (page && requestHandler) {
+        try {
+          await page.setRequestInterception(false);
+          page.removeListener('request', requestHandler);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 🔥 ИЗМЕНЕНО: Безопасное закрытие
+      if (page) {
+        await this.closePage(page);
+      }
     }
   }
 
-  /**
-   * 🔥 МЕТОД ДЛЯ МНОЖЕСТВЕННОЙ ОБРАБОТКИ - ПАРАЛЛЕЛЬНО ПО 3 БРАУЗЕРА
-   */
   async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, routeParamsArray = null) {
     if (!routeParamsArray || routeParamsArray.length !== urls.length) {
       console.error('❌ ОШИБКА: routeParamsArray должен быть массивом той же длины что и urls');
@@ -384,14 +473,12 @@ class KupibiletPricer {
 
     const startTime = Date.now();
 
-    // 🔥 Обрабатываем батчами по maxConcurrent (3)
     for (let i = 0; i < total; i += this.maxConcurrent) {
       const batchSize = Math.min(this.maxConcurrent, total - i);
       const batchPromises = [];
 
-      this.log(`📦 Батч ${Math.floor(i / this.maxConcurrent) + 1}: обработка ${batchSize} маршрутов параллельно`);
+      this.log(`📦 Батч ${Math.floor(i / this.maxConcurrent) + 1}: обработка ${batchSize} маршрутов`);
 
-      // Создаем промисы для батча
       for (let j = 0; j < batchSize; j++) {
         const index = i + j;
         const promise = this.getPriceFromUrl(
@@ -409,17 +496,20 @@ class KupibiletPricer {
         batchPromises.push(promise);
       }
 
-      // Ждем завершения батча
       const batchResults = await Promise.all(batchPromises);
 
-      // Сохраняем результаты
       for (let j = 0; j < batchSize; j++) {
         results[i + j] = batchResults[j];
       }
 
-      // Пауза между батчами
+      // 🔥 НОВОЕ: Принудительная очистка памяти между батчами
+      if (global.gc) {
+        global.gc();
+        this.log('🗑️ Garbage collection выполнен');
+      }
+
       if (i + batchSize < total) {
-        const pause = this.getRandomDelay(1000, 2500);
+        const pause = this.getRandomDelay(2000, 4000); // 🔥 Увеличил паузу
         this.log(`⏸️ Пауза ${Math.round(pause/1000)}с перед следующим батчем`);
         await this.sleep(pause);
       }
@@ -434,9 +524,40 @@ class KupibiletPricer {
 
   async close() {
     if (this.browser) {
-      await this.browser.close();
+      this.log('🔒 Закрываю браузер...');
+
+      // 🔥 НОВОЕ: Закрываем все страницы сначала
+      try {
+        const pages = await this.browser.pages();
+        this.log(`📄 Открыто страниц: ${pages.length}`);
+
+        await Promise.all(
+          pages.map(page => this.closePage(page))
+        );
+      } catch (error) {
+        console.error('Ошибка закрытия страниц:', error);
+      }
+
+      // Закрываем браузер
+      try {
+        await Promise.race([
+          this.browser.close(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout closing browser')), 10000)
+          )
+        ]);
+      } catch (error) {
+        console.error('⚠️ Timeout закрытия браузера, убиваем процесс');
+        try {
+          this.browser.process()?.kill('SIGKILL');
+        } catch (e) {
+          // ignore
+        }
+      }
+
       this.browser = null;
-      console.log('🔒 Браузер закрыт (Kupibilet)');
+      this.activePages = 0;
+      console.log('✅ Браузер закрыт');
     }
   }
 }
