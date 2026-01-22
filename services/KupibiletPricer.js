@@ -81,15 +81,49 @@ class KupibiletPricer {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
+
+        // 🔥 CPU оптимизации
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-software-rasterizer',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gl-drawing-for-tests',
+        '--disable-canvas-aa',
+        '--disable-2d-canvas-clip-aa',
+
+        // 🔥 Отключаем ВСЁ лишнее
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-extensions',
+        '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+        '--disable-ipc-flooding-protection',
+        '--disable-renderer-backgrounding',
+
+        // 🔥 Отключаем медиа
+        '--autoplay-policy=user-gesture-required',
+        '--disable-background-media-suspend',
+        '--mute-audio',
+
+        // 🔥 Память
+        '--disable-dev-shm-usage',
+        '--disable-shared-workers',
+
+        // 🔥 JS оптимизации
+        '--js-flags=--max-old-space-size=512', // Лимит RAM для JS
+
+        // 🔥 Низкое разрешение (меньше рендеринга)
+        '--window-size=1920,1080', // Вместо 1920x1080
+
+        '--single-process', // Один процесс вместо нескольких
+        '--no-zygote',
+
+
         '--disable-blink-features=AutomationControlled',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-dev-shm-usage', // 🔥 ВАЖНО для контейнеров
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-        '--window-size=1920,1080',
-        '--single-process', // 🔥 НОВОЕ: меньше процессов
-        '--no-zygote', // 🔥 НОВОЕ: экономия RAM
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       ],
       ignoreDefaultArgs: ['--enable-automation'],
