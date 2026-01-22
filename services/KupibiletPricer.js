@@ -8,7 +8,7 @@ class KupibiletPricer {
     this.debug = debug;
     this.lastRequestTime = 0;
     this.minDelayBetweenRequests = 3000; // 3 секунды между запросами
-    this.maxConcurrent = 3; // 🔥 3 браузера параллельно
+    this.maxConcurrent = 2; // 🔥 2 браузера параллельно
 
     // Создаем папку для скриншотов
     const tempDir = path.join(__dirname, '../temp');
