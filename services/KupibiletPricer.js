@@ -294,17 +294,49 @@ class KupibiletPricer {
 
       // 🔥 ИЗМЕНЕНО: Сохраняем handler для удаления
       await page.setRequestInterception(true);
-      requestHandler = (request) => {
+      const blockedResourceTypes = [
+        'image',
+        'stylesheet',
+        'font',
+        'media',
+        'websocket',
+        'manifest',
+        'other'
+      ];
+
+      const blockedDomains = [
+        'google-analytics.com',
+        'googletagmanager.com',
+        'mc.yandex.ru',
+        'metrika.yandex.ru',
+        'recaptcha.net',
+        'googlesyndication.com',
+        'doubleclick.net',
+        'facebook.com',
+        'twitter.com',
+        'vk.com',
+        'mc.webvisor.org',
+        'analytics'
+      ];
+
+      page.on('request', (request) => {
         const url = request.url();
-        if (url.includes('recaptcha') || url.includes('google-analytics') ||
-          url.includes('googletagmanager') || url.includes('mc.yandex') ||
-          url.includes('metrika')) {
+        const resourceType = request.resourceType();
+
+        // Блокируем типы ресурсов
+        if (blockedResourceTypes.includes(resourceType)) {
           request.abort();
-        } else {
-          request.continue();
+          return;
         }
-      };
-      page.on('request', requestHandler);
+
+        // Блокируем домены
+        if (blockedDomains.some(domain => url.includes(domain))) {
+          request.abort();
+          return;
+        }
+
+        request.continue();
+      });
 
       // Антиспам задержка
       const timeSinceLastRequest = Date.now() - this.lastRequestTime;
