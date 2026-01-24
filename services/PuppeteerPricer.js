@@ -18,6 +18,141 @@ class PuppeteerPricer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  // 🔥 НОВАЯ ФУНКЦИЯ: Сброс сохраненных фильтров
+  async resetSavedFilters(page, index, total) {
+    console.log(`[${index}/${total}] 🔄 Проверка сохраненных фильтров...`);
+
+    try {
+      // Ждем появления информера с сохраненными фильтрами (максимум 5 секунд)
+      const informerExists = await Promise.race([
+        page.waitForSelector('[data-test-id="saved-filters-informer-container"]', {
+          timeout: 5000,
+          visible: true
+        }).then(() => true),
+        this.sleep(5000).then(() => false)
+      ]);
+
+      if (!informerExists) {
+        console.log(`[${index}/${total}] ✅ Сохраненных фильтров нет`);
+        return true;
+      }
+
+      console.log(`[${index}/${total}] ⚠️ Обнаружены сохраненные фильтры из прошлого поиска`);
+
+      // Ищем и кликаем кнопку "Сбросить"
+      const resetClicked = await page.evaluate(() => {
+        const informer = document.querySelector('[data-test-id="saved-filters-informer-container"]');
+        if (!informer) {
+          console.log('Информер не найден');
+          return false;
+        }
+
+        const resetButton = informer.querySelector('button[data-test-id="button"]');
+        if (!resetButton) {
+          console.log('Кнопка сброса не найдена');
+          return false;
+        }
+
+        const buttonText = resetButton.textContent.trim();
+        console.log(`Найдена кнопка: "${buttonText}"`);
+
+        if (buttonText.includes('Сбросить') || buttonText.includes('Reset')) {
+          resetButton.click();
+          console.log('✅ Кликнули кнопку сброса');
+          return true;
+        }
+
+        return false;
+      });
+
+      if (!resetClicked) {
+        console.warn(`[${index}/${total}] ⚠️ Не удалось кликнуть кнопку сброса`);
+        return false;
+      }
+
+      console.log(`[${index}/${total}] ✅ Фильтры сброшены, ожидание обновления результатов...`);
+
+      // Ждем исчезновения информера и обновления результатов
+      await this.sleep(2000);
+
+      // Проверяем что информер исчез
+      const informerGone = await page.evaluate(() => {
+        const informer = document.querySelector('[data-test-id="saved-filters-informer-container"]');
+        return informer === null || informer.style.display === 'none';
+      });
+
+      if (informerGone) {
+        console.log(`[${index}/${total}] ✅ Информер исчез, фильтры успешно сброшены`);
+      } else {
+        console.log(`[${index}/${total}] ⚠️ Информер все еще виден, но продолжаем`);
+      }
+
+      return true;
+
+    } catch (error) {
+      console.error(`[${index}/${total}] ❌ Ошибка сброса фильтров:`, error.message);
+      return false;
+    }
+  }
+
+  // 🔥 НОВАЯ ФУНКЦИЯ: Проверка завершения поиска
+  async waitForSearchComplete(page, index, total, timeout = 120000) {
+    console.log(`[${index}/${total}] 🔍 Ожидание завершения поиска билетов...`);
+
+    const startTime = Date.now();
+    let checks = 0;
+
+    while (Date.now() - startTime < timeout) {
+      checks++;
+
+      const searchStatus = await page.evaluate(() => {
+        // Проверяем различные индикаторы поиска
+        const searchIndicators = {
+          // Текст "Ищем билеты"
+          searchingText: document.body.textContent.includes('Ищем билеты') ||
+              document.body.textContent.includes('Searching for tickets'),
+
+          // Спиннеры загрузки
+          spinners: document.querySelectorAll('[class*="spinner"]').length > 0 ||
+              document.querySelectorAll('[class*="loading"]').length > 0 ||
+              document.querySelectorAll('[class*="Loader"]').length > 0,
+
+          // Прогресс-бары
+          progressBars: document.querySelectorAll('progress').length > 0,
+
+          // Количество результатов
+          resultsCount: document.querySelectorAll('[data-test-id="price"]').length
+        };
+
+        return searchIndicators;
+      });
+
+      // Логируем статус каждые 5 секунд
+      if (checks % 10 === 0) {
+        console.log(`[${index}/${total}] ⏱ Проверка ${checks} (${Math.floor((Date.now() - startTime) / 1000)}с):`);
+        console.log(`[${index}/${total}]    📊 Результатов: ${searchStatus.resultsCount}`);
+        console.log(`[${index}/${total}]    🔄 Ищем: ${searchStatus.searchingText}`);
+        console.log(`[${index}/${total}]    ⏳ Спиннеры: ${searchStatus.spinners}`);
+      }
+
+      // Поиск завершен, если:
+      // 1. Нет текста "Ищем билеты"
+      // 2. Нет спиннеров
+      // 3. Есть хотя бы несколько результатов
+      if (!searchStatus.searchingText &&
+          !searchStatus.spinners &&
+          searchStatus.resultsCount > 0) {
+        console.log(`[${index}/${total}] ✅ Поиск завершен! Найдено ${searchStatus.resultsCount} результатов`);
+        return true;
+      }
+
+      await this.sleep(500);
+    }
+
+    console.log(`[${index}/${total}] ⚠️ Timeout: поиск не завершился за ${timeout/1000}с`);
+    return false;
+  }
+
   // Снимок цен для отслеживания изменений
   async getPricesSnapshot(page) {
     return await page.evaluate(() => {
@@ -81,7 +216,9 @@ class PuppeteerPricer {
         previousSnapshot = currentSnapshot;
       }
 
-      console.log(`[${index}/${total}] 📊 Проверка стабильности ${checks} (${previousSnapshot.length} цен, стабильно ${stableFor}мс)`);
+      if (checks % 6 === 0) {
+        console.log(`[${index}/${total}] 📊 Проверка стабильности ${checks} (${previousSnapshot.length} цен, стабильно ${stableFor}мс)`);
+      }
     }
 
     return previousSnapshot.length > 0;
@@ -196,7 +333,6 @@ class PuppeteerPricer {
     console.log(`[${index}/${total}] ⏱ Установка макс. времени пересадки: ${maxHours}ч...`);
 
     try {
-      // Ждем контейнер фильтра - ПРАВИЛЬНЫЙ SELECTOR ИЗ HTML!
       const filterContainer = await page.$('[data-test-id="range-filter-transfers_duration"]');
       if (!filterContainer) {
         console.warn(`[${index}/${total}] ⚠️ Фильтр времени пересадки не найден`);
@@ -207,7 +343,6 @@ class PuppeteerPricer {
 
       const success = await page.evaluate((targetHours) => {
         console.log('🎯 Начинаем изменение слайдера...');
-        // 1. Находим контейнер - ПРАВИЛЬНЫЙ SELECTOR!
         const filterContainer = document.querySelector('[data-test-id="range-filter-transfers_duration"]');
         if (!filterContainer) {
           console.error('❌ Контейнер не найден');
@@ -216,7 +351,6 @@ class PuppeteerPricer {
 
         console.log('✅ 2. Контейнер найден');
 
-        // 2. Находим слайдер и правую ручку
         const slider = filterContainer.querySelector('.rc-slider');
         const maxHandle = slider.querySelector('.rc-slider-handle-2');
 
@@ -233,18 +367,15 @@ class PuppeteerPricer {
         console.log(`  Старое значение: ${oldValue} (${Math.floor(oldValue/60)}ч)`);
         console.log(`  Диапазон: ${minValue} - ${maxValue}`);
 
-        // 3. Вычисляем новое значение
-        const newValue = targetHours * 60; // переводим часы в минуты
+        const newValue = targetHours * 60;
         console.log(`🎯 Целевое значение: ${targetHours}ч = ${newValue} минут`);
 
-        // 4. Вычисляем позицию в процентах
         const range = maxValue - minValue;
         const valueFromMin = newValue - minValue;
         const percentPosition = (valueFromMin / range) * 100;
 
         console.log(`📐 Процентная позиция: ${percentPosition.toFixed(2)}%`);
 
-        // 5. Вычисляем пиксельные координаты
         const sliderRect = slider.getBoundingClientRect();
         const handleRect = maxHandle.getBoundingClientRect();
         const newX = sliderRect.left + (sliderRect.width * percentPosition / 100);
@@ -252,10 +383,8 @@ class PuppeteerPricer {
 
         console.log(`📍 Координаты: x=${newX.toFixed(0)}, y=${centerY.toFixed(0)}`);
 
-        // 6. DRAG & DROP
         console.log('🖱 Начинаем драг...');
 
-        // Mousedown
         const mousedownEvent = new MouseEvent('mousedown', {
           view: window,
           bubbles: true,
@@ -268,7 +397,6 @@ class PuppeteerPricer {
 
         return new Promise((resolve) => {
           setTimeout(() => {
-            // Mousemove
             const mousemoveEvent = new MouseEvent('mousemove', {
               view: window,
               bubbles: true,
@@ -280,7 +408,6 @@ class PuppeteerPricer {
             document.dispatchEvent(mousemoveEvent);
 
             setTimeout(() => {
-              // Mouseup
               const mouseupEvent = new MouseEvent('mouseup', {
                 view: window,
                 bubbles: true,
@@ -299,7 +426,6 @@ class PuppeteerPricer {
                 console.log(`  Новое: ${resultValue} (${resultHours}ч)`);
                 console.log(`  Цель: ${newValue} (${targetHours}ч)`);
 
-                // Допускаем погрешность ±1 час
                 if (Math.abs(resultValue - newValue) <= 60) {
                   console.log('🎉 Значение установлено!');
                   resolve(true);
@@ -308,7 +434,6 @@ class PuppeteerPricer {
                   resolve(true);
                 }
 
-                // Логируем текст тега
                 const tag = filterContainer.querySelector('[data-test-id*="text"]');
                 if (tag) {
                   console.log(`📝 Текст фильтра: "${tag.textContent.trim()}"`);
@@ -336,7 +461,6 @@ class PuppeteerPricer {
     console.log(`[${index}/${total}] ✈️ Применение фильтра авиакомпании: ${airline}`);
 
     try {
-      // 2. Открываем модалку авиакомпаний
       console.log(`[${index}/${total}] 🔍 Ищу кнопку "Авиакомпании"...`);
 
       await page.waitForFunction(() => {
@@ -347,7 +471,7 @@ class PuppeteerPricer {
       const modalOpened = await page.evaluate(() => {
         const buttons = Array.from(document.querySelectorAll('button, div[role="button"]'));
         const airlineButton = buttons.find(btn =>
-          btn.textContent.includes('Авиакомпании') || btn.textContent.includes('Airlines')
+            btn.textContent.includes('Авиакомпании') || btn.textContent.includes('Airlines')
         );
         if (airlineButton) {
           airlineButton.click();
@@ -363,14 +487,12 @@ class PuppeteerPricer {
       console.log(`[${index}/${total}] ✅ Модалка открыта, ожидаю загрузки...`);
       await this.sleep(1000);
 
-      // 3. Кликаем чекбокс авиакомпании
       console.log(`[${index}/${total}] 🎯 Включаю фильтр авиакомпании ${airline}...`);
 
       await page.waitForSelector('[data-test-id*="filter"]', { timeout: 5000 });
       await this.sleep(500);
 
       const checkboxClicked = await page.evaluate((airlineCode) => {
-        // data-test-id="set-filter-row-IATA:SU"
         const filterRow = document.querySelector(`[data-test-id="set-filter-row-${airlineCode}"]`);
         if (filterRow) {
           const checkbox = filterRow.querySelector('input[type="checkbox"]');
@@ -407,11 +529,9 @@ class PuppeteerPricer {
   async applyPriceSortAscending(page, index, total) {
     console.log(`[${index}/${total}] 💰 Включение сортировки "Самые дешёвые"...`);
     try {
-      // 1. Ждем появления селектора сортировки
       await page.waitForSelector('[data-test-id="single-choice-filter-sort-price_asc"]', { timeout: 10000 });
       await this.sleep(500);
 
-      // 2. Кликаем по label (лучше чем по input readonly)
       const sortClicked = await page.evaluate(() => {
         const sortContainer = document.querySelector('[data-test-id="single-choice-filter-sort-price_asc"]');
         if (!sortContainer) {
@@ -506,8 +626,8 @@ class PuppeteerPricer {
       page.on('request', (request) => {
         const url = request.url();
         if (url.includes('recaptcha') || url.includes('google-analytics') ||
-          url.includes('googletagmanager') || url.includes('mc.yandex') ||
-          url.includes('metrika')) {
+            url.includes('googletagmanager') || url.includes('mc.yandex') ||
+            url.includes('metrika')) {
           request.abort();
         } else {
           request.continue();
@@ -558,10 +678,25 @@ class PuppeteerPricer {
         throw new Error('Timeout: результаты не загрузились');
       }
 
+      // 🔥 КРИТИЧЕСКОЕ ОЖИДАНИЕ: Завершение поиска билетов
+      console.log(`[${index}/${total}] 🎯 Ожидание завершения поиска по всем источникам...`);
+      const searchCompleted = await this.waitForSearchComplete(page, index, total, 120000);
+
+      if (!searchCompleted) {
+        console.warn(`[${index}/${total}] ⚠️ Поиск не завершился полностью, но продолжаем...`);
+      }
+
+      // Дополнительная пауза после завершения поиска
+      console.log(`[${index}/${total}] ⏸ Дополнительная пауза 3 сек после завершения поиска...`);
+      await this.sleep(3000);
+
+      // 🔥 НОВЫЙ ШАГ: Сброс сохраненных фильтров
+      await this.resetSavedFilters(page, index, total);
+
       // ПРИМЕНЕНИЕ ФИЛЬТРОВ
       console.log(`[${index}/${total}] 📝 Применение фильтров...`);
 
-      // 🔥 Шаг 1: БАГАЖ (САМЫЙ ПЕРВЫЙ!)
+      // Шаг 1: БАГАЖ
       if (baggage === true || baggage === 1) {
         console.log(`[${index}/${total}] 🔧 Фильтр багажа (первый шаг)`);
         await this.applyBaggageFilter(page, index, total);
@@ -570,13 +705,13 @@ class PuppeteerPricer {
         console.log(`[${index}/${total}] ⏭ Пропускаю фильтр багажа`);
       }
 
-      // Шаг 2: Время пересадки (только если задано)
+      // Шаг 2: Время пересадки
       if (maxLayoverHours !== null && maxLayoverHours !== undefined && maxLayoverHours > 0) {
         console.log(`[${index}/${total}] 🔧 Устанавливаю макс. время пересадки: ${maxLayoverHours}ч`);
         await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
         await this.sleep(500);
       } else {
-        console.log(`[${index}/${total}] ⏭ Пропускаю настройку времени пересадки (прямые рейсы или не задано)`);
+        console.log(`[${index}/${total}] ⏭ Пропускаю настройку времени пересадки`);
       }
 
       // Шаг 3: Авиакомпания
@@ -586,14 +721,14 @@ class PuppeteerPricer {
         await this.sleep(500);
       }
 
-      // 🔥 Шаг 4: СОРТИРОВКА ПО ЦЕНЕ (ПОСЛЕ всех фильтров)
+      // Шаг 4: СОРТИРОВКА ПО ЦЕНЕ
       console.log(`[${index}/${total}] 💰 Сортировка по цене (последний шаг)`);
       await this.applyPriceSortAscending(page, index, total);
 
-      // 🔥 ЕДИНСТВЕННОЕ ДОЛГОЕ ОЖИДАНИЕ - после всех фильтров
+      // Ожидание стабилизации после всех фильтров
       console.log(`[${index}/${total}] ⏳ Ожидание окончательной стабилизации результатов...`);
       await this.sleep(2000);
-      await this.waitForStableResults(page, index, total, 6000);
+      await this.waitForStableResults(page, index, total, 3000);
 
       console.log(`[${index}/${total}] 💰 Получение цены...`);
 
@@ -674,15 +809,15 @@ class PuppeteerPricer {
       for (let j = 0; j < this.maxConcurrent && i + j < total; j++) {
         const index = i + j;
         batch.push(
-          this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours, baggage)
-            .then(result => {
-              results[index] = result;
-              return result;
-            })
-            .catch(error => {
-              results[index] = null;
-              return null;
-            })
+            this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours, baggage)
+                .then(result => {
+                  results[index] = result;
+                  return result;
+                })
+                .catch(error => {
+                  results[index] = null;
+                  return null;
+                })
         );
       }
 
