@@ -1,5 +1,6 @@
 const Route = require('../models/Route');
-const KupibiletPricer = require('../services/KupibiletPricer');
+const AviasalesAPI = require('../services/AviasalesAPI');
+const PuppeteerPricer = require('../services/PuppeteerPricer');
 const db = require('../config/database');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
@@ -9,6 +10,7 @@ class RouteHandlers {
   constructor(bot, userStates) {
     this.bot = bot;
     this.userStates = userStates;
+    this.api = new AviasalesAPI(process.env.TRAVELPAYOUTS_TOKEN);
   }
 
   getMainMenuKeyboard() {
@@ -58,13 +60,10 @@ class RouteHandlers {
     };
 
     routes.forEach((route, index) => {
-      // Kupibilet проверка
       keyboard.inline_keyboard.push([
         { text: `${index + 1}. ${route.origin}→${route.destination}`, callback_data: `check_price_${route.id}` }
       ]);
-      // Kupibilet + сравнение
       keyboard.inline_keyboard.push([
-        { text: '🔍 Kupibilet', callback_data: `check_kupi_${route.id}` },
         { text: '⚖️ Сравнение', callback_data: `compare_${route.id}` }
       ]);
     });
@@ -543,7 +542,7 @@ class RouteHandlers {
   }
 
   async handleCheckPrice(chatId, routeId) {
-    await this.bot.sendMessage(chatId, '🔍 Проверяю цены на Kupibilet...\n⏳ Это может занять 10-15 секунд...');
+    await this.bot.sendMessage(chatId, '🔍 Проверяю цены на Aviasales...\n⏳ Это может занять 10-15 секунд...');
 
     try {
       const route = await Route.findById(routeId);
@@ -553,8 +552,7 @@ class RouteHandlers {
         return;
       }
 
-      // 🔥 Генерация URL через KupibiletPricer.generateSearchUrl()
-      const searchUrl = KupibiletPricer.generateSearchUrl({
+      const searchUrl = this.api.generateSearchLink({
         origin: route.origin,
         destination: route.destination,
         departure_date: route.departure_date,
@@ -563,36 +561,13 @@ class RouteHandlers {
         children: route.children,
         airline: route.airline,
         baggage: route.baggage,
-        max_stops: route.max_stops,
-        max_layover_hours: route.max_stops === 0 ? null : route.max_layover_hours
+        max_stops: route.max_stops
       });
 
-      // 🔥 ИСПОЛЬЗУЕМ KUPIBILET
-      const kupibilet = new KupibiletPricer(false);
-      const maxLayoverHours = route.max_stops === 0 ? null : route.max_layover_hours;
-
-      // Создаем объект routeParams для KupibiletPricer
-      const routeParams = {
-        origin: route.origin,
-        destination: route.destination,
-        departure_date: route.departure_date,
-        return_date: route.return_date,
-        adults: route.adults,
-        children: route.children,
-        max_stops: route.max_stops
-      };
-
-      const result = await kupibilet.getPriceFromUrl(
-        searchUrl,
-        1,
-        1,
-        route.airline,
-        maxLayoverHours,
-        route.baggage,
-        routeParams
-      );
-
-      await kupibilet.close();
+      const puppeteer = new PuppeteerPricer(false);
+      const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
+      const result = await puppeteer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours);
+      await puppeteer.close();
 
       if (result && result.price) {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);
@@ -601,7 +576,7 @@ class RouteHandlers {
         let message = `🔍 Результат проверки:\n\n`;
         message += `📍 ${route.origin} → ${route.destination}\n`;
         message += `💰 ${Formatters.formatPrice(result.price, route.currency)}\n`;
-        message += `✅ Проверено через Kupibilet\n\n`;
+        message += `✅ Проверено через Aviasales\n\n`;
         message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}\n`;
         message += `👥 ${passengersText}\n`;
         message += `🧳 ${baggageText}\n`;
@@ -619,7 +594,7 @@ class RouteHandlers {
 
         const keyboard = {
           inline_keyboard: [[
-            { text: '🔗 Посмотреть на Kupibilet', url: result.search_link || searchUrl }
+            { text: '🔗 Посмотреть на Aviasales', url: result.search_link || searchUrl }
           ]]
         };
 

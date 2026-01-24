@@ -1,5 +1,6 @@
 const Route = require('../models/Route');
-const KupibiletPricer = require('./KupibiletPricer');
+const AviasalesAPI = require('./AviasalesAPI');
+const PuppeteerPricer = require('./PuppeteerPricer');
 const NotificationService = require('./NotificationService');
 const db = require('../config/database');
 const DateUtils = require('../utils/dateUtils');
@@ -8,8 +9,8 @@ const PriceAnalytics = require('./PriceAnalytics');
 
 class PriceMonitor {
   constructor(aviasalesToken, bot, debug = false) {
-    // aviasalesToken больше не используется, но оставляем параметр для совместимости
-    this.kupibiletPricer = new KupibiletPricer(debug);
+    this.api = new AviasalesAPI(aviasalesToken);
+    this.puppeteerPricer = new PuppeteerPricer(debug);
     this.notificationService = new NotificationService(bot);
     this.bot = bot;
     this.stats = {
@@ -25,7 +26,7 @@ class PriceMonitor {
   async checkPrices() {
     this.stats.startTime = Date.now();
     console.log('\n========================================');
-    console.log('⏰ ПРОВЕРКА ОБЫЧНЫХ МАРШРУТОВ (Kupibilet)');
+    console.log('⏰ ПРОВЕРКА ОБЫЧНЫХ МАРШРУТОВ (Aviasales)');
     console.log(new Date().toLocaleString('ru-RU'));
     console.log('========================================\n');
 
@@ -56,8 +57,7 @@ class PriceMonitor {
       };
 
       try {
-        // Генерируем URL через KupibiletPricer
-        const searchUrl = KupibiletPricer.generateSearchUrl({
+        const searchUrl = this.api.generateSearchLink({
           origin: route.origin,
           destination: route.destination,
           departure_date: route.departure_date,
@@ -66,29 +66,16 @@ class PriceMonitor {
           children: route.children,
           airline: route.airline,
           baggage: route.baggage,
-          max_stops: route.max_stops,
-          max_layover_hours: route.max_stops === 0 ? null : route.max_layover_hours
+          max_stops: route.max_stops
         });
 
-        // Передаем параметры маршрута для KupibiletPricer
-        const routeParams = {
-          origin: route.origin,
-          destination: route.destination,
-          departure_date: route.departure_date,
-          return_date: route.return_date,
-          adults: route.adults,
-          children: route.children,
-          max_stops: route.max_stops
-        };
-
-        const priceResult = await this.kupibiletPricer.getPriceFromUrl(
+        const priceResult = await this.puppeteerPricer.getPriceFromUrl(
           searchUrl,
           i + 1,
           routes.length,
           route.airline,
           route.max_stops === 0 ? null : route.max_layover_hours,
-          route.baggage,
-          routeParams
+          route.baggage  // 🔥 ПАРАМЕТР БАГАЖА
         );
 
         if (priceResult && priceResult.price) {
@@ -100,7 +87,7 @@ class PriceMonitor {
           routeStats.screenshot = priceResult.screenshot;
           this.stats.success++;
 
-          const alert = await this.processPrice(route, totalPrice, priceResult.search_link || searchUrl, canNotify, priceResult.screenshot);
+          const alert = await this.processPrice(route, totalPrice, searchUrl, canNotify, priceResult.screenshot);
           if (alert) {
             routeStats.alert = true;
             this.stats.alerts++;
@@ -166,7 +153,7 @@ class PriceMonitor {
     );
 
     await PriceAnalytics.savePrice({
-      routeId: route.id,
+      routeId: route.id,  // 🔥 ДОБАВЛЯЕМ route.id
       routeType: 'regular',
       origin: route.origin,
       destination: route.destination,
@@ -246,7 +233,7 @@ class PriceMonitor {
     let message = `${header}\n\n`;
     message += `📍 Маршрут: ${route.origin} → ${route.destination}\n`;
     message += `💰 ${Formatters.formatPrice(totalPrice, route.currency)}\n`;
-    message += `✅ Проверено через Kupibilet\n\n`;
+    message += `✅ Проверено через Aviasales\n\n`;
     message += `✈️ Авиакомпания: ${ticket.airline}\n`;
     message += `👥 Пассажиры: ${passengersText}\n`;
     message += `🧳 Багаж: ${baggageText}\n`;
@@ -413,7 +400,7 @@ class PriceMonitor {
   }
 
   async close() {
-    await this.kupibiletPricer.close();
+    await this.puppeteerPricer.close();
   }
 }
 
