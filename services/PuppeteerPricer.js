@@ -18,12 +18,73 @@ class PuppeteerPricer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // 🔥 НОВАЯ ФУНКЦИЯ: Сброс сохраненных фильтров
+  // 🔥 НОВАЯ ФУНКЦИЯ: Получение цены первого билета
+  async getFirstPrice(page) {
+    return await page.evaluate(() => {
+      const prices = document.querySelectorAll('[data-test-id="price"]');
+      if (prices.length === 0) return null;
+
+      const firstPrice = prices[0].textContent.trim();
+      const num = parseInt(firstPrice.replace(/\D/g, ''));
+
+      return isNaN(num) ? null : num;
+    });
+  }
+
+  // 🔥 НОВАЯ ФУНКЦИЯ: Ожидание стабилизации цены первого билета
+  async waitForPriceStability(page, index, total, checksRequired = 3, checkInterval = 10000) {
+    console.log(`[${index}/${total}] 💰 Отслеживание стабилизации цены первого билета...`);
+    console.log(`[${index}/${total}] 📊 Параметры: ${checksRequired} проверок по ${checkInterval}мс`);
+
+    let previousPrice = await this.getFirstPrice(page);
+
+    if (previousPrice === null) {
+      console.warn(`[${index}/${total}] ⚠️ Первая цена не найдена, жду загрузки...`);
+      await this.sleep(checkInterval);
+      previousPrice = await this.getFirstPrice(page);
+
+      if (previousPrice === null) {
+        throw new Error('Не удалось получить первую цену после ожидания');
+      }
+    }
+
+    console.log(`[${index}/${total}] 💰 Начальная цена: ${previousPrice.toLocaleString('ru-RU')} ₽`);
+
+    let stableChecks = 0;
+    let totalChecks = 0;
+
+    while (stableChecks < checksRequired) {
+      await this.sleep(checkInterval);
+      totalChecks++;
+
+      const currentPrice = await this.getFirstPrice(page);
+
+      if (currentPrice === null) {
+        console.warn(`[${index}/${total}] ⚠️ Проверка ${totalChecks}: цена не найдена, сброс счетчика`);
+        stableChecks = 0;
+        previousPrice = null;
+        continue;
+      }
+
+      if (currentPrice === previousPrice) {
+        stableChecks++;
+        console.log(`[${index}/${total}] ✅ Проверка ${totalChecks}: цена стабильна ${currentPrice.toLocaleString('ru-RU')} ₽ (${stableChecks}/${checksRequired})`);
+      } else {
+        console.log(`[${index}/${total}] 🔄 Проверка ${totalChecks}: цена изменилась ${previousPrice.toLocaleString('ru-RU')} → ${currentPrice.toLocaleString('ru-RU')} ₽, сброс счетчика`);
+        stableChecks = 0;
+        previousPrice = currentPrice;
+      }
+    }
+
+    console.log(`[${index}/${total}] 🎉 Цена стабилизировалась на ${previousPrice.toLocaleString('ru-RU')} ₽ после ${totalChecks} проверок`);
+    return previousPrice;
+  }
+
+  // 🔥 ФУНКЦИЯ: Сброс сохраненных фильтров
   async resetSavedFilters(page, index, total) {
     console.log(`[${index}/${total}] 🔄 Проверка сохраненных фильтров...`);
 
     try {
-      // Ждем появления информера с сохраненными фильтрами (максимум 5 секунд)
       const informerExists = await Promise.race([
         page.waitForSelector('[data-test-id="saved-filters-informer-container"]', {
           timeout: 5000,
@@ -39,7 +100,6 @@ class PuppeteerPricer {
 
       console.log(`[${index}/${total}] ⚠️ Обнаружены сохраненные фильтры из прошлого поиска`);
 
-      // Ищем и кликаем кнопку "Сбросить"
       const resetClicked = await page.evaluate(() => {
         const informer = document.querySelector('[data-test-id="saved-filters-informer-container"]');
         if (!informer) {
@@ -70,22 +130,8 @@ class PuppeteerPricer {
         return false;
       }
 
-      console.log(`[${index}/${total}] ✅ Фильтры сброшены, ожидание обновления результатов...`);
-
-      // Ждем исчезновения информера и обновления результатов
+      console.log(`[${index}/${total}] ✅ Фильтры сброшены, ожидание обновления...`);
       await this.sleep(2000);
-
-      // Проверяем что информер исчез
-      const informerGone = await page.evaluate(() => {
-        const informer = document.querySelector('[data-test-id="saved-filters-informer-container"]');
-        return informer === null || informer.style.display === 'none';
-      });
-
-      if (informerGone) {
-        console.log(`[${index}/${total}] ✅ Информер исчез, фильтры успешно сброшены`);
-      } else {
-        console.log(`[${index}/${total}] ⚠️ Информер все еще виден, но продолжаем`);
-      }
 
       return true;
 
@@ -93,125 +139,6 @@ class PuppeteerPricer {
       console.error(`[${index}/${total}] ❌ Ошибка сброса фильтров:`, error.message);
       return false;
     }
-  }
-
-  // 🔥 НОВАЯ ФУНКЦИЯ: Проверка завершения поиска
-  async waitForSearchComplete(page, index, total, timeout = 120000) {
-    console.log(`[${index}/${total}] 🔍 Ожидание завершения поиска билетов...`);
-
-    const startTime = Date.now();
-    let checks = 0;
-
-    while (Date.now() - startTime < timeout) {
-      checks++;
-
-      const searchStatus = await page.evaluate(() => {
-        // Проверяем различные индикаторы поиска
-        const searchIndicators = {
-          // Текст "Ищем билеты"
-          searchingText: document.body.textContent.includes('Ищем билеты') ||
-              document.body.textContent.includes('Searching for tickets'),
-
-          // Количество результатов
-          resultsCount: document.querySelectorAll('[data-test-id="price"]').length
-        };
-
-        return searchIndicators;
-      });
-
-      // Логируем статус каждые 5 секунд
-      if (checks % 10 === 0) {
-        console.log(`[${index}/${total}] ⏱ Проверка ${checks} (${Math.floor((Date.now() - startTime) / 1000)}с):`);
-        console.log(`[${index}/${total}]    📊 Результатов: ${searchStatus.resultsCount}`);
-        console.log(`[${index}/${total}]    🔄 Ищем: ${searchStatus.searchingText}`);
-      }
-
-      // Поиск завершен, если:
-      // 1. Нет текста "Ищем билеты"
-      // 2. Нет спиннеров
-      // 3. Есть хотя бы несколько результатов
-      if (!searchStatus.searchingText &&
-          searchStatus.resultsCount > 0) {
-        console.log(`[${index}/${total}] ✅ Поиск завершен! Найдено ${searchStatus.resultsCount} результатов`);
-        return true;
-      }
-
-      await this.sleep(500);
-    }
-
-    console.log(`[${index}/${total}] ⚠️ Timeout: поиск не завершился за ${timeout/1000}с`);
-    return false;
-  }
-
-  // Снимок цен для отслеживания изменений
-  async getPricesSnapshot(page) {
-    return await page.evaluate(() => {
-      const prices = document.querySelectorAll('[data-test-id="price"]');
-      return Array.from(prices).slice(0, 10).map(p => p.textContent.trim());
-    });
-  }
-
-  arraysEqual(arr1, arr2) {
-    if (arr1.length !== arr2.length) return false;
-    return arr1.every((val, index) => val === arr2[index]);
-  }
-
-  async waitForResultsChange(page, beforeSnapshot, index, total, timeout = 30000) {
-    console.log(`[${index}/${total}] ⏳ Ожидание изменения результатов...`);
-    console.log(`[${index}/${total}] 📊 Начальное состояние: ${beforeSnapshot.length} цен`);
-
-    const startTime = Date.now();
-    let attempts = 0;
-
-    while (Date.now() - startTime < timeout) {
-      attempts++;
-      await this.sleep(500);
-
-      const currentSnapshot = await this.getPricesSnapshot(page);
-
-      if (!this.arraysEqual(beforeSnapshot, currentSnapshot) && currentSnapshot.length > 0) {
-        console.log(`[${index}/${total}] ✅ Результаты изменились! (попытка ${attempts})`);
-        console.log(`[${index}/${total}] 📊 Новое состояние: ${currentSnapshot.length} цен`);
-        console.log(`[${index}/${total}] 💰 Первая цена: ${currentSnapshot[0]}`);
-        return true;
-      }
-
-      if (attempts % 10 === 0) {
-        console.log(`[${index}/${total}] ⏱ Прошло ${attempts} попыток (${Math.floor((Date.now() - startTime) / 1000)}с)...`);
-      }
-    }
-
-    console.log(`[${index}/${total}] ⚠️ Timeout: результаты не изменились за ${timeout}мс`);
-    return false;
-  }
-
-  async waitForStableResults(page, index, total, stabilityTime = 3000) {
-    console.log(`[${index}/${total}] ⏳ Ожидание стабилизации результатов...`);
-
-    let previousSnapshot = await this.getPricesSnapshot(page);
-    let stableFor = 0;
-    const checkInterval = 500;
-    let checks = 0;
-
-    while (stableFor < stabilityTime) {
-      await this.sleep(checkInterval);
-      checks++;
-
-      const currentSnapshot = await this.getPricesSnapshot(page);
-
-      if (this.arraysEqual(previousSnapshot, currentSnapshot) && currentSnapshot.length > 0) {
-        stableFor += checkInterval;
-      } else {
-        stableFor = 0;
-        previousSnapshot = currentSnapshot;
-      }
-
-      if (checks % 6 === 0) {
-        console.log(`[${index}/${total}] 📊 Проверка стабильности ${checks} (${previousSnapshot.length} цен, стабильно ${stableFor}мс)`);
-      }
-    }
-
-    return previousSnapshot.length > 0;
   }
 
   async applyBaggageFilter(page, index, total) {
@@ -311,7 +238,6 @@ class PuppeteerPricer {
       }
 
       console.log(`[${index}/${total}] ✅ Вес багажа 20 кг выбран`);
-
       return true;
     } catch (error) {
       console.error(`[${index}/${total}] ❌ Ошибка применения фильтра багажа:`, error.message);
@@ -545,7 +471,6 @@ class PuppeteerPricer {
       }
 
       console.log(`[${index}/${total}] ✅ Сортировка активирована`);
-
       return true;
     } catch (error) {
       console.error(`[${index}/${total}] ❌ Ошибка сортировки по цене:`, error.message);
@@ -642,85 +567,59 @@ class PuppeteerPricer {
       }
 
       console.log(`[${index}/${total}] ⏳ Ожидание выполнения JavaScript...`);
-      await this.sleep(8000);
+      await this.sleep(5000);
 
       console.log(`[${index}/${total}] 🔍 Поиск результатов...`);
-      let attempts = 0;
-      const maxAttempts = 10;
-      let found = false;
+      await page.waitForSelector('[data-test-id="search-results-items-list"]', {
+        timeout: 30000,
+        visible: true
+      });
+      console.log(`[${index}/${total}] ✅ Результаты найдены!`);
 
-      while (attempts < maxAttempts && !found) {
-        try {
-          await page.waitForSelector('[data-test-id="search-results-items-list"]', {
-            timeout: 5000,
-            visible: true
-          });
-          found = true;
-          console.log(`[${index}/${total}] ✅ Результаты найдены!`);
-        } catch (e) {
-          attempts++;
-          console.log(`[${index}/${total}] ⏳ Попытка ${attempts}/${maxAttempts}...`);
-          await this.sleep(2000);
-        }
-      }
+      // 🔥 ШАГ 1: СОРТИРОВКА (ПЕРВЫМ ДЕЛОМ!)
+      console.log(`[${index}/${total}] 📝 ШАГ 1: Применение сортировки по цене`);
+      await this.applyPriceSortAscending(page, index, total);
+      await this.sleep(1000);
 
-      if (!found) {
-        throw new Error('Timeout: результаты не загрузились');
-      }
-
-      // 🔥 КРИТИЧЕСКОЕ ОЖИДАНИЕ: Завершение поиска билетов
-      console.log(`[${index}/${total}] 🎯 Ожидание завершения поиска по всем источникам...`);
-      const searchCompleted = await this.waitForSearchComplete(page, index, total, 120000);
-
-      if (!searchCompleted) {
-        console.warn(`[${index}/${total}] ⚠️ Поиск не завершился полностью, но продолжаем...`);
-      }
-
-      // Дополнительная пауза после завершения поиска
-      console.log(`[${index}/${total}] ⏸ Дополнительная пауза 3 сек после завершения поиска...`);
-      await this.sleep(3000);
-
-      // 🔥 НОВЫЙ ШАГ: Сброс сохраненных фильтров
+      // 🔥 ШАГ 2: СБРОС СОХРАНЕННЫХ ФИЛЬТРОВ
+      console.log(`[${index}/${total}] 📝 ШАГ 2: Сброс сохраненных фильтров`);
       await this.resetSavedFilters(page, index, total);
+      await this.sleep(1000);
 
-      // ПРИМЕНЕНИЕ ФИЛЬТРОВ
-      console.log(`[${index}/${total}] 📝 Применение фильтров...`);
+      // 🔥 ШАГ 3: ПРИМЕНЕНИЕ ФИЛЬТРОВ (БЕЗ СТАБИЛИЗАЦИИ)
+      console.log(`[${index}/${total}] 📝 ШАГ 3: Применение фильтров`);
 
-      // Шаг 1: БАГАЖ
+      // Багаж
       if (baggage === true || baggage === 1) {
-        console.log(`[${index}/${total}] 🔧 Фильтр багажа (первый шаг)`);
+        console.log(`[${index}/${total}] 🔧 Фильтр багажа`);
         await this.applyBaggageFilter(page, index, total);
-        await this.sleep(500);
+        await this.sleep(1000);
       } else {
         console.log(`[${index}/${total}] ⏭ Пропускаю фильтр багажа`);
       }
 
-      // Шаг 2: Время пересадки
+      // Время пересадки
       if (maxLayoverHours !== null && maxLayoverHours !== undefined && maxLayoverHours > 0) {
         console.log(`[${index}/${total}] 🔧 Устанавливаю макс. время пересадки: ${maxLayoverHours}ч`);
         await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
-        await this.sleep(500);
+        await this.sleep(1000);
       } else {
         console.log(`[${index}/${total}] ⏭ Пропускаю настройку времени пересадки`);
       }
 
-      // Шаг 3: Авиакомпания
+      // Авиакомпания
       if (airline) {
         console.log(`[${index}/${total}] 🔧 Фильтр авиакомпании`);
         await this.applyAirlineFilter(page, airline, index, total);
-        await this.sleep(500);
+        await this.sleep(1000);
       }
 
-      // Шаг 4: СОРТИРОВКА ПО ЦЕНЕ
-      console.log(`[${index}/${total}] 💰 Сортировка по цене (последний шаг)`);
-      await this.applyPriceSortAscending(page, index, total);
+      // 🔥 ШАГ 4: ЕДИНСТВЕННАЯ СТАБИЛИЗАЦИЯ ПЕРЕД ПОЛУЧЕНИЕМ ЦЕНЫ
+      console.log(`[${index}/${total}] 📝 ШАГ 4: Ожидание загрузки всех источников цен`);
+      await this.waitForPriceStability(page, index, total, 3, 3000);
 
-      // Ожидание стабилизации после всех фильтров
-      console.log(`[${index}/${total}] ⏳ Ожидание окончательной стабилизации результатов...`);
-      await this.sleep(2000);
-      await this.waitForStableResults(page, index, total, 3000);
-
-      console.log(`[${index}/${total}] 💰 Получение цены...`);
+      // 🔥 ШАГ 5: ПОЛУЧЕНИЕ ФИНАЛЬНОЙ ЦЕНЫ
+      console.log(`[${index}/${total}] 💰 Получение финальной цены...`);
 
       const priceData = await page.evaluate(() => {
         const container = document.querySelector('[data-test-id="search-results-items-list"]');
