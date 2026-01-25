@@ -18,8 +18,8 @@ class Route {
           data.children || 0,
           data.airline,
           data.baggage || 0,
-          data.max_stops || 99,
-          data.max_layover_hours || 5,  // 🔥 НОВОЕ ПОЛЕ
+          data.max_stops || null,
+          data.max_layover_hours || null,  // 🔥 НОВОЕ ПОЛЕ
           data.threshold_price,
           data.currency || 'RUB'
         ],

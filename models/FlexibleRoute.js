@@ -21,8 +21,8 @@ class FlexibleRoute {
           data.children || 0,
           data.airline,
           data.baggage || 0,
-          data.max_stops || 99,
-          data.max_layover_hours || 5,
+          data.max_stops || null,
+          data.max_layover_hours || null,
           data.threshold_price,
           data.currency || 'RUB'
         ],

@@ -694,10 +694,12 @@
                             <i class="fas fa-suitcase"></i>
                             <span><%= route.baggage ? 'С багажом' : 'Без багажа' %></span>
                         </div>
-                        <div class="info-item">
-                            <i class="fas fa-clock"></i>
-                            <span>Макс. пересадка: <%= route.max_layover_hours || 5 %>ч</span>
-                        </div>
+                        <% if (route.max_layover_hours) { %>
+                            <div class="info-item">
+                                <i class="fas fa-clock"></i>
+                                <span>Макс. пересадка: <%= route.max_layover_hours || 5 %>ч</span>
+                            </div>
+                        <% } %>
                     </div>
 
                     <div class="route-actions">

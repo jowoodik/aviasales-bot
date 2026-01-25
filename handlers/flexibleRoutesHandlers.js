@@ -339,9 +339,9 @@ class FlexibleRoutesHandlers {
         } else if (text.includes('2')) {
           state.max_stops = 2;
         } else if (text.includes('Любое')) {
-          state.max_stops = 99;
+          state.max_stops = null;
         } else {
-          state.max_stops = 99;
+          state.max_stops = null;
         }
 
         if (state.max_stops === 0) {
@@ -411,7 +411,7 @@ class FlexibleRoutesHandlers {
           airline: state.airline,
           baggage: state.baggage,
           max_stops: state.max_stops !== undefined ? state.max_stops : 99,
-          max_layover_hours: state.max_layover_hours !== undefined ? state.max_layover_hours : 5,
+          max_layover_hours: state.max_layover_hours !== undefined ? state.max_layover_hours : null,
           threshold_price: state.threshold_price,
           currency: 'RUB'
         })
@@ -459,13 +459,11 @@ class FlexibleRoutesHandlers {
       const flexMonitor = new FlexibleMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
       await flexMonitor.checkAllRoutes();
       await flexMonitor.sendReport(chatId);
-      await flexMonitor.close();
 
       const PriceMonitor = require('../services/RegularMonitor');
       const priceMonitor = new PriceMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
       await priceMonitor.checkPrices();
       await priceMonitor.sendReport(chatId);
-      await priceMonitor.close();
 
       await this.bot.sendMessage(chatId, '✅ Проверка всех маршрутов завершена!', this.getMainMenuKeyboard());
     } catch (error) {

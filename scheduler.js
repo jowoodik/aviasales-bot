@@ -24,8 +24,6 @@ function setupScheduler(priceMonitor, flexibleMonitor) {
         routes: []
       };
 
-      await priceMonitor.close();
-
       // 2️⃣ Гибкие маршруты
       console.log('🔍 Проверяем гибкие маршруты...');
       await flexibleMonitor.checkAllRoutes();
@@ -42,8 +40,6 @@ function setupScheduler(priceMonitor, flexibleMonitor) {
         startTime: null,
         routes: []
       };
-
-      await flexibleMonitor.close();
 
       console.log('✅ Автопроверка завершена');
     } catch (error) {

@@ -333,12 +333,6 @@ class FlexibleMonitor {
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
-
-  async close() {
-    if (this.aviasalesPricer) {
-      await this.aviasalesPricer.close();
-    }
-  }
 }
 
 module.exports = FlexibleMonitor;

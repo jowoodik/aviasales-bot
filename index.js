@@ -2,7 +2,7 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 require('./config/database');
 
-const PriceMonitor = require('./services/RegularMonitor');
+const RegularMonitor = require('./services/RegularMonitor');
 const FlexibleMonitor = require('./services/FlexibleMonitor');
 const RouteHandlers = require('./handlers/regularRouteHandlers');
 const FlexibleHandlers = require('./handlers/flexibleRoutesHandlers');
@@ -17,7 +17,7 @@ const FlexibleRoute = require('./models/FlexibleRoute');
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
 const userStates = {};
 
-const priceMonitor = new PriceMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
+const regularMonitor = new RegularMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
 const flexibleMonitor = new FlexibleMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
 const routeHandlers = new RouteHandlers(bot, userStates);
 const flexibleHandlers = new FlexibleHandlers(bot, userStates);
@@ -101,7 +101,7 @@ bot.onText(/\/settings/, (msg) => {
 bot.onText(/\/check/, async (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, '🔄 Запускаю проверку всех маршрутов...');
-  await priceMonitor.checkPrices();
+  await regularMonitor.checkPrices();
   await flexibleMonitor.checkAllRoutes();
   bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard());
 });
@@ -114,7 +114,6 @@ bot.onText(/\/check_prices/, async (msg) => {
     const FlexibleMonitor = require('./services/FlexibleMonitor');
     const monitor = new FlexibleMonitor(process.env.AVIASALES_TOKEN, bot);
     await monitor.checkAllRoutes();
-    await monitor.close();
 
     await bot.sendMessage(chatId, '✅ Проверка завершена! Если найдены хорошие цены, вы получите уведомление.');
   } catch (error) {
@@ -124,7 +123,7 @@ bot.onText(/\/check_prices/, async (msg) => {
 });
 
 bot.onText(/\/report/, (msg) => {
-  priceMonitor.generateDailyReport(msg.chat.id);
+  regularMonitor.generateDailyReport(msg.chat.id);
 });
 
 bot.on('callback_query', async (query) => {
@@ -712,7 +711,7 @@ process.on('SIGQUIT', shutdown);
 
 global.flexibleMonitor = flexibleMonitor;
 
-setupScheduler(priceMonitor, flexibleMonitor);
+setupScheduler(regularMonitor, flexibleMonitor);
 
 if (process.env.ENABLE_WEB === 'true') {
   require('./web/server');

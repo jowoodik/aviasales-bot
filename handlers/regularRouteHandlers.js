@@ -361,9 +361,9 @@ class RegularRouteHandlers {
       } else if (text.includes('2')) {
         data.max_stops = 2;
       } else if (text.includes('🌍')) {
-        data.max_stops = 99;
+        data.max_stops = null;
       } else {
-        data.max_stops = 99;
+        data.max_stops = null;
       }
 
       if (data.max_stops === 0) {
@@ -434,8 +434,8 @@ class RegularRouteHandlers {
 
       Route.create(chatId, {
         ...data,
-        max_stops: data.max_stops || 99,
-        max_layover_hours: data.max_layover_hours || 5
+        max_stops: data.max_stops || null,
+        max_layover_hours: data.max_layover_hours || null
       }).then(() => {
         const stopsText = data.max_stops === 0 ? '✈️ Прямой рейс' :
           data.max_stops === 1 ? '🔄 Макс. 1 пересадка' :
@@ -566,7 +566,6 @@ class RegularRouteHandlers {
       const aviasalesPricer = new AviasalesPricer(false);
       const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
       const result = await aviasalesPricer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours, route.max_stops);
-      await aviasalesPricer.close();
 
       if (result && result.price) {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);

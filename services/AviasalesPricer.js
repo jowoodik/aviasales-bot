@@ -4,7 +4,7 @@ const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false) {
-    this.browser = null;
+    // Убираем this.browser - каждая проверка создает свой браузер
     this.maxConcurrent = 2;
     this.debug = debug;
 
@@ -12,13 +12,71 @@ class AviasalesPricer {
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
+
+    // 🔥 Чистка старых скриншотов при запуске
+    this.cleanupOldScreenshots();
   }
 
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // 🔥 НОВАЯ ФУНКЦИЯ: Получение цены первого билета
+  // 🔥 НОВЫЙ МЕТОД: Создание браузера для каждой проверки
+  async createBrowser() {
+    return await puppeteer.launch({
+      headless: !this.debug,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--window-size=1920,1080',
+        '--disable-web-security',
+        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      ],
+      ignoreDefaultArgs: ['--enable-automation'],
+      ignoreHTTPSErrors: true,
+      dumpio: this.debug
+    });
+  }
+
+  // 🔥 Чистка старых скриншотов (> 24 часов)
+  cleanupOldScreenshots() {
+    const tempDir = path.join(__dirname, '../temp');
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24 часа
+
+    fs.readdir(tempDir, (err, files) => {
+      if (err) {
+        console.warn('⚠️ Не удалось прочитать папку temp:', err.message);
+        return;
+      }
+
+      let deletedCount = 0;
+
+      files.forEach(file => {
+        const filePath = path.join(tempDir, file);
+
+        fs.stat(filePath, (err, stats) => {
+          if (err) return;
+
+          if (now - stats.mtimeMs > maxAge) {
+            fs.unlink(filePath, (err) => {
+              if (!err) {
+                deletedCount++;
+                if (deletedCount === 1) {
+                  console.log(`🗑 Удаляю старые скриншоты (> 24ч)...`);
+                }
+              }
+            });
+          }
+        });
+      });
+    });
+  }
+
+  // 🔥 Получение цены первого билета
   async getFirstPrice(page) {
     return await page.evaluate(() => {
       const prices = document.querySelectorAll('[data-test-id="price"]');
@@ -31,8 +89,8 @@ class AviasalesPricer {
     });
   }
 
-  // 🔥 НОВАЯ ФУНКЦИЯ: Ожидание стабилизации цены первого билета
-  async waitForPriceStability(page, index, total, checksRequired = 3, checkInterval = 10000) {
+  // 🔥 Ожидание стабилизации цены первого билета
+  async waitForPriceStability(page, index, total, checksRequired = 3, checkInterval = 3000) {
     console.log(`[${index}/${total}] 💰 Отслеживание стабилизации цены первого билета...`);
     console.log(`[${index}/${total}] 📊 Параметры: ${checksRequired} проверок по ${checkInterval}мс`);
 
@@ -80,7 +138,7 @@ class AviasalesPricer {
     return previousPrice;
   }
 
-  // 🔥 ФУНКЦИЯ: Сброс сохраненных фильтров
+  // 🔥 Сброс сохраненных фильтров
   async resetSavedFilters(page, index, total) {
     console.log(`[${index}/${total}] 🔄 Проверка сохраненных фильтров...`);
 
@@ -131,7 +189,7 @@ class AviasalesPricer {
       }
 
       console.log(`[${index}/${total}] ✅ Фильтры сброшены, ожидание обновления...`);
-      await this.sleep(2000);
+      await this.sleep(1000);
 
       return true;
 
@@ -141,16 +199,31 @@ class AviasalesPricer {
     }
   }
 
-  // 🔥 НОВАЯ ФУНКЦИЯ: Применение фильтра максимального количества пересадок
   async applyMaxStopsFilter(page, maxStops, index, total) {
     console.log(`[${index}/${total}] 🔢 Применение фильтра макс. пересадок: ${maxStops}`);
 
     try {
-      console.log(`[${index}/${total}] 🎯 Выбираю фильтр для ${maxStops} пересадок...`);
+      // 🔥 ШАГ 1: Ждем появления динамического контейнера фильтров
+      console.log(`[${index}/${total}] 🔍 Жду загрузки блока фильтров пересадок...`);
 
-      // Формируем селектор и кликаем напрямую по элементу
+      await page.waitForSelector('[data-test-id="dynamic-filter-instance-transfers_count"]', {
+        timeout: 10000,
+        visible: true
+      });
+
+      console.log(`[${index}/${total}] ✅ Блок фильтров пересадок загружен`);
+
+      // 🔥 ШАГ 2: Ждем конкретный фильтр
       const selector = `[data-test-id="set-filter-row-${maxStops}"]`;
 
+      await page.waitForSelector(selector, {
+        timeout: 5000,
+        visible: true
+      });
+
+      console.log(`[${index}/${total}] 🎯 Выбираю фильтр для ${maxStops} пересадок...`);
+
+      // 🔥 ШАГ 3: Кликаем по чекбоксу
       const filterClicked = await page.evaluate((sel, stops) => {
         console.log(`Ищу элемент с селектором: ${sel}`);
 
@@ -158,7 +231,6 @@ class AviasalesPricer {
         if (!filterRow) {
           console.error(`❌ Фильтр для ${stops} пересадок не найден`);
 
-          // Выводим доступные фильтры для отладки
           const availableFilters = document.querySelectorAll('[data-test-id^="set-filter-row-"]');
           console.log(`📋 Доступные фильтры пересадок:`);
           availableFilters.forEach(f => {
@@ -169,9 +241,26 @@ class AviasalesPricer {
         }
 
         console.log(`✅ Фильтр найден: ${sel}`);
-        console.log(`🖱 Кликаю напрямую по элементу...`);
 
-        // Кликаем прямо по найденному элементу
+        // Ищем чекбокс внутри
+        const checkbox = filterRow.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+          const wasChecked = checkbox.checked;
+          console.log(`📋 Чекбокс состояние: checked=${wasChecked}`);
+
+          if (!wasChecked) {
+            console.log(`🖱 Кликаю по чекбоксу...`);
+            checkbox.click();
+            console.log(`✅ Клик выполнен для ${stops} пересадок`);
+            return true;
+          } else {
+            console.log(`ℹ️ Чекбокс уже выбран`);
+            return true;
+          }
+        }
+
+        // Если чекбокс не найден, кликаем по всему ряду
+        console.log(`🖱 Кликаю по всему ряду фильтра...`);
         filterRow.click();
         console.log(`✅ Клик выполнен для ${stops} пересадок`);
 
@@ -181,6 +270,10 @@ class AviasalesPricer {
       if (!filterClicked) {
         throw new Error(`Не удалось применить фильтр для ${maxStops} пересадок`);
       }
+
+      // 🔥 ШАГ 4: Ждем применения фильтра (обновление списка билетов)
+      console.log(`[${index}/${total}] ⏳ Ожидание применения фильтра...`);
+      await this.sleep(1000); // Даем время на перерисовку
 
       console.log(`[${index}/${total}] ✅ Фильтр макс. пересадок (${maxStops}) применен`);
       return true;
@@ -482,7 +575,6 @@ class AviasalesPricer {
       }
 
       console.log(`[${index}/${total}] ✅ Чекбокс ${airline} активирован`);
-
       console.log(`[${index}/${total}] ✅ Фильтрация авиакомпании ${airline} завершена!`);
       return true;
 
@@ -531,6 +623,11 @@ class AviasalesPricer {
   async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const startTime = Date.now();
 
+    // 🔥 Локальные переменные для браузера и страницы
+    let browser = null;
+    let page = null;
+    let screenshotPath = null;
+
     console.log('='.repeat(80));
     console.log(`[${index}/${total}] 🚀 НАЧАЛО ПРОВЕРКИ`);
     console.log(`[${index}/${total}] 🔗 ${url}`);
@@ -548,11 +645,12 @@ class AviasalesPricer {
     }
     console.log('='.repeat(80));
 
-    await this.init();
-    const page = await this.browser.newPage();
-    let screenshotPath = null;
-
     try {
+      // 🔥 Создаем свой браузер для этой проверки
+      console.log(`[${index}/${total}] 🚀 Запуск браузера...`);
+      browser = await this.createBrowser();
+      page = await browser.newPage();
+
       await page.evaluateOnNewDocument(() => {
         delete Object.getPrototypeOf(navigator).webdriver;
 
@@ -620,7 +718,7 @@ class AviasalesPricer {
       }
 
       console.log(`[${index}/${total}] ⏳ Ожидание выполнения JavaScript...`);
-      await this.sleep(5000);
+      await this.sleep(3000); // ⚡ Оптимизировано с 5000
 
       console.log(`[${index}/${total}] 🔍 Поиск результатов...`);
       await page.waitForSelector('[data-test-id="search-results-items-list"]', {
@@ -629,33 +727,33 @@ class AviasalesPricer {
       });
       console.log(`[${index}/${total}] ✅ Результаты найдены!`);
 
-      // 🔥 ШАГ 1: СОРТИРОВКА (ПЕРВЫМ ДЕЛОМ!)
+      // 🔥 ШАГ 1: СОРТИРОВКА
       console.log(`[${index}/${total}] 📝 ШАГ 1: Применение сортировки по цене`);
       await this.applyPriceSortAscending(page, index, total);
-      await this.sleep(1000);
+      await this.sleep(500); // ⚡ Оптимизировано с 1000
 
       // 🔥 ШАГ 2: СБРОС СОХРАНЕННЫХ ФИЛЬТРОВ
       console.log(`[${index}/${total}] 📝 ШАГ 2: Сброс сохраненных фильтров`);
       await this.resetSavedFilters(page, index, total);
-      await this.sleep(1000);
+      await this.sleep(500); // ⚡ Оптимизировано с 1000
 
-      // 🔥 ШАГ 3: ПРИМЕНЕНИЕ ФИЛЬТРОВ (БЕЗ СТАБИЛИЗАЦИИ)
+      // 🔥 ШАГ 3: ПРИМЕНЕНИЕ ФИЛЬТРОВ
       console.log(`[${index}/${total}] 📝 ШАГ 3: Применение фильтров`);
 
-      // Максимальное количество пересадок
-      if (max_stops !== null && max_stops !== undefined && max_stops >= 0) {
+      // Максимальное количество пересадок (только 0, 1, 2)
+      if (max_stops !== null && max_stops !== undefined && max_stops >= 0 && max_stops < 3) {
         console.log(`[${index}/${total}] 🔧 Фильтр макс. пересадок`);
         await this.applyMaxStopsFilter(page, max_stops, index, total);
-        await this.sleep(1000);
+        await this.sleep(500); // ⚡ Оптимизировано с 1000
       } else {
-        console.log(`[${index}/${total}] ⏭ Пропускаю фильтр пересадок`);
+        console.log(`[${index}/${total}] ⏭ Пропускаю фильтр пересадок (max_stops=${max_stops})`);
       }
 
       // Багаж
       if (baggage === true || baggage === 1) {
         console.log(`[${index}/${total}] 🔧 Фильтр багажа`);
         await this.applyBaggageFilter(page, index, total);
-        await this.sleep(1000);
+        await this.sleep(500); // ⚡ Оптимизировано с 1000
       } else {
         console.log(`[${index}/${total}] ⏭ Пропускаю фильтр багажа`);
       }
@@ -664,7 +762,7 @@ class AviasalesPricer {
       if (maxLayoverHours !== null && maxLayoverHours !== undefined && maxLayoverHours > 0) {
         console.log(`[${index}/${total}] 🔧 Устанавливаю макс. время пересадки: ${maxLayoverHours}ч`);
         await this.setMaxLayoverDuration(page, maxLayoverHours, index, total);
-        await this.sleep(1000);
+        await this.sleep(500); // ⚡ Оптимизировано с 1000
       } else {
         console.log(`[${index}/${total}] ⏭ Пропускаю настройку времени пересадки`);
       }
@@ -673,10 +771,10 @@ class AviasalesPricer {
       if (airline) {
         console.log(`[${index}/${total}] 🔧 Фильтр авиакомпании`);
         await this.applyAirlineFilter(page, airline, index, total);
-        await this.sleep(1000);
+        await this.sleep(500); // ⚡ Оптимизировано с 1000
       }
 
-      // 🔥 ШАГ 4: ЕДИНСТВЕННАЯ СТАБИЛИЗАЦИЯ ПЕРЕД ПОЛУЧЕНИЕМ ЦЕНЫ
+      // 🔥 ШАГ 4: СТАБИЛИЗАЦИЯ ЦЕНЫ
       console.log(`[${index}/${total}] 📝 ШАГ 4: Ожидание загрузки всех источников цен`);
       await this.waitForPriceStability(page, index, total, 3, 3000);
 
@@ -685,15 +783,39 @@ class AviasalesPricer {
 
       const priceData = await page.evaluate(() => {
         const container = document.querySelector('[data-test-id="search-results-items-list"]');
-        if (!container) return { error: 'Контейнер результатов не найден' };
+        if (!container) {
+          console.error('❌ Контейнер результатов не найден');
+          return { error: 'Контейнер результатов не найден' };
+        }
+
+        // 🔥 ПРОВЕРКА: первый элемент - это информер "смягчить фильтры"?
+        const firstChild = container.firstElementChild;
+        if (firstChild) {
+          const softInformer = firstChild.querySelector('[data-test-id="soft-tickets-informer"]');
+          if (softInformer) {
+            console.error('❌ Билеты не найдены - первый элемент это soft-tickets-informer');
+            return { error: 'Билеты под выбранные фильтры не найдены. Попробуйте смягчить условия поиска.' };
+          } else {
+            console.log('✅ Первый элемент не информер, продолжаем...');
+          }
+        }
 
         const prices = container.querySelectorAll('[data-test-id="price"]');
-        if (prices.length === 0) return { error: 'Цены не найдены' };
+        if (prices.length === 0) {
+          console.error('❌ Цены не найдены');
+          return { error: 'Цены не найдены' };
+        }
+
+        console.log(`✅ Найдено ${prices.length} цен`);
 
         const firstPrice = prices[0].textContent.trim();
+        console.log(`💰 Первая цена (текст): "${firstPrice}"`);
+
         const num = parseInt(firstPrice.replace(/\D/g, ''));
+        console.log(`💰 Первая цена (число): ${num}`);
 
         if (isNaN(num) || num < 1000 || num > 10000000) {
+          console.error(`❌ Некорректная цена: ${firstPrice}`);
           return { error: `Некорректная цена: ${firstPrice}` };
         }
 
@@ -731,10 +853,12 @@ class AviasalesPricer {
       console.error(`[${index}/${total}] ❌ ОШИБКА:`, error.message);
 
       try {
-        const timestamp = Date.now();
-        screenshotPath = path.join(__dirname, '../temp', `error_${airline || 'all'}_${timestamp}.png`);
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        console.log(`[${index}/${total}] 📸 Скриншот ошибки: ${screenshotPath}`);
+        if (page) {
+          const timestamp = Date.now();
+          screenshotPath = path.join(__dirname, '../temp', `error_${airline || 'all'}_${timestamp}.png`);
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+          console.log(`[${index}/${total}] 📸 Скриншот ошибки: ${screenshotPath}`);
+        }
       } catch (e) {
         // ignore
       }
@@ -742,10 +866,34 @@ class AviasalesPricer {
       return null;
 
     } finally {
-      await page.close();
+      // 🔥 КРИТИЧНО: ВСЕГДА закрываем браузер и страницу
+      if (page) {
+        try {
+          await page.removeAllListeners(); // Чистим event listeners
+          await page.close();
+          console.log(`[${index}/${total}] 🔒 Страница закрыта`);
+        } catch (e) {
+          console.error(`[${index}/${total}] ⚠️ Ошибка закрытия страницы:`, e.message);
+        }
+      }
+
+      if (browser) {
+        try {
+          await browser.close();
+          console.log(`[${index}/${total}] 🔒 Браузер закрыт`);
+        } catch (e) {
+          console.error(`[${index}/${total}] ⚠️ Ошибка закрытия браузера:`, e.message);
+        }
+      }
+
+      // 🔥 Явная сборка мусора (если доступна)
+      if (global.gc) {
+        global.gc();
+      }
     }
   }
 
+  // 🔥 WORKER POOL: истинная параллельность без простоев
   async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const total = urls.length;
     const results = new Array(total).fill(null);
@@ -753,71 +901,65 @@ class AviasalesPricer {
     console.log(`🚀 Начинаю обработку ${total} URL по ${this.maxConcurrent} параллельно`);
 
     const startTime = Date.now();
+    let completedCount = 0;
+    let nextUrlIndex = 0;
 
-    for (let i = 0; i < total; i += this.maxConcurrent) {
-      const batch = [];
-
-      for (let j = 0; j < this.maxConcurrent && i + j < total; j++) {
-        const index = i + j;
-        batch.push(
-            this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours, baggage, max_stops)
-                .then(result => {
-                  results[index] = result;
-                  return result;
-                })
-                .catch(error => {
-                  results[index] = null;
-                  return null;
-                })
+    // Функция обработки одного URL
+    const processUrl = async (index) => {
+      try {
+        const result = await this.getPriceFromUrl(
+            urls[index],
+            index + 1,
+            total,
+            airline,
+            maxLayoverHours,
+            baggage,
+            max_stops
         );
-      }
 
-      await Promise.all(batch);
+        results[index] = result;
+        completedCount++;
 
-      if (i + this.maxConcurrent < total) {
-        const pause = Math.floor(Math.random() * 3000) + 5000;
-        console.log(`⏸ Пауза ${pause}мс перед следующей пачкой...`);
-        await this.sleep(pause);
+        console.log(`\n📊 Прогресс: ${completedCount}/${total} завершено\n`);
+
+        // 🔥 Пауза перед следующим (имитация человека)
+        if (nextUrlIndex < total) {
+          const pause = Math.floor(Math.random() * 3000) + 5000; // 5-8 сек
+          console.log(`⏸ Пауза ${pause}мс перед следующим URL...`);
+          await this.sleep(pause);
+        }
+
+        return result;
+      } catch (error) {
+        console.error(`❌ Критическая ошибка URL ${index + 1}:`, error);
+        results[index] = null;
+        completedCount++;
+        return null;
       }
+    };
+
+    // 🔥 Worker pool: запускаем maxConcurrent воркеров
+    const workers = [];
+
+    for (let i = 0; i < Math.min(this.maxConcurrent, total); i++) {
+      const workerChain = (async () => {
+        while (nextUrlIndex < total) {
+          const currentIndex = nextUrlIndex++;
+          await processUrl(currentIndex);
+        }
+      })();
+
+      workers.push(workerChain);
     }
+
+    // Ждем завершения всех воркеров
+    await Promise.allSettled(workers); // 🔥 allSettled вместо all
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const validResults = results.filter(r => r !== null);
-    console.log(`✅ Обработка завершена за ${elapsed}с. Успешно: ${validResults.length}/${total}`);
+    console.log(`\n✅ Обработка завершена за ${elapsed}с. Успешно: ${validResults.length}/${total}\n`);
 
     return results;
-  }
-
-  async init() {
-    if (this.browser) return;
-
-    console.log('🚀 Запуск Puppeteer...');
-    this.browser = await puppeteer.launch({
-      headless: !this.debug,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--window-size=1920,1080',
-        '--disable-web-security',
-        '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      ],
-      ignoreDefaultArgs: ['--enable-automation'],
-      ignoreHTTPSErrors: true,
-      dumpio: this.debug
-    });
-
-    console.log('✅ Puppeteer запущен');
-  }
-
-  async close() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      console.log('🔒 Puppeteer закрыт');
-    }
   }
 }
 
