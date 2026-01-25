@@ -199,11 +199,12 @@ class AviasalesPricer {
     }
   }
 
+  // 🔥 Применение фильтра максимального количества пересадок
   async applyMaxStopsFilter(page, maxStops, index, total) {
     console.log(`[${index}/${total}] 🔢 Применение фильтра макс. пересадок: ${maxStops}`);
 
     try {
-      // 🔥 ШАГ 1: Ждем появления динамического контейнера фильтров
+      // 🔥 ШАГ 1: Ждем загрузки ДИНАМИЧЕСКОГО блока фильтров
       console.log(`[${index}/${total}] 🔍 Жду загрузки блока фильтров пересадок...`);
 
       await page.waitForSelector('[data-test-id="dynamic-filter-instance-transfers_count"]', {
@@ -213,17 +214,13 @@ class AviasalesPricer {
 
       console.log(`[${index}/${total}] ✅ Блок фильтров пересадок загружен`);
 
-      // 🔥 ШАГ 2: Ждем конкретный фильтр
-      const selector = `[data-test-id="set-filter-row-${maxStops}"]`;
+      // Микропауза для стабильности
+      await this.sleep(300);
 
-      await page.waitForSelector(selector, {
-        timeout: 5000,
-        visible: true
-      });
+      const selector = `[data-test-id="set-filter-row-${maxStops}"]`;
 
       console.log(`[${index}/${total}] 🎯 Выбираю фильтр для ${maxStops} пересадок...`);
 
-      // 🔥 ШАГ 3: Кликаем по чекбоксу
       const filterClicked = await page.evaluate((sel, stops) => {
         console.log(`Ищу элемент с селектором: ${sel}`);
 
@@ -242,7 +239,6 @@ class AviasalesPricer {
 
         console.log(`✅ Фильтр найден: ${sel}`);
 
-        // Ищем чекбокс внутри
         const checkbox = filterRow.querySelector('input[type="checkbox"]');
         if (checkbox) {
           const wasChecked = checkbox.checked;
@@ -259,7 +255,6 @@ class AviasalesPricer {
           }
         }
 
-        // Если чекбокс не найден, кликаем по всему ряду
         console.log(`🖱 Кликаю по всему ряду фильтра...`);
         filterRow.click();
         console.log(`✅ Клик выполнен для ${stops} пересадок`);
@@ -270,10 +265,6 @@ class AviasalesPricer {
       if (!filterClicked) {
         throw new Error(`Не удалось применить фильтр для ${maxStops} пересадок`);
       }
-
-      // 🔥 ШАГ 4: Ждем применения фильтра (обновление списка билетов)
-      console.log(`[${index}/${total}] ⏳ Ожидание применения фильтра...`);
-      await this.sleep(1000); // Даем время на перерисовку
 
       console.log(`[${index}/${total}] ✅ Фильтр макс. пересадок (${maxStops}) применен`);
       return true;
@@ -392,6 +383,19 @@ class AviasalesPricer {
     console.log(`[${index}/${total}] ⏱ Установка макс. времени пересадки: ${maxHours}ч...`);
 
     try {
+      // 🔥 ШАГ 1: Ждем загрузки ДИНАМИЧЕСКОГО блока времени пересадки
+      console.log(`[${index}/${total}] 🔍 Жду загрузки блока времени пересадки...`);
+
+      await page.waitForSelector('[data-test-id="dynamic-filter-instance-transfers_duration"]', {
+        timeout: 10000,
+        visible: true
+      });
+
+      console.log(`[${index}/${total}] ✅ Блок времени пересадки загружен`);
+
+      // Микропауза для стабильности
+      await this.sleep(300);
+
       const filterContainer = await page.$('[data-test-id="range-filter-transfers_duration"]');
       if (!filterContainer) {
         console.warn(`[${index}/${total}] ⚠️ Фильтр времени пересадки не найден`);
@@ -649,7 +653,18 @@ class AviasalesPricer {
       // 🔥 Создаем свой браузер для этой проверки
       console.log(`[${index}/${total}] 🚀 Запуск браузера...`);
       browser = await this.createBrowser();
+
+      // 🔥 Слушаем disconnected события
+      browser.on('disconnected', () => {
+        console.error(`[${index}/${total}] ⚠️ Браузер отключился неожиданно!`);
+      });
+
       page = await browser.newPage();
+
+      // 🔥 Слушаем падение страницы
+      page.on('error', (error) => {
+        console.error(`[${index}/${total}] ⚠️ Страница упала:`, error.message);
+      });
 
       await page.evaluateOnNewDocument(() => {
         delete Object.getPrototypeOf(navigator).webdriver;
@@ -869,20 +884,38 @@ class AviasalesPricer {
       // 🔥 КРИТИЧНО: ВСЕГДА закрываем браузер и страницу
       if (page) {
         try {
-          await page.removeAllListeners(); // Чистим event listeners
-          await page.close();
-          console.log(`[${index}/${total}] 🔒 Страница закрыта`);
+          if (!page.isClosed()) {
+            await page.removeAllListeners();
+            await page.close();
+            console.log(`[${index}/${total}] 🔒 Страница закрыта`);
+          } else {
+            console.log(`[${index}/${total}] ℹ️ Страница уже была закрыта`);
+          }
         } catch (e) {
-          console.error(`[${index}/${total}] ⚠️ Ошибка закрытия страницы:`, e.message);
+          // Игнорируем ошибки Protocol error - страница уже закрыта
+          if (e.message.includes('Protocol error') || e.message.includes('Target closed')) {
+            console.log(`[${index}/${total}] ℹ️ Страница уже закрыта`);
+          } else {
+            console.error(`[${index}/${total}] ⚠️ Ошибка закрытия страницы:`, e.message);
+          }
         }
       }
 
       if (browser) {
         try {
-          await browser.close();
-          console.log(`[${index}/${total}] 🔒 Браузер закрыт`);
+          if (browser.isConnected()) {
+            await browser.close();
+            console.log(`[${index}/${total}] 🔒 Браузер закрыт`);
+          } else {
+            console.log(`[${index}/${total}] ℹ️ Браузер уже был закрыт`);
+          }
         } catch (e) {
-          console.error(`[${index}/${total}] ⚠️ Ошибка закрытия браузера:`, e.message);
+          // Игнорируем ошибки Protocol error
+          if (e.message.includes('Protocol error') || e.message.includes('Target closed')) {
+            console.log(`[${index}/${total}] ℹ️ Браузер уже закрыт`);
+          } else {
+            console.error(`[${index}/${total}] ⚠️ Ошибка закрытия браузера:`, e.message);
+          }
         }
       }
 
