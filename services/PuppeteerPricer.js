@@ -112,14 +112,6 @@ class PuppeteerPricer {
           searchingText: document.body.textContent.includes('Ищем билеты') ||
               document.body.textContent.includes('Searching for tickets'),
 
-          // Спиннеры загрузки
-          spinners: document.querySelectorAll('[class*="spinner"]').length > 0 ||
-              document.querySelectorAll('[class*="loading"]').length > 0 ||
-              document.querySelectorAll('[class*="Loader"]').length > 0,
-
-          // Прогресс-бары
-          progressBars: document.querySelectorAll('progress').length > 0,
-
           // Количество результатов
           resultsCount: document.querySelectorAll('[data-test-id="price"]').length
         };
@@ -132,7 +124,6 @@ class PuppeteerPricer {
         console.log(`[${index}/${total}] ⏱ Проверка ${checks} (${Math.floor((Date.now() - startTime) / 1000)}с):`);
         console.log(`[${index}/${total}]    📊 Результатов: ${searchStatus.resultsCount}`);
         console.log(`[${index}/${total}]    🔄 Ищем: ${searchStatus.searchingText}`);
-        console.log(`[${index}/${total}]    ⏳ Спиннеры: ${searchStatus.spinners}`);
       }
 
       // Поиск завершен, если:
@@ -140,7 +131,6 @@ class PuppeteerPricer {
       // 2. Нет спиннеров
       // 3. Есть хотя бы несколько результатов
       if (!searchStatus.searchingText &&
-          !searchStatus.spinners &&
           searchStatus.resultsCount > 0) {
         console.log(`[${index}/${total}] ✅ Поиск завершен! Найдено ${searchStatus.resultsCount} результатов`);
         return true;
