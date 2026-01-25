@@ -494,6 +494,7 @@ class FlexibleRoutesHandlers {
 
         list += `${statusIcon} ${i + 1}. ✈️ ${r.origin} → ${r.destination}\n`;
         list += `   🏢 ${airlineName} | 👥 ${passengersText} | ${baggageIcon}\n`;
+        list += `   Пересадок ${r.max_stops}, длительность ${r.max_layover_hours}\n`;
         list += `   📅 Вылет: ${DateUtils.formatDateDisplay(r.departure_start)} - ${DateUtils.formatDateDisplay(r.departure_end)}\n`;
         list += `   📆 Пребывание: ${r.min_days}-${r.max_days} дней\n`;
         list += `   💰 Порог: ${Formatters.formatPrice(r.threshold_price, r.currency)}\n`;
