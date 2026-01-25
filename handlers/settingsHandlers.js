@@ -3,7 +3,6 @@ const Route = require('../models/Route');
 const FlexibleRoute = require('../models/FlexibleRoute');
 const PriceAnalytics = require('../services/PriceAnalytics');
 const DateUtils = require('../utils/dateUtils');
-const Formatters = require('../utils/formatters');
 const ChartGenerator = require('../services/ChartGenerator');
 
 class SettingsHandlers {

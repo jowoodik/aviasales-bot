@@ -1,5 +1,4 @@
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
-const PriceAnalytics = require('./PriceAnalytics');
 const DateUtils = require('../utils/dateUtils');
 const { createCanvas, loadImage } = require('canvas');
 

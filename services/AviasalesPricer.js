@@ -2,7 +2,7 @@ const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
 
-class PuppeteerPricer {
+class AviasalesPricer {
   constructor(debug = false) {
     this.browser = null;
     this.maxConcurrent = 2;
@@ -137,6 +137,56 @@ class PuppeteerPricer {
 
     } catch (error) {
       console.error(`[${index}/${total}] ❌ Ошибка сброса фильтров:`, error.message);
+      return false;
+    }
+  }
+
+  // 🔥 НОВАЯ ФУНКЦИЯ: Применение фильтра максимального количества пересадок
+  async applyMaxStopsFilter(page, maxStops, index, total) {
+    console.log(`[${index}/${total}] 🔢 Применение фильтра макс. пересадок: ${maxStops}`);
+
+    try {
+      console.log(`[${index}/${total}] 🎯 Выбираю фильтр для ${maxStops} пересадок...`);
+
+      // Формируем селектор и кликаем напрямую по элементу
+      const selector = `[data-test-id="set-filter-row-${maxStops}"]`;
+
+      const filterClicked = await page.evaluate((sel, stops) => {
+        console.log(`Ищу элемент с селектором: ${sel}`);
+
+        const filterRow = document.querySelector(sel);
+        if (!filterRow) {
+          console.error(`❌ Фильтр для ${stops} пересадок не найден`);
+
+          // Выводим доступные фильтры для отладки
+          const availableFilters = document.querySelectorAll('[data-test-id^="set-filter-row-"]');
+          console.log(`📋 Доступные фильтры пересадок:`);
+          availableFilters.forEach(f => {
+            console.log(`  - ${f.getAttribute('data-test-id')}`);
+          });
+
+          return false;
+        }
+
+        console.log(`✅ Фильтр найден: ${sel}`);
+        console.log(`🖱 Кликаю напрямую по элементу...`);
+
+        // Кликаем прямо по найденному элементу
+        filterRow.click();
+        console.log(`✅ Клик выполнен для ${stops} пересадок`);
+
+        return true;
+      }, selector, maxStops);
+
+      if (!filterClicked) {
+        throw new Error(`Не удалось применить фильтр для ${maxStops} пересадок`);
+      }
+
+      console.log(`[${index}/${total}] ✅ Фильтр макс. пересадок (${maxStops}) применен`);
+      return true;
+
+    } catch (error) {
+      console.error(`[${index}/${total}] ❌ Ошибка применения фильтра пересадок:`, error.message);
       return false;
     }
   }
@@ -478,7 +528,7 @@ class PuppeteerPricer {
     }
   }
 
-  async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = null, baggage = false) {
+  async getPriceFromUrl(url, index, total, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const startTime = Date.now();
 
     console.log('='.repeat(80));
@@ -487,8 +537,11 @@ class PuppeteerPricer {
     if (airline) {
       console.log(`[${index}/${total}] ✈️ Авиакомпания: ${airline}`);
     }
+    if (max_stops !== null && max_stops !== undefined) {
+      console.log(`[${index}/${total}] 🔢 Макс. пересадок: ${max_stops}`);
+    }
     if (maxLayoverHours !== null && maxLayoverHours !== undefined) {
-      console.log(`[${index}/${total}] ⏱ Макс. пересадка: ${maxLayoverHours}ч`);
+      console.log(`[${index}/${total}] ⏱ Макс. время пересадки: ${maxLayoverHours}ч`);
     }
     if (baggage === true || baggage === 1) {
       console.log(`[${index}/${total}] 🧳 Багаж: 20 кг`);
@@ -589,6 +642,15 @@ class PuppeteerPricer {
       // 🔥 ШАГ 3: ПРИМЕНЕНИЕ ФИЛЬТРОВ (БЕЗ СТАБИЛИЗАЦИИ)
       console.log(`[${index}/${total}] 📝 ШАГ 3: Применение фильтров`);
 
+      // Максимальное количество пересадок
+      if (max_stops !== null && max_stops !== undefined && max_stops >= 0) {
+        console.log(`[${index}/${total}] 🔧 Фильтр макс. пересадок`);
+        await this.applyMaxStopsFilter(page, max_stops, index, total);
+        await this.sleep(1000);
+      } else {
+        console.log(`[${index}/${total}] ⏭ Пропускаю фильтр пересадок`);
+      }
+
       // Багаж
       if (baggage === true || baggage === 1) {
         console.log(`[${index}/${total}] 🔧 Фильтр багажа`);
@@ -684,7 +746,7 @@ class PuppeteerPricer {
     }
   }
 
-  async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false) {
+  async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const total = urls.length;
     const results = new Array(total).fill(null);
 
@@ -698,7 +760,7 @@ class PuppeteerPricer {
       for (let j = 0; j < this.maxConcurrent && i + j < total; j++) {
         const index = i + j;
         batch.push(
-            this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours, baggage)
+            this.getPriceFromUrl(urls[index], index + 1, total, airline, maxLayoverHours, baggage, max_stops)
                 .then(result => {
                   results[index] = result;
                   return result;
@@ -759,4 +821,4 @@ class PuppeteerPricer {
   }
 }
 
-module.exports = PuppeteerPricer;
+module.exports = AviasalesPricer;

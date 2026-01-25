@@ -17,13 +17,6 @@ module.exports = {
     return AIRLINES[code] || code || 'Любая';
   },
 
-  formatStops(maxStops) {
-    if (maxStops === 0) return '🛬 Прямой';
-    if (maxStops === 1) return '🔄 До 1 пересадки';
-    if (maxStops === 2) return '🔄 До 2 пересадок';
-    return '🔄 Любое количество';
-  },
-
   parseAirportCode(text) {
     if (!text) return null;
 

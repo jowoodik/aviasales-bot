@@ -210,7 +210,7 @@ aviasales-price-bot/
 ├── README.md                   # Документация
 │
 ├── services/                   # Бизнес-логика
-│   ├── PriceMonitor.js         # Мониторинг обычных маршрутов
+│   ├── RegularMonitor.js         # Мониторинг обычных маршрутов
 │   ├── FlexibleMonitor.js      # Мониторинг гибких маршрутов
 │   ├── AviasalesPricer.js      # Парсинг Aviasales через Puppeteer
 │   ├── NotificationService.js  # Отправка уведомлений пользователям
@@ -224,8 +224,8 @@ aviasales-price-bot/
 │   └── FlexibleResult.js       # Модель результатов гибкого поиска
 │
 ├── handlers/                   # Обработчики команд Telegram бота
-│   ├── routeHandlers.js        # Команды для обычных маршрутов
-│   ├── flexibleHandlers.js     # Команды для гибких маршрутов
+│   ├── regularRouteHandlers.js        # Команды для обычных маршрутов
+│   ├── flexibleRoutesHandlers.js     # Команды для гибких маршрутов
 │   └── settingsHandlers.js     # Команды настроек
 │
 ├── utils/                      # Вспомогательные утилиты
@@ -267,7 +267,7 @@ aviasales-price-bot/
 - Делает скриншоты для подтверждения
 - Поддерживает пул браузеров для параллельной обработки
 
-#### 2. **PriceMonitor** (services/PriceMonitor.js)
+#### 2. **RegularMonitor** (services/RegularMonitor.js)
 Мониторит обычные маршруты:
 - Проверяет цены по расписанию (каждые N минут)
 - Сравнивает с предыдущими значениями
@@ -324,11 +324,11 @@ File                        | % Stmts | % Branch | % Funcs | % Lines |
 ----------------------------|---------|----------|---------|---------|
 All files                   |   92.5  |   87.3   |   95.1  |   93.2  |
  handlers/                  |   100   |   100    |   100   |   100   |
-  routeHandlers.js          |   100   |   100    |   100   |   100   |
-  flexibleHandlers.js       |   100   |   100    |   100   |   100   |
+  regularRouteHandlers.js          |   100   |   100    |   100   |   100   |
+  flexibleRoutesHandlers.js       |   100   |   100    |   100   |   100   |
   settingsHandlers.js       |   100   |   100    |   100   |   100   |
  services/                  |   85.3  |   78.5   |   91.2  |   86.7  |
-  PriceMonitor.js           |   88.5  |   82.1   |   93.3  |   89.2  |
+  RegularMonitor.js           |   88.5  |   82.1   |   93.3  |   89.2  |
   FlexibleMonitor.js        |   87.2  |   79.8   |   92.5  |   88.1  |
 ----------------------------|---------|----------|---------|---------|
 ```

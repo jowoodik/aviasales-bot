@@ -1,5 +1,3 @@
-const axios = require('axios');
-
 class AviasalesAPI {
   constructor(token, marker) {
     this.token = token;

@@ -17,7 +17,7 @@ function formatTimeAgo(dateString) {
   return utcDate.toLocaleString('ru-RU', options);
 }
 
-class FlexibleHandlers {
+class FlexibleRoutesHandlers {
   constructor(bot, userStates) {
     this.bot = bot;
     this.userStates = userStates;
@@ -461,7 +461,7 @@ class FlexibleHandlers {
       await flexMonitor.sendReport(chatId);
       await flexMonitor.close();
 
-      const PriceMonitor = require('../services/PriceMonitor');
+      const PriceMonitor = require('../services/RegularMonitor');
       const priceMonitor = new PriceMonitor(process.env.TRAVELPAYOUTS_TOKEN, this.bot);
       await priceMonitor.checkPrices();
       await priceMonitor.sendReport(chatId);
@@ -756,4 +756,4 @@ class FlexibleHandlers {
   }
 }
 
-module.exports = FlexibleHandlers;
+module.exports = FlexibleRoutesHandlers;

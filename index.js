@@ -2,10 +2,10 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 require('./config/database');
 
-const PriceMonitor = require('./services/PriceMonitor');
+const PriceMonitor = require('./services/RegularMonitor');
 const FlexibleMonitor = require('./services/FlexibleMonitor');
-const RouteHandlers = require('./handlers/routeHandlers');
-const FlexibleHandlers = require('./handlers/flexibleHandlers');
+const RouteHandlers = require('./handlers/regularRouteHandlers');
+const FlexibleHandlers = require('./handlers/flexibleRoutesHandlers');
 const SettingsHandlers = require('./handlers/settingsHandlers');
 const setupScheduler = require('./scheduler');
 const Route = require('./models/Route');

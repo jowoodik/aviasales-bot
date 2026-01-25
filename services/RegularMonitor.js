@@ -1,16 +1,16 @@
 const Route = require('../models/Route');
 const AviasalesAPI = require('./AviasalesAPI');
-const PuppeteerPricer = require('./PuppeteerPricer');
+const AviasalesPricer = require('./AviasalesPricer');
 const NotificationService = require('./NotificationService');
 const db = require('../config/database');
 const DateUtils = require('../utils/dateUtils');
 const fs = require('fs');
 const PriceAnalytics = require('./PriceAnalytics');
 
-class PriceMonitor {
+class RegularMonitor {
   constructor(aviasalesToken, bot, debug = false) {
     this.api = new AviasalesAPI(aviasalesToken);
-    this.puppeteerPricer = new PuppeteerPricer(debug);
+    this.aviasalesPricer = new AviasalesPricer(debug);
     this.notificationService = new NotificationService(bot);
     this.bot = bot;
     this.stats = {
@@ -69,13 +69,14 @@ class PriceMonitor {
           max_stops: route.max_stops
         });
 
-        const priceResult = await this.puppeteerPricer.getPriceFromUrl(
+        const priceResult = await this.aviasalesPricer.getPriceFromUrl(
           searchUrl,
           i + 1,
           routes.length,
           route.airline,
           route.max_stops === 0 ? null : route.max_layover_hours,
-          route.baggage  // 🔥 ПАРАМЕТР БАГАЖА
+          route.baggage,  // 🔥 ПАРАМЕТР БАГАЖА
+          route.max_stops
         );
 
         if (priceResult && priceResult.price) {
@@ -400,8 +401,8 @@ class PriceMonitor {
   }
 
   async close() {
-    await this.puppeteerPricer.close();
+    await this.aviasalesPricer.close();
   }
 }
 
-module.exports = PriceMonitor;
+module.exports = RegularMonitor;

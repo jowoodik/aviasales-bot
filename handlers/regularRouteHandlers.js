@@ -1,12 +1,11 @@
 const Route = require('../models/Route');
 const AviasalesAPI = require('../services/AviasalesAPI');
-const PuppeteerPricer = require('../services/PuppeteerPricer');
-const db = require('../config/database');
+const AviasalesPricer = require('../services/AviasalesPricer');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
 const fs = require('fs');
 
-class RouteHandlers {
+class RegularRouteHandlers {
   constructor(bot, userStates) {
     this.bot = bot;
     this.userStates = userStates;
@@ -564,10 +563,10 @@ class RouteHandlers {
         max_stops: route.max_stops
       });
 
-      const puppeteer = new PuppeteerPricer(false);
+      const aviasalesPricer = new AviasalesPricer(false);
       const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
-      const result = await puppeteer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours);
-      await puppeteer.close();
+      const result = await aviasalesPricer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours, route.max_stops);
+      await aviasalesPricer.close();
 
       if (result && result.price) {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);
@@ -621,4 +620,4 @@ class RouteHandlers {
   }
 }
 
-module.exports = RouteHandlers;
+module.exports = RegularRouteHandlers;
