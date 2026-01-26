@@ -5,7 +5,7 @@ const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 3;
+    this.maxConcurrent = 7;
     this.debug = debug;
     this.marker = marker;
 
