@@ -1,11 +1,12 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const fs = require('fs');
 const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 8;
+    this.maxConcurrent = 7;
     this.debug = debug;
     this.marker = marker;
 
@@ -27,7 +28,9 @@ class AviasalesPricer {
       'http://bkczhupt:ww4ng38q6a84@23.26.71.145:5628',
       'http://bkczhupt:ww4ng38q6a84@23.27.208.120:5830'
     ];
+    this.workingProxies = [];  // 🔥 Список рабочих прокси
     this.currentProxyIndex = 0;
+    this.proxyCheckTimeout = 5000;  // 🔥 Таймаут проверки: 5 секунд
 
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {
@@ -37,15 +40,65 @@ class AviasalesPricer {
     this.cleanupOldScreenshots();
   }
 
-  // 🔥 НОВЫЙ МЕТОД: Получение следующего прокси
+  // 🔥 НОВЫЙ МЕТОД: Проверка прокси
+  async testProxy(proxyUrl) {
+    try {
+      const httpsAgent = new HttpsProxyAgent(proxyUrl);
+
+      const startTime = Date.now();
+      await axios.get('https://api.ipify.org?format=json', {
+        httpsAgent: httpsAgent,
+        timeout: this.proxyCheckTimeout
+      });
+      const elapsed = Date.now() - startTime;
+
+      console.log(`✅ Прокси работает (${elapsed}мс):`, proxyUrl.substring(0, 50) + '...');
+      return true;
+    } catch (error) {
+      console.error(`❌ Прокси не работает:`, proxyUrl.substring(0, 50) + '...', '-', error.message);
+      return false;
+    }
+  }
+
+  // 🔥 НОВЫЙ МЕТОД: Проверка всех прокси при старте
+  async initProxies() {
+    console.log('\n🔍 ========================================');
+    console.log('🔍 ПРОВЕРКА ПРОКСИ');
+    console.log('🔍 ========================================');
+    console.log(`🔍 Проверка ${this.proxyList.length} прокси (таймаут ${this.proxyCheckTimeout}мс)...\n`);
+
+    this.workingProxies = [];
+
+    for (const proxy of this.proxyList) {
+      const isWorking = await this.testProxy(proxy);
+      if (isWorking) {
+        this.workingProxies.push(proxy);
+      }
+    }
+
+    console.log(`\n✅ Рабочих прокси: ${this.workingProxies.length}/${this.proxyList.length}`);
+    console.log('🔍 ========================================\n');
+
+    if (this.workingProxies.length === 0) {
+      console.warn('⚠️ НЕТ РАБОЧИХ ПРОКСИ! Работа без прокси.');
+    }
+
+    return this.workingProxies.length > 0;
+  }
+
+  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Получение следующего прокси (только из рабочих)
   getNextProxy() {
-    const proxy = this.proxyList[this.currentProxyIndex];
-    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxyList.length;
-    console.log(`🔄 Используется прокси #${this.currentProxyIndex + 1}/${this.proxyList.length}`);
+    if (this.workingProxies.length === 0) {
+      return null;
+    }
+
+    const proxy = this.workingProxies[this.currentProxyIndex];
+    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.workingProxies.length;
+    console.log(`🔄 Прокси #${this.currentProxyIndex}/${this.workingProxies.length}`);
     return proxy;
   }
 
-  // 🔥 НОВЫЙ МЕТОД: Парсинг прокси URL
+  // 🔥 НОВЫЙ МЕТОД: Парсинг прокси URL (для Puppeteer)
   parseProxy(proxyUrl) {
     const url = new URL(proxyUrl);
     return {
@@ -76,7 +129,7 @@ class AviasalesPricer {
       // 🔥 Получаем следующий прокси
       const proxyUrl = this.getNextProxy();
 
-      browser = await puppeteer.launch({
+      const launchOptions = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -85,13 +138,32 @@ class AviasalesPricer {
           '--disable-gpu',
           '--disable-software-rasterizer',
           '--disable-extensions',
-          '--disable-blink-features=AutomationControlled',
-          `--proxy-server=${proxyUrl}`  // 🔥 Добавили прокси
+          '--disable-blink-features=AutomationControlled'
         ]
-      });
-      console.log('✅ Браузер запущен с прокси');
+      };
+
+      // 🔥 Добавляем прокси если есть рабочие
+      if (proxyUrl) {
+        const proxyObj = this.parseProxy(proxyUrl);
+        const proxyServer = `http://${proxyObj.host}:${proxyObj.port}`;
+        launchOptions.args.push(`--proxy-server=${proxyServer}`);
+        console.log('✅ Использую прокси для браузера');
+      }
+
+      browser = await puppeteer.launch(launchOptions);
+      console.log('✅ Браузер запущен');
 
       page = await browser.newPage();
+
+      // 🔥 Авторизация прокси если используется
+      if (proxyUrl) {
+        const proxyObj = this.parseProxy(proxyUrl);
+        await page.authenticate({
+          username: proxyObj.auth.username,
+          password: proxyObj.auth.password
+        });
+        console.log('✅ Авторизация на прокси выполнена');
+      }
 
       await page.setUserAgent(
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
@@ -147,14 +219,12 @@ class AviasalesPricer {
     }
   }
 
-  // Форматирование куков в строку
   formatCookies(cookiesObj) {
     return Object.entries(cookiesObj)
         .map(([key, value]) => `${key}=${value}`)
         .join('; ');
   }
 
-  // Получение заголовков для API
   getHeaders(cookiesObj) {
     return {
       'accept': 'application/json',
@@ -174,7 +244,6 @@ class AviasalesPricer {
     };
   }
 
-  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Запуск поиска через API с прокси
   async startSearch(params, cookiesObj) {
     const {
       origin,
@@ -279,18 +348,22 @@ class AviasalesPricer {
     }
 
     try {
-      // 🔥 Получаем следующий прокси для API запроса
       const proxyUrl = this.getNextProxy();
-      const proxy = this.parseProxy(proxyUrl);
+
+      const config = {
+        headers: this.getHeaders(cookiesObj),
+        timeout: 30000
+      };
+
+      if (proxyUrl) {
+        const httpsAgent = new HttpsProxyAgent(proxyUrl);
+        config.httpsAgent = httpsAgent;
+      }
 
       const response = await axios.post(
           `${this.baseURL}/search/v2/start`,
           requestBody,
-          {
-            headers: this.getHeaders(cookiesObj),
-            timeout: 30000,
-            proxy: proxy  // 🔥 Используем прокси
-          }
+          config
       );
 
       const data = response.data;
@@ -315,7 +388,6 @@ class AviasalesPricer {
     }
   }
 
-  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Получение результатов через API с прокси
   async getResults(searchData, cookiesObj, airline = null) {
     const { search_id, results_url, filters_state } = searchData;
 
@@ -342,25 +414,28 @@ class AviasalesPricer {
 
         console.log(`\n📡 Запрос ${attempt}/${this.maxPollingAttempts}...`);
 
-        // 🔥 Получаем следующий прокси для каждого запроса
         const proxyUrl = this.getNextProxy();
-        const proxy = this.parseProxy(proxyUrl);
+
+        const config = {
+          headers: this.getHeaders(cookiesObj),
+          timeout: 10000
+        };
+
+        if (proxyUrl) {
+          const httpsAgent = new HttpsProxyAgent(proxyUrl);
+          config.httpsAgent = httpsAgent;
+        }
 
         const response = await axios.post(
             `https://${results_url}/search/v3.2/results`,
             requestBody,
-            {
-              headers: this.getHeaders(cookiesObj),
-              timeout: 10000,
-              proxy: proxy  // 🔥 Используем прокси
-            }
+            config
         );
 
         const data = response.data[0];
 
         console.log(`📊 last_update_timestamp: ${data.last_update_timestamp}`);
         console.log(`📊 tickets: ${data.tickets?.length || 0}`);
-        console.log(`📊 soft_tickets: ${data.soft_tickets?.length || 0}`);
 
         if (data.last_update_timestamp === 0) {
           console.log('\n✅ Загрузка завершена (last_update_timestamp = 0)');
@@ -404,7 +479,6 @@ class AviasalesPricer {
     return null;
   }
 
-  // Извлечение минимальной цены из билетов
   extractCheapestPriceFromAllTickets(tickets, airline = null) {
     if (!tickets || tickets.length === 0) {
       console.warn('⚠️ Билеты отсутствуют');
@@ -488,7 +562,7 @@ class AviasalesPricer {
     const startTime = Date.now();
 
     console.log('='.repeat(80));
-    console.log(`[${index}/${total}] 🚀 НАЧАЛО ПРОВЕРКИ (ГИБРИДНЫЙ РЕЖИМ)`);
+    console.log(`[${index}/${total}] 🚀 НАЧАЛО ПРОВЕРКИ`);
     console.log(`[${index}/${total}] 🔗 ${url}`);
     if (airline) {
       console.log(`[${index}/${total}] ✈️ Авиакомпания: ${airline}`);
@@ -569,6 +643,10 @@ class AviasalesPricer {
     const results = new Array(total).fill(null);
 
     console.log(`🚀 Начинаю обработку ${total} URL по ${this.maxConcurrent} параллельно`);
+
+    // 🔥 ПРОВЕРЯЕМ ПРОКСИ ПЕРЕД НАЧАЛОМ РАБОТЫ
+    await this.initProxies();
+
     console.log('\n🍪 ========================================');
     console.log('🍪 УСТАНОВКА КУКИ ДЛЯ ВСЕЙ ПАЧКИ');
     console.log('🍪 ========================================');
