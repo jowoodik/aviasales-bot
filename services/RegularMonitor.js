@@ -69,8 +69,11 @@ class RegularMonitor {
           max_stops: route.max_stops
         });
 
+        const cookiesObj = await this.aviasalesPricer.setCookie();
+
         const priceResult = await this.aviasalesPricer.getPriceFromUrl(
           searchUrl,
+          cookiesObj,
           i + 1,
           routes.length,
           route.airline,

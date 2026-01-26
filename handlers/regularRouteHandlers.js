@@ -565,7 +565,8 @@ class RegularRouteHandlers {
 
       const aviasalesPricer = new AviasalesPricer(false);
       const maxlayover_hours = route.max_stops === 0 ? null : route.max_layover_hours;
-      const result = await aviasalesPricer.getPriceFromUrl(searchUrl, 1, 1, route.airline, maxlayover_hours, route.max_stops);
+      const cookiesObj = await this.setCookie();
+      const result = await aviasalesPricer.getPriceFromUrl(searchUrl, cookiesObj, 1, 1, route.airline, maxlayover_hours, route.max_stops);
 
       if (result && result.price) {
         const passengersText = Formatters.formatPassengers(route.adults, route.children);
