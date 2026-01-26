@@ -5,7 +5,7 @@ const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 3;
+    this.maxConcurrent = 8;
     this.debug = debug;
     this.marker = marker;
 
@@ -13,6 +13,21 @@ class AviasalesPricer {
     this.baseURL = 'https://tickets-api.aviasales.ru';
     this.maxPollingAttempts = 7;
     this.pollingInterval = 4000;
+
+    // 🔥 ПРОКСИ-РОТАЦИЯ
+    this.proxyList = [
+      'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
+      'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
+      'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
+      'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
+      'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
+      'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
+      'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
+      'http://bkczhupt:ww4ng38q6a84@216.10.27.159:6837',
+      'http://bkczhupt:ww4ng38q6a84@23.26.71.145:5628',
+      'http://bkczhupt:ww4ng38q6a84@23.27.208.120:5830'
+    ];
+    this.currentProxyIndex = 0;
 
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {
@@ -22,11 +37,32 @@ class AviasalesPricer {
     this.cleanupOldScreenshots();
   }
 
+  // 🔥 НОВЫЙ МЕТОД: Получение следующего прокси
+  getNextProxy() {
+    const proxy = this.proxyList[this.currentProxyIndex];
+    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxyList.length;
+    console.log(`🔄 Используется прокси #${this.currentProxyIndex + 1}/${this.proxyList.length}`);
+    return proxy;
+  }
+
+  // 🔥 НОВЫЙ МЕТОД: Парсинг прокси URL
+  parseProxy(proxyUrl) {
+    const url = new URL(proxyUrl);
+    return {
+      host: url.hostname,
+      port: parseInt(url.port),
+      auth: {
+        username: url.username,
+        password: url.password
+      }
+    };
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // 🔥 НОВЫЙ МЕТОД: Установка куки через Puppeteer
+  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Установка куки через Puppeteer с прокси
   async setCookie() {
     console.log('\n🍪 ========================================');
     console.log('🍪 УСТАНОВКА КУКИ');
@@ -37,6 +73,9 @@ class AviasalesPricer {
     let page = null;
 
     try {
+      // 🔥 Получаем следующий прокси
+      const proxyUrl = this.getNextProxy();
+
       browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -46,10 +85,11 @@ class AviasalesPricer {
           '--disable-gpu',
           '--disable-software-rasterizer',
           '--disable-extensions',
-          '--disable-blink-features=AutomationControlled'
+          '--disable-blink-features=AutomationControlled',
+          `--proxy-server=${proxyUrl}`  // 🔥 Добавили прокси
         ]
       });
-      console.log('✅ Браузер запущен');
+      console.log('✅ Браузер запущен с прокси');
 
       page = await browser.newPage();
 
@@ -134,7 +174,7 @@ class AviasalesPricer {
     };
   }
 
-  // Запуск поиска через API
+  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Запуск поиска через API с прокси
   async startSearch(params, cookiesObj) {
     const {
       origin,
@@ -239,12 +279,17 @@ class AviasalesPricer {
     }
 
     try {
+      // 🔥 Получаем следующий прокси для API запроса
+      const proxyUrl = this.getNextProxy();
+      const proxy = this.parseProxy(proxyUrl);
+
       const response = await axios.post(
           `${this.baseURL}/search/v2/start`,
           requestBody,
           {
             headers: this.getHeaders(cookiesObj),
-            timeout: 30000
+            timeout: 30000,
+            proxy: proxy  // 🔥 Используем прокси
           }
       );
 
@@ -270,7 +315,7 @@ class AviasalesPricer {
     }
   }
 
-  // Получение результатов через API
+  // 🔥 ОБНОВЛЕННЫЙ МЕТОД: Получение результатов через API с прокси
   async getResults(searchData, cookiesObj, airline = null) {
     const { search_id, results_url, filters_state } = searchData;
 
@@ -297,12 +342,17 @@ class AviasalesPricer {
 
         console.log(`\n📡 Запрос ${attempt}/${this.maxPollingAttempts}...`);
 
+        // 🔥 Получаем следующий прокси для каждого запроса
+        const proxyUrl = this.getNextProxy();
+        const proxy = this.parseProxy(proxyUrl);
+
         const response = await axios.post(
             `https://${results_url}/search/v3.2/results`,
             requestBody,
             {
               headers: this.getHeaders(cookiesObj),
-              timeout: 10000
+              timeout: 10000,
+              proxy: proxy  // 🔥 Используем прокси
             }
         );
 
@@ -312,8 +362,6 @@ class AviasalesPricer {
         console.log(`📊 tickets: ${data.tickets?.length || 0}`);
         console.log(`📊 soft_tickets: ${data.soft_tickets?.length || 0}`);
 
-        // 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ: Если загрузка завершена (last_update_timestamp = 0)
-        // сразу возвращаем результат или null, БЕЗ дальнейшего ожидания
         if (data.last_update_timestamp === 0) {
           console.log('\n✅ Загрузка завершена (last_update_timestamp = 0)');
 
@@ -324,20 +372,17 @@ class AviasalesPricer {
             return cheapestPrice;
           } else {
             console.log('⚠️ Билеты не найдены под заданные фильтры');
-            return null;  // 🔥 Возвращаем null сразу, не бросаем ошибку
+            return null;
           }
         }
 
-        // Обновляем timestamp для следующего запроса
         if (data.last_update_timestamp) {
           last_update_timestamp = data.last_update_timestamp;
         }
 
-        // Ждем перед следующей попыткой
         await this.sleep(this.pollingInterval);
 
       } catch (error) {
-        // Игнорируем 304 (Not Modified)
         if (error.response && error.response.status === 304) {
           console.log('📡 304 Not Modified, продолжаем...');
           await this.sleep(this.pollingInterval);
@@ -348,7 +393,7 @@ class AviasalesPricer {
 
         if (attempt >= this.maxPollingAttempts) {
           console.error('❌ Превышено максимальное количество попыток');
-          return null;  // 🔥 Возвращаем null вместо throw
+          return null;
         }
 
         await this.sleep(this.pollingInterval);
@@ -356,7 +401,7 @@ class AviasalesPricer {
     }
 
     console.error('❌ Превышено время ожидания');
-    return null;  // 🔥 Возвращаем null вместо throw
+    return null;
   }
 
   // Извлечение минимальной цены из билетов
@@ -439,7 +484,6 @@ class AviasalesPricer {
     });
   }
 
-  // 🔥 ГИБРИДНЫЙ МЕТОД: получение цены с передачей куки
   async getPriceFromUrl(url, cookiesObj, index, total, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const startTime = Date.now();
 
@@ -461,13 +505,10 @@ class AviasalesPricer {
     console.log('='.repeat(80));
 
     try {
-      // Парсим URL для извлечения параметров
       const urlObj = new URL(url);
       const pathParts = urlObj.pathname.split('/');
       const searchPath = pathParts[pathParts.length - 1];
 
-      // 🔥 ИСПРАВЛЕННАЯ РЕГУЛЯРКА: парсим маршрут из пути (например: SVX1003DPS0704410)
-      // Формат: ORIGIN(3)DDMM(4)DESTINATION(3)DDMM(4)ADULTS(1)CHILDREN(1)INFANTS(1)
       const match = searchPath.match(/^([A-Z]{3})(\d{4})([A-Z]{3})(\d{4})?(\d)(\d)?(\d)?$/);
 
       if (!match) {
@@ -476,7 +517,6 @@ class AviasalesPricer {
 
       const [, origin, depDate, destination, retDate, adults, children, infants] = match;
 
-      // Форматируем даты
       const formatDate = (ddmm) => {
         if (!ddmm || ddmm === '0000') return null;
         const day = ddmm.substring(0, 2);
@@ -501,10 +541,7 @@ class AviasalesPricer {
 
       console.log(`[${index}/${total}] 📋 Параметры поиска:`, params);
 
-      // 1. Запускаем поиск через API
       const searchData = await this.startSearch(params, cookiesObj);
-
-      // 2. Получаем результаты через API
       const result = await this.getResults(searchData, cookiesObj, airline);
 
       if (!result) {
@@ -527,7 +564,6 @@ class AviasalesPricer {
     }
   }
 
-  // 🔥 ГЛАВНЫЙ МЕТОД: пакетная проверка с установкой куки один раз
   async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const total = urls.length;
     const results = new Array(total).fill(null);
@@ -537,7 +573,6 @@ class AviasalesPricer {
     console.log('🍪 УСТАНОВКА КУКИ ДЛЯ ВСЕЙ ПАЧКИ');
     console.log('🍪 ========================================');
 
-    // 🔥 УСТАНАВЛИВАЕМ КУКУ ОДИН РАЗ ДЛЯ ВСЕЙ ПАЧКИ
     const cookiesObj = await this.setCookie();
 
     if (!cookiesObj) {
