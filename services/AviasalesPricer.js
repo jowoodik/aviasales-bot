@@ -11,8 +11,8 @@ class AviasalesPricer {
 
     // API конфигурация
     this.baseURL = 'https://tickets-api.aviasales.ru';
-    this.maxPollingAttempts = 60;
-    this.pollingInterval = 1000;
+    this.maxPollingAttempts = 5;
+    this.pollingInterval = 5000;
 
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {
@@ -145,6 +145,7 @@ class AviasalesPricer {
       children = 0,
       infants = 0,
       trip_class = 'Y',
+      airline = null,
       baggage = false,
       baggage_weight = '20',
       max_stops = null,
@@ -157,6 +158,11 @@ class AviasalesPricer {
     console.log(`👥 Пассажиры: ${adults} взр, ${children} дет, ${infants} млад`);
 
     const filters_state = {};
+
+    if (airline) {
+      filters_state.airlines = [airline];
+      console.log(`✈️ Авиакомпания: ${airline}`);
+    }
 
     if (baggage) {
       filters_state.baggage = true;
@@ -172,11 +178,13 @@ class AviasalesPricer {
     if (max_layover_hours !== null && max_layover_hours !== undefined) {
       const maxMinutes = max_layover_hours * 60;
       filters_state.transfers_duration = {
-        min: 55,
+        min: 0,
         max: maxMinutes
       };
       console.log(`⏱ Макс. время пересадки: ${max_layover_hours}ч`);
     }
+
+    filters_state.sort = 'price_asc';
 
     const requestBody = {
       search_params: {
@@ -266,7 +274,7 @@ class AviasalesPricer {
   async getResults(searchData, cookiesObj, airline = null) {
     const { search_id, results_url, filters_state } = searchData;
 
-    console.log('\n⏳ Ожидание результатов (макс 60 сек)...');
+    console.log('\n⏳ Ожидание результатов...');
 
     let attempt = 0;
     let last_update_timestamp = null;
@@ -287,6 +295,8 @@ class AviasalesPricer {
           requestBody.last_update_timestamp = last_update_timestamp;
         }
 
+        console.log(`\n📡 Запрос ${attempt}/${this.maxPollingAttempts}...`);
+
         const response = await axios.post(
             `https://${results_url}/search/v3.2/results`,
             requestBody,
@@ -298,33 +308,38 @@ class AviasalesPricer {
 
         const data = response.data[0];
 
+        console.log(`📊 last_update_timestamp: ${data.last_update_timestamp}`);
+        console.log(`📊 tickets: ${data.tickets?.length || 0}`);
+        console.log(`📊 soft_tickets: ${data.soft_tickets?.length || 0}`);
+
+        // 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ: Если загрузка завершена (last_update_timestamp = 0)
+        // сразу возвращаем результат или null, БЕЗ дальнейшего ожидания
         if (data.last_update_timestamp === 0) {
           console.log('\n✅ Загрузка завершена (last_update_timestamp = 0)');
 
           const cheapestPrice = this.extractCheapestPriceFromAllTickets(data.tickets, airline);
 
           if (cheapestPrice) {
+            console.log('✅ Цена найдена!');
             return cheapestPrice;
           } else {
-            throw new Error('Загрузка завершена, но билеты не найдены');
+            console.log('⚠️ Билеты не найдены под заданные фильтры');
+            return null;  // 🔥 Возвращаем null сразу, не бросаем ошибку
           }
         }
 
+        // Обновляем timestamp для следующего запроса
         if (data.last_update_timestamp) {
           last_update_timestamp = data.last_update_timestamp;
         }
 
-        if (attempt % 10 === 0) {
-          console.log(`\n📊 Промежуточный статус (попытка ${attempt}):`);
-          console.log(`   last_update_timestamp: ${data.last_update_timestamp}`);
-          console.log(`   tickets: ${data.tickets?.length || 0}`);
-          console.log(`   soft_tickets: ${data.soft_tickets?.length || 0}`);
-        }
-
+        // Ждем перед следующей попыткой
         await this.sleep(this.pollingInterval);
 
       } catch (error) {
+        // Игнорируем 304 (Not Modified)
         if (error.response && error.response.status === 304) {
+          console.log('📡 304 Not Modified, продолжаем...');
           await this.sleep(this.pollingInterval);
           continue;
         }
@@ -332,14 +347,16 @@ class AviasalesPricer {
         console.error(`❌ Ошибка (попытка ${attempt}):`, error.message);
 
         if (attempt >= this.maxPollingAttempts) {
-          throw error;
+          console.error('❌ Превышено максимальное количество попыток');
+          return null;  // 🔥 Возвращаем null вместо throw
         }
 
         await this.sleep(this.pollingInterval);
       }
     }
 
-    throw new Error('Превышено время ожидания (60 сек)');
+    console.error('❌ Превышено время ожидания');
+    return null;  // 🔥 Возвращаем null вместо throw
   }
 
   // Извлечение минимальной цены из билетов
@@ -361,10 +378,6 @@ class AviasalesPricer {
       }
 
       for (const proposal of ticket.proposals) {
-        if (airline && !this.proposalMatchesAirline(proposal, ticket, airline)) {
-          continue;
-        }
-
         const price = proposal.unified_price?.value || proposal.price?.value;
 
         if (price && price < minPrice) {
@@ -390,27 +403,6 @@ class AviasalesPricer {
       ticket_id: bestTicket.id,
       proposal_id: bestProposal.id
     };
-  }
-
-  // Проверка соответствия авиакомпании
-  proposalMatchesAirline(proposal, ticket, airline) {
-    const segments = ticket.segments || [];
-
-    for (const segment of segments) {
-      const flights = segment.flights || [];
-
-      for (const flightId of flights) {
-        const flightTerms = proposal.flight_terms?.[flightId];
-        if (flightTerms) {
-          const carrier = flightTerms.marketing_carrier_designator?.airline_id;
-          if (carrier && carrier !== airline) {
-            return false;
-          }
-        }
-      }
-    }
-
-    return true;
   }
 
   cleanupOldScreenshots() {
@@ -503,7 +495,7 @@ class AviasalesPricer {
         infants: parseInt(infants || '0'),
         airline: airline,
         baggage: baggage,
-        max_stops: max_stops,
+        max_stops: max_stops === 99 ? null : max_stops,
         max_layover_hours: maxLayoverHours
       };
 
@@ -514,6 +506,11 @@ class AviasalesPricer {
 
       // 2. Получаем результаты через API
       const result = await this.getResults(searchData, cookiesObj, airline);
+
+      if (!result) {
+        console.log(`[${index}/${total}] ⚠️ Билеты не найдены`);
+        return null;
+      }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`[${index}/${total}] ✅ ЗАВЕРШЕНО за ${elapsed}с`);
@@ -558,7 +555,7 @@ class AviasalesPricer {
       try {
         const result = await this.getPriceFromUrl(
             urls[index],
-            cookiesObj, // 🔥 Передаем куку
+            cookiesObj,
             index + 1,
             total,
             airline,
