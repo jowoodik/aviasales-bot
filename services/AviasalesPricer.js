@@ -26,12 +26,8 @@ class AviasalesPricer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  // 🔥 НОВЫЙ МЕТОД: Установка куки через Puppeteer
   async setCookie() {
-    console.log('\n🍪 ========================================');
-    console.log('🍪 УСТАНОВКА КУКИ');
-    console.log('🍪 ========================================');
-    console.log('🌐 Запуск браузера для получения куки...');
+    console.log('🍪 Получение куки...');
 
     let browser = null;
     let page = null;
@@ -49,7 +45,6 @@ class AviasalesPricer {
           '--disable-blink-features=AutomationControlled'
         ]
       });
-      console.log('✅ Браузер запущен');
 
       page = await browser.newPage();
 
@@ -57,14 +52,11 @@ class AviasalesPricer {
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
       );
 
-      console.log('🔍 Открытие aviasales.ru...');
-
       await page.goto('https://www.aviasales.ru/', {
         waitUntil: 'domcontentloaded',
         timeout: 60000
       });
 
-      console.log('✅ DOM загружен, ждем куки...');
       await this.sleep(3000);
 
       const pageCookies = await page.cookies();
@@ -77,19 +69,15 @@ class AviasalesPricer {
       cookiesObj.currency = cookiesObj.currency || 'rub';
       cookiesObj.marker = this.marker;
 
-      console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
-      console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));
-
       await page.close();
       await browser.close();
 
-      console.log('✅ Куки успешно установлены');
-      console.log('🍪 ========================================\n');
+      console.log(`✅ Куки получены (${Object.keys(cookiesObj).length} шт)\n`);
 
       return cookiesObj;
 
     } catch (error) {
-      console.error('❌ Ошибка установки куки:', error.message);
+      console.error('❌ Ошибка получения куки:', error.message);
 
       if (page) {
         try {
@@ -107,14 +95,12 @@ class AviasalesPricer {
     }
   }
 
-  // Форматирование куков в строку
   formatCookies(cookiesObj) {
     return Object.entries(cookiesObj)
         .map(([key, value]) => `${key}=${value}`)
         .join('; ');
   }
 
-  // Получение заголовков для API
   getHeaders(cookiesObj) {
     return {
       'accept': 'application/json',
@@ -134,8 +120,7 @@ class AviasalesPricer {
     };
   }
 
-  // Запуск поиска через API
-  async startSearch(params, cookiesObj) {
+  async startSearch(params, cookiesObj, prefix = '') {
     const {
       origin,
       destination,
@@ -152,27 +137,19 @@ class AviasalesPricer {
       max_layover_hours = null
     } = params;
 
-    console.log('\n🚀 Запуск поиска через API...');
-    console.log(`📍 Маршрут: ${origin} → ${destination}`);
-    console.log(`📅 Даты: ${departure_date} — ${return_date || 'в одну сторону'}`);
-    console.log(`👥 Пассажиры: ${adults} взр, ${children} дет, ${infants} млад`);
-
     const filters_state = {};
 
     if (airline) {
       filters_state.airlines = [airline];
-      console.log(`✈️ Авиакомпания: ${airline}`);
     }
 
     if (baggage) {
       filters_state.baggage = true;
       filters_state.baggage_weight = String(baggage_weight);
-      console.log(`🧳 Багаж: ${baggage_weight} кг`);
     }
 
     if (max_stops !== null && max_stops !== undefined) {
       filters_state.transfers_count = [String(max_stops)];
-      console.log(`✈️ Макс. пересадок: ${max_stops}`);
     }
 
     if (max_layover_hours !== null && max_layover_hours !== undefined) {
@@ -181,7 +158,6 @@ class AviasalesPricer {
         min: 0,
         max: maxMinutes
       };
-      console.log(`⏱ Макс. время пересадки: ${max_layover_hours}ч`);
     }
 
     filters_state.sort = 'price_asc';
@@ -249,8 +225,7 @@ class AviasalesPricer {
       );
 
       const data = response.data;
-
-      console.log(`✅ Поиск запущен! search_id: ${data.search_id}`);
+      console.log(`${prefix}🔍 Поиск запущен (ID: ${data.search_id.substring(0, 8)}...)`);
 
       return {
         search_id: data.search_id,
@@ -261,20 +236,16 @@ class AviasalesPricer {
 
     } catch (error) {
       if (error.response) {
-        console.error('❌ HTTP ошибка:', error.response.status);
-        console.error('📄 Ответ:', error.response.data);
+        console.error(`${prefix}❌ HTTP ${error.response.status}`);
       } else {
-        console.error('❌ Ошибка запуска поиска:', error.message);
+        console.error(`${prefix}❌ ${error.message}`);
       }
       throw error;
     }
   }
 
-  // Получение результатов через API
-  async getResults(searchData, cookiesObj, airline = null) {
+  async getResults(searchData, cookiesObj, airline = null, prefix = '') {
     const { search_id, results_url, filters_state } = searchData;
-
-    console.log('\n⏳ Ожидание результатов...');
 
     let attempt = 0;
     let last_update_timestamp = null;
@@ -295,8 +266,6 @@ class AviasalesPricer {
           requestBody.last_update_timestamp = last_update_timestamp;
         }
 
-        console.log(`\n📡 Запрос ${attempt}/${this.maxPollingAttempts}...`);
-
         const response = await axios.post(
             `https://${results_url}/search/v3.2/results`,
             requestBody,
@@ -308,69 +277,50 @@ class AviasalesPricer {
 
         const data = response.data[0];
 
-        console.log(`📊 last_update_timestamp: ${data.last_update_timestamp}`);
-        console.log(`📊 tickets: ${data.tickets?.length || 0}`);
-        console.log(`📊 soft_tickets: ${data.soft_tickets?.length || 0}`);
-
-        // 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ: Если загрузка завершена (last_update_timestamp = 0)
-        // сразу возвращаем результат или null, БЕЗ дальнейшего ожидания
         if (data.last_update_timestamp === 0) {
-          console.log('\n✅ Загрузка завершена (last_update_timestamp = 0)');
-
-          const cheapestPrice = this.extractCheapestPriceFromAllTickets(data.tickets, airline);
+          const cheapestPrice = this.extractCheapestPriceFromAllTickets(data.tickets, airline, prefix);
 
           if (cheapestPrice) {
-            console.log('✅ Цена найдена!');
             return cheapestPrice;
           } else {
-            console.log('⚠️ Билеты не найдены под заданные фильтры');
-            return null;  // 🔥 Возвращаем null сразу, не бросаем ошибку
+            console.log(`${prefix}⚠️ Билеты не найдены`);
+            return null;
           }
         }
 
-        // Обновляем timestamp для следующего запроса
         if (data.last_update_timestamp) {
           last_update_timestamp = data.last_update_timestamp;
         }
 
-        // Ждем перед следующей попыткой
         await this.sleep(this.pollingInterval);
 
       } catch (error) {
-        // Игнорируем 304 (Not Modified)
         if (error.response && error.response.status === 304) {
-          console.log('📡 304 Not Modified, продолжаем...');
           await this.sleep(this.pollingInterval);
           continue;
         }
 
-        console.error(`❌ Ошибка (попытка ${attempt}):`, error.message);
-
         if (attempt >= this.maxPollingAttempts) {
-          console.error('❌ Превышено максимальное количество попыток');
-          return null;  // 🔥 Возвращаем null вместо throw
+          console.error(`${prefix}❌ Таймаут поиска`);
+          return null;
         }
 
         await this.sleep(this.pollingInterval);
       }
     }
 
-    console.error('❌ Превышено время ожидания');
-    return null;  // 🔥 Возвращаем null вместо throw
+    console.error(`${prefix}❌ Таймаут поиска`);
+    return null;
   }
 
-  // Извлечение минимальной цены из билетов
-  extractCheapestPriceFromAllTickets(tickets, airline = null) {
+  extractCheapestPriceFromAllTickets(tickets, airline = null, prefix = '') {
     if (!tickets || tickets.length === 0) {
-      console.warn('⚠️ Билеты отсутствуют');
       return null;
     }
 
     let minPrice = Infinity;
     let bestProposal = null;
     let bestTicket = null;
-
-    console.log(`\n🔍 Анализ ${tickets.length} билетов...`);
 
     for (const ticket of tickets) {
       if (!ticket.proposals || ticket.proposals.length === 0) {
@@ -389,13 +339,12 @@ class AviasalesPricer {
     }
 
     if (!bestProposal) {
-      console.warn('⚠️ Не найдено предложений с ценой');
       return null;
     }
 
     const currency = bestProposal.unified_price?.currency_code || bestProposal.price?.currency_code;
 
-    console.log(`\n💰 Самая низкая цена: ${minPrice.toLocaleString('ru-RU')} ${currency}`);
+    console.log(`${prefix}💰 ${minPrice.toLocaleString('ru-RU')} ${currency}`);
 
     return {
       price: minPrice,
@@ -411,12 +360,7 @@ class AviasalesPricer {
     const maxAge = 24 * 60 * 60 * 1000;
 
     fs.readdir(tempDir, (err, files) => {
-      if (err) {
-        console.warn('⚠️ Не удалось прочитать папку temp:', err.message);
-        return;
-      }
-
-      let deletedCount = 0;
+      if (err) return;
 
       files.forEach(file => {
         const filePath = path.join(tempDir, file);
@@ -425,49 +369,31 @@ class AviasalesPricer {
           if (err) return;
 
           if (now - stats.mtimeMs > maxAge) {
-            fs.unlink(filePath, (err) => {
-              if (!err) {
-                deletedCount++;
-                if (deletedCount === 1) {
-                  console.log(`🗑 Удаляю старые скриншоты (> 24ч)...`);
-                }
-              }
-            });
+            fs.unlink(filePath, () => {});
           }
         });
       });
     });
   }
 
-  // 🔥 ГИБРИДНЫЙ МЕТОД: получение цены с передачей куки
   async getPriceFromUrl(url, cookiesObj, index, total, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const startTime = Date.now();
+    const prefix = `[${index}/${total}] `;
 
-    console.log('='.repeat(80));
-    console.log(`[${index}/${total}] 🚀 НАЧАЛО ПРОВЕРКИ (ГИБРИДНЫЙ РЕЖИМ)`);
-    console.log(`[${index}/${total}] 🔗 ${url}`);
-    if (airline) {
-      console.log(`[${index}/${total}] ✈️ Авиакомпания: ${airline}`);
-    }
-    if (max_stops !== null && max_stops !== undefined) {
-      console.log(`[${index}/${total}] 🔢 Макс. пересадок: ${max_stops}`);
-    }
-    if (maxLayoverHours !== null && maxLayoverHours !== undefined) {
-      console.log(`[${index}/${total}] ⏱ Макс. время пересадки: ${maxLayoverHours}ч`);
-    }
-    if (baggage === true || baggage === 1) {
-      console.log(`[${index}/${total}] 🧳 Багаж: 20 кг`);
-    }
-    console.log('='.repeat(80));
+    // Формируем краткое описание фильтров
+    const filters = [];
+    if (airline) filters.push(`✈️${airline}`);
+    if (max_stops !== null && max_stops !== undefined && max_stops !== 99) filters.push(`🔢${max_stops}`);
+    if (maxLayoverHours) filters.push(`⏱${maxLayoverHours}ч`);
+    if (baggage) filters.push(`🧳`);
+
+    const filtersStr = filters.length > 0 ? ` (${filters.join(' ')})` : '';
 
     try {
-      // Парсим URL для извлечения параметров
       const urlObj = new URL(url);
       const pathParts = urlObj.pathname.split('/');
       const searchPath = pathParts[pathParts.length - 1];
 
-      // 🔥 ИСПРАВЛЕННАЯ РЕГУЛЯРКА: парсим маршрут из пути (например: SVX1003DPS0704410)
-      // Формат: ORIGIN(3)DDMM(4)DESTINATION(3)DDMM(4)ADULTS(1)CHILDREN(1)INFANTS(1)
       const match = searchPath.match(/^([A-Z]{3})(\d{4})([A-Z]{3})(\d{4})?(\d)(\d)?(\d)?$/);
 
       if (!match) {
@@ -476,7 +402,6 @@ class AviasalesPricer {
 
       const [, origin, depDate, destination, retDate, adults, children, infants] = match;
 
-      // Форматируем даты
       const formatDate = (ddmm) => {
         if (!ddmm || ddmm === '0000') return null;
         const day = ddmm.substring(0, 2);
@@ -499,22 +424,18 @@ class AviasalesPricer {
         max_layover_hours: maxLayoverHours
       };
 
-      console.log(`[${index}/${total}] 📋 Параметры поиска:`, params);
+      console.log(`${prefix}🚀 ${origin}→${destination} ${formatDate(depDate).substring(5)}${filtersStr}`);
 
-      // 1. Запускаем поиск через API
-      const searchData = await this.startSearch(params, cookiesObj);
-
-      // 2. Получаем результаты через API
-      const result = await this.getResults(searchData, cookiesObj, airline);
+      const searchData = await this.startSearch(params, cookiesObj, prefix);
+      const result = await this.getResults(searchData, cookiesObj, airline, prefix);
 
       if (!result) {
-        console.log(`[${index}/${total}] ⚠️ Билеты не найдены`);
+        console.log(`${prefix}❌ Не найдено`);
         return null;
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${index}/${total}] ✅ ЗАВЕРШЕНО за ${elapsed}с`);
-      console.log(`[${index}/${total}] 💰 Цена: ${result.price.toLocaleString('ru-RU')} ${result.currency}`);
+      console.log(`${prefix}✅ ${elapsed}с\n`);
 
       return {
         price: result.price,
@@ -522,30 +443,23 @@ class AviasalesPricer {
       };
 
     } catch (error) {
-      console.error(`[${index}/${total}] ❌ ОШИБКА:`, error.message);
+      console.error(`${prefix}❌ ${error.message}\n`);
       return null;
     }
   }
 
-  // 🔥 ГЛАВНЫЙ МЕТОД: пакетная проверка с установкой куки один раз
   async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const total = urls.length;
     const results = new Array(total).fill(null);
 
-    console.log(`🚀 Начинаю обработку ${total} URL по ${this.maxConcurrent} параллельно`);
-    console.log('\n🍪 ========================================');
-    console.log('🍪 УСТАНОВКА КУКИ ДЛЯ ВСЕЙ ПАЧКИ');
-    console.log('🍪 ========================================');
+    console.log(`\n🚀 Обработка ${total} билетов (параллельно: ${this.maxConcurrent})\n`);
 
-    // 🔥 УСТАНАВЛИВАЕМ КУКУ ОДИН РАЗ ДЛЯ ВСЕЙ ПАЧКИ
     const cookiesObj = await this.setCookie();
 
     if (!cookiesObj) {
-      console.error('❌ Не удалось установить куки, прерываем обработку');
+      console.error('❌ Не удалось получить куки\n');
       return results;
     }
-
-    console.log('✅ Куки установлены для всей пачки проверок\n');
 
     const startTime = Date.now();
     let completedCount = 0;
@@ -567,17 +481,14 @@ class AviasalesPricer {
         results[index] = result;
         completedCount++;
 
-        console.log(`\n📊 Прогресс: ${completedCount}/${total} завершено\n`);
-
         if (nextUrlIndex < total) {
           const pause = Math.floor(Math.random() * 3000) + 5000;
-          console.log(`⏸ Пауза ${pause}мс перед следующим URL...`);
           await this.sleep(pause);
         }
 
         return result;
       } catch (error) {
-        console.error(`❌ Критическая ошибка URL ${index + 1}:`, error);
+        console.error(`[${index + 1}/${total}] ❌ Критическая ошибка\n`);
         results[index] = null;
         completedCount++;
         return null;
@@ -601,7 +512,7 @@ class AviasalesPricer {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const validResults = results.filter(r => r !== null);
-    console.log(`\n✅ Обработка завершена за ${elapsed}с. Успешно: ${validResults.length}/${total}\n`);
+    console.log(`✅ Завершено: ${validResults.length}/${total} за ${elapsed}с\n`);
 
     return results;
   }
