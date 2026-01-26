@@ -4,15 +4,15 @@ const fs = require('fs');
 const path = require('path');
 
 class AviasalesPricer {
-  constructor(debug = false, marker = '12345') {
-    this.maxConcurrent = 2;
+  constructor(debug = false, marker = '696196') {
+    this.maxConcurrent = 3;
     this.debug = debug;
     this.marker = marker;
 
     // API конфигурация
     this.baseURL = 'https://tickets-api.aviasales.ru';
-    this.maxPollingAttempts = 5;
-    this.pollingInterval = 5000;
+    this.maxPollingAttempts = 7;
+    this.pollingInterval = 4000;
 
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {

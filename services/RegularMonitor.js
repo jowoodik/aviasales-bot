@@ -328,7 +328,9 @@ class RegularMonitor {
     }
 
     try {
-      await this.bot.sendMessage(chatId, report, { parse_mode: 'HTML' });
+      if (this.stats.routes.length > 0) {
+        await this.bot.sendMessage(chatId, report, { parse_mode: 'HTML' });
+      }
 
       for (const route of this.stats.routes) {
         if (route.screenshot && fs.existsSync(route.screenshot)) {

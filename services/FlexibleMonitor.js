@@ -241,15 +241,54 @@ class FlexibleMonitor {
       report += `\nДетали:\n`;
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '⚠️';
+
+        // 🔥 ЗАГОЛОВОК МАРШРУТА
         report += `\n${emoji} ${route.origin} → ${route.destination}\n`;
+
+        // 🔥 ДОБАВЛЯЕМ ПОЛНУЮ ИНФОРМАЦИЮ О МАРШРУТЕ
+
+        // Даты
+        report += `   📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
+        report += `   ⏳ ${route.min_days}-${route.max_days} дней\n`;
+
+        // Пассажиры
+        const passengersStr = `${route.adults} взр${route.children > 0 ? `, ${route.children} дет` : ''}`;
+        report += `   👥 ${passengersStr}\n`;
+
+        // Авиакомпания
+        if (route.airline) {
+          report += `   ✈️ ${route.airline}\n`;
+        }
+
+        // Багаж
+        if (route.baggage === 1 || route.baggage === true) {
+          report += `   🧳 Багаж: 20 кг\n`;
+        }
+
+        // Пересадки
+        if (route.max_stops === 0) {
+          report += `   🛫 Прямые\n`;
+        } else if (route.max_stops !== 99 && route.max_stops !== null) {
+          report += `   🛫 До ${route.max_stops} пересадок\n`;
+          if (route.max_layover_hours) {
+            report += `   ⏱ Макс. пересадка: ${route.max_layover_hours}ч\n`;
+          }
+        }
+
+        // Цена и алерт
         if (route.success && route.bestPrice) {
           report += `   💰 ${route.bestPrice.toLocaleString('ru-RU')} ₽`;
           if (route.alert) {
-            report += ` (алерт отправлен)`;
+            report += ` 🔥 (алерт!)`;
           }
           report += `\n`;
+
+          // Порог
+          if (route.threshold_price) {
+            report += `   💵 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽\n`;
+          }
         } else {
-          report += `   ℹ️ Не удалось получить данные с сайта\n`;
+          report += `   ℹ️ Не удалось получить данные\n`;
         }
       }
     }
@@ -260,9 +299,20 @@ class FlexibleMonitor {
       for (const route of this.stats.routes) {
         if (route.screenshot && fs.existsSync(route.screenshot)) {
           try {
+            // 🔥 УЛУЧШЕННАЯ ПОДПИСЬ К СКРИНШОТУ
+            let caption = `📸 ${route.origin} → ${route.destination}\n`;
+            caption += `💰 ${route.bestPrice?.toLocaleString('ru-RU')} ₽\n`;
+
+            if (route.airline) {
+              caption += `✈️ ${route.airline}\n`;
+            }
+
+            const passengersStr = `${route.adults} взр${route.children > 0 ? `, ${route.children} дет` : ''}`;
+            caption += `👥 ${passengersStr}`;
+
             await this.bot.sendPhoto(chatId, route.screenshot, {
               contentType: 'image/png',
-              caption: `📸 ${route.origin} → ${route.destination}: ${route.bestPrice?.toLocaleString('ru-RU')} ₽`,
+              caption: caption,
             });
           } catch (e) {
             console.error(`Ошибка отправки скриншота: ${e.message}`);
@@ -272,62 +322,6 @@ class FlexibleMonitor {
     } catch (error) {
       console.error('Ошибка отправки отчета:', error.message);
     }
-  }
-
-  async checkSingleRoute(route) {
-    this.stats.startTime = Date.now();
-    console.log('\n========================================');
-    console.log('🎯 ПРОВЕРКА ОДНОГО МАРШРУТА');
-    console.log(new Date().toLocaleString('ru-RU'));
-    console.log('========================================\n');
-
-    console.log(`🔍 ${route.origin} → ${route.destination}`);
-    console.log(`   📅 Диапазон: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}`);
-    console.log(`   🛫 Пребывание: ${route.min_days}-${route.max_days} дней`);
-    console.log(`   ⏱️ Макс. пересадка: ${route.max_layover_hours || 5} ч`);
-    console.log(`   💰 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`);
-
-    const canNotify = await this.notificationService.canSendNotification(route.chat_id);
-
-    const routeStats = {
-      origin: route.origin,
-      destination: route.destination,
-      chatId: route.chat_id,
-      success: false,
-      bestPrice: null,
-      alert: false,
-      screenshot: null
-    };
-
-    try {
-      const result = await this.analyzeRoute(route, canNotify);
-
-      if (result && result.success) {
-        routeStats.success = true;
-        routeStats.bestPrice = result.bestPrice;
-        routeStats.alert = result.alert;
-        routeStats.screenshot = result.screenshot;
-        this.stats.success++;
-
-        if (result.alert) {
-          this.stats.alerts++;
-        }
-      } else {
-        this.stats.failed++;
-      }
-    } catch (error) {
-      console.error(`   ❌ Ошибка: ${error.message}`);
-      this.stats.failed++;
-    }
-
-    this.stats.routes.push(routeStats);
-    await FlexibleRoute.updateLastCheck(route.id);
-
-    console.log('\n========================================');
-    console.log('✅ Проверка завершена');
-    console.log('========================================\n');
-
-    return routeStats;
   }
 
   sleep(ms) {

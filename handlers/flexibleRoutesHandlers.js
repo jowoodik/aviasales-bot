@@ -625,18 +625,52 @@ class FlexibleRoutesHandlers {
 
   async showFlexibleTopResults(chatId, route) {
     const FlexibleResult = require('../models/FlexibleResult');
-    const results = await FlexibleResult.getTopResults(route.id, 3); // 🔥 ИЗМЕНЕНО С 5 НА 3
+    const results = await FlexibleResult.getTopResults(route.id, 3);
 
     if (!results || results.length === 0) {
       this.bot.sendMessage(chatId, '❌ Пока нет результатов поиска', this.getMainMenuKeyboard());
       return;
     }
 
+    // 🔥 УЛУЧШЕННЫЙ ЗАГОЛОВОК С ПОЛНОЙ ИНФОРМАЦИЕЙ
     let headerMessage = `💎 ЛУЧШЕЕ СЕЙЧАС (ГИБКИЙ ПОИСК)\n\n`;
-    headerMessage += `${route.origin} → ${route.destination}\n`;
-    headerMessage += `Диапазон вылета: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
-    headerMessage += `Пребывание: ${route.min_days}-${route.max_days} дней\n\n`;
-    headerMessage += `🏆 Топ-${results.length}:\n`;
+    headerMessage += `📍 Маршрут: ${route.origin} → ${route.destination}\n`;
+    headerMessage += `📅 Диапазон вылета: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
+    headerMessage += `⏳ Пребывание: ${route.min_days}-${route.max_days} дней\n`;
+
+    // Пассажиры
+    const passengersStr = `${route.adults} взр${route.children > 0 ? `, ${route.children} дет` : ''}`;
+    headerMessage += `👥 Пассажиры: ${passengersStr}\n`;
+
+    // Авиакомпания
+    if (route.airline) {
+      headerMessage += `✈️ Авиакомпания: ${route.airline}\n`;
+    } else {
+      headerMessage += `✈️ Авиакомпания: Любая\n`;
+    }
+
+    // Багаж
+    if (route.baggage === 1 || route.baggage === true) {
+      headerMessage += `🧳 Багаж: 20 кг\n`;
+    } else {
+      headerMessage += `🧳 Багаж: Нет\n`;
+    }
+
+    // Пересадки
+    if (route.max_stops === 0) {
+      headerMessage += `🛫 Пересадки: Только прямые\n`;
+    } else if (route.max_stops === 99 || route.max_stops === null) {
+      headerMessage += `🛫 Пересадки: Любое количество\n`;
+    } else {
+      headerMessage += `🛫 Пересадки: До ${route.max_stops}\n`;
+    }
+
+    // Максимальное время пересадки
+    if (route.max_layover_hours && route.max_stops > 0 && route.max_stops !== 99) {
+      headerMessage += `⏱ Макс. время пересадки: ${route.max_layover_hours}ч\n`;
+    }
+
+    headerMessage += `\n🏆 Топ-${results.length}:\n`;
 
     await this.bot.sendMessage(chatId, headerMessage, { parse_mode: 'HTML' });
 
@@ -680,7 +714,7 @@ class FlexibleRoutesHandlers {
         });
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 🔥 ИЗМЕНЕНО С 500 НА 1000
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     const summaryMessage = `\n💵 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽`;

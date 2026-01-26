@@ -1,7 +1,7 @@
 class AviasalesAPI {
   constructor(token, marker) {
     this.token = token;
-    this.marker = marker || '12345';
+    this.marker = marker || '696196';
     this.baseURL = 'https://api.travelpayouts.com';
   }
 
