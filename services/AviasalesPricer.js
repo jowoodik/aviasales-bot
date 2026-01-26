@@ -11,7 +11,7 @@ class AviasalesPricer {
 
     // API конфигурация
     this.baseURL = 'https://tickets-api.aviasales.ru';
-    this.maxPollingAttempts = 7;
+    this.maxPollingAttempts = 3;
     this.pollingInterval = 4000;
 
     const tempDir = path.join(__dirname, '../temp');
