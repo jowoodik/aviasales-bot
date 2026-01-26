@@ -68,10 +68,22 @@ class FlexibleMonitor {
 
       const canNotify = await this.notificationService.canSendNotification(route.chat_id);
 
+      // 🔥 ИСПРАВЛЕНИЕ: Сохраняем ВСЕ данные маршрута
       const routeStats = {
         origin: route.origin,
         destination: route.destination,
         chatId: route.chat_id,
+        departure_start: route.departure_start,
+        departure_end: route.departure_end,
+        min_days: route.min_days,
+        max_days: route.max_days,
+        adults: route.adults,
+        children: route.children,
+        airline: route.airline,
+        baggage: route.baggage,
+        max_stops: route.max_stops,
+        max_layover_hours: route.max_layover_hours,
+        threshold_price: route.threshold_price,
         success: false,
         bestPrice: null,
         alert: false,
@@ -242,10 +254,8 @@ class FlexibleMonitor {
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '⚠️';
 
-        // 🔥 ЗАГОЛОВОК МАРШРУТА
+        // Заголовок маршрута
         report += `\n${emoji} ${route.origin} → ${route.destination}\n`;
-
-        // 🔥 ДОБАВЛЯЕМ ПОЛНУЮ ИНФОРМАЦИЮ О МАРШРУТЕ
 
         // Даты
         report += `   📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
@@ -299,7 +309,6 @@ class FlexibleMonitor {
       for (const route of this.stats.routes) {
         if (route.screenshot && fs.existsSync(route.screenshot)) {
           try {
-            // 🔥 УЛУЧШЕННАЯ ПОДПИСЬ К СКРИНШОТУ
             let caption = `📸 ${route.origin} → ${route.destination}\n`;
             caption += `💰 ${route.bestPrice?.toLocaleString('ru-RU')} ₽\n`;
 

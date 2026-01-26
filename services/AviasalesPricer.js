@@ -27,7 +27,7 @@ class AviasalesPricer {
   }
 
   async setCookie() {
-    console.log('🍪 Получение куки...');
+    console.log('Получение куки с aviasales.ru...');
 
     let browser = null;
     let page = null;
@@ -72,12 +72,12 @@ class AviasalesPricer {
       await page.close();
       await browser.close();
 
-      console.log(`✅ Куки получены (${Object.keys(cookiesObj).length} шт)\n`);
+      console.log(`Куки получены: ${Object.keys(cookiesObj).length} штук\n`);
 
       return cookiesObj;
 
     } catch (error) {
-      console.error('❌ Ошибка получения куки:', error.message);
+      console.error('ОШИБКА получения куки:', error.message);
 
       if (page) {
         try {
@@ -136,6 +136,8 @@ class AviasalesPricer {
       max_stops = null,
       max_layover_hours = null
     } = params;
+
+    console.log(`${prefix}  > Запуск поиска через API...`);
 
     const filters_state = {};
 
@@ -225,7 +227,7 @@ class AviasalesPricer {
       );
 
       const data = response.data;
-      console.log(`${prefix}🔍 Поиск запущен (ID: ${data.search_id.substring(0, 8)}...)`);
+      console.log(`${prefix}  > Поиск запущен, search_id: ${data.search_id.substring(0, 12)}...`);
 
       return {
         search_id: data.search_id,
@@ -236,9 +238,9 @@ class AviasalesPricer {
 
     } catch (error) {
       if (error.response) {
-        console.error(`${prefix}❌ HTTP ${error.response.status}`);
+        console.error(`${prefix}  > ОШИБКА: HTTP ${error.response.status}`);
       } else {
-        console.error(`${prefix}❌ ${error.message}`);
+        console.error(`${prefix}  > ОШИБКА: ${error.message}`);
       }
       throw error;
     }
@@ -246,6 +248,8 @@ class AviasalesPricer {
 
   async getResults(searchData, cookiesObj, airline = null, prefix = '') {
     const { search_id, results_url, filters_state } = searchData;
+
+    console.log(`${prefix}  > Ожидание результатов (макс ${this.maxPollingAttempts} попыток)...`);
 
     let attempt = 0;
     let last_update_timestamp = null;
@@ -278,12 +282,13 @@ class AviasalesPricer {
         const data = response.data[0];
 
         if (data.last_update_timestamp === 0) {
+          console.log(`${prefix}  > Загрузка завершена, анализ билетов...`);
           const cheapestPrice = this.extractCheapestPriceFromAllTickets(data.tickets, airline, prefix);
 
           if (cheapestPrice) {
             return cheapestPrice;
           } else {
-            console.log(`${prefix}⚠️ Билеты не найдены`);
+            console.log(`${prefix}  > Билеты не найдены под заданные фильтры`);
             return null;
           }
         }
@@ -301,7 +306,7 @@ class AviasalesPricer {
         }
 
         if (attempt >= this.maxPollingAttempts) {
-          console.error(`${prefix}❌ Таймаут поиска`);
+          console.error(`${prefix}  > ОШИБКА: Превышено максимальное количество попыток`);
           return null;
         }
 
@@ -309,7 +314,7 @@ class AviasalesPricer {
       }
     }
 
-    console.error(`${prefix}❌ Таймаут поиска`);
+    console.error(`${prefix}  > ОШИБКА: Таймаут ожидания результатов`);
     return null;
   }
 
@@ -344,7 +349,7 @@ class AviasalesPricer {
 
     const currency = bestProposal.unified_price?.currency_code || bestProposal.price?.currency_code;
 
-    console.log(`${prefix}💰 ${minPrice.toLocaleString('ru-RU')} ${currency}`);
+    console.log(`${prefix}  > Найдена минимальная цена: ${minPrice.toLocaleString('ru-RU')} ${currency}`);
 
     return {
       price: minPrice,
@@ -378,16 +383,7 @@ class AviasalesPricer {
 
   async getPriceFromUrl(url, cookiesObj, index, total, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const startTime = Date.now();
-    const prefix = `[${index}/${total}] `;
-
-    // Формируем краткое описание фильтров
-    const filters = [];
-    if (airline) filters.push(`✈️${airline}`);
-    if (max_stops !== null && max_stops !== undefined && max_stops !== 99) filters.push(`🔢${max_stops}`);
-    if (maxLayoverHours) filters.push(`⏱${maxLayoverHours}ч`);
-    if (baggage) filters.push(`🧳`);
-
-    const filtersStr = filters.length > 0 ? ` (${filters.join(' ')})` : '';
+    const prefix = `[${index}/${total}]`;
 
     try {
       const urlObj = new URL(url);
@@ -410,11 +406,14 @@ class AviasalesPricer {
         return `${year}-${month}-${day}`;
       };
 
+      const depDateFormatted = formatDate(depDate);
+      const retDateFormatted = formatDate(retDate);
+
       const params = {
         origin: origin,
         destination: destination,
-        departure_date: formatDate(depDate),
-        return_date: formatDate(retDate),
+        departure_date: depDateFormatted,
+        return_date: retDateFormatted,
         adults: parseInt(adults) || 1,
         children: parseInt(children || '0'),
         infants: parseInt(infants || '0'),
@@ -424,18 +423,37 @@ class AviasalesPricer {
         max_layover_hours: maxLayoverHours
       };
 
-      console.log(`${prefix}🚀 ${origin}→${destination} ${formatDate(depDate).substring(5)}${filtersStr}`);
+      // Формируем красивое описание
+      console.log('');
+      console.log(`${prefix} ========================================`);
+      console.log(`${prefix} Маршрут: ${origin} -> ${destination}`);
+      console.log(`${prefix} Вылет: ${depDateFormatted}${retDateFormatted ? ', Обратно: ' + retDateFormatted : ''}`);
+      console.log(`${prefix} Пассажиры: ${params.adults} взр${params.children > 0 ? ', ' + params.children + ' дет' : ''}${params.infants > 0 ? ', ' + params.infants + ' млад' : ''}`);
+
+      if (airline || max_stops !== null || maxLayoverHours || baggage) {
+        const filters = [];
+        if (airline) filters.push(`авиакомпания ${airline}`);
+        if (max_stops !== null && max_stops !== 99) filters.push(`макс пересадок: ${max_stops}`);
+        if (maxLayoverHours) filters.push(`макс время пересадки: ${maxLayoverHours}ч`);
+        if (baggage) filters.push(`с багажом`);
+        console.log(`${prefix} Фильтры: ${filters.join(', ')}`);
+      }
+
+      console.log(`${prefix} ========================================`);
 
       const searchData = await this.startSearch(params, cookiesObj, prefix);
       const result = await this.getResults(searchData, cookiesObj, airline, prefix);
 
       if (!result) {
-        console.log(`${prefix}❌ Не найдено`);
+        console.log(`${prefix} РЕЗУЛЬТАТ: Билеты не найдены`);
+        console.log('');
         return null;
       }
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`${prefix}✅ ${elapsed}с\n`);
+      console.log(`${prefix} РЕЗУЛЬТАТ: ${result.price.toLocaleString('ru-RU')} ${result.currency}`);
+      console.log(`${prefix} Время обработки: ${elapsed} секунд`);
+      console.log('');
 
       return {
         price: result.price,
@@ -443,7 +461,8 @@ class AviasalesPricer {
       };
 
     } catch (error) {
-      console.error(`${prefix}❌ ${error.message}\n`);
+      console.error(`${prefix} КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`);
+      console.log('');
       return null;
     }
   }
@@ -452,12 +471,18 @@ class AviasalesPricer {
     const total = urls.length;
     const results = new Array(total).fill(null);
 
-    console.log(`\n🚀 Обработка ${total} билетов (параллельно: ${this.maxConcurrent})\n`);
+    console.log('');
+    console.log('========================================');
+    console.log(`НАЧАЛО ОБРАБОТКИ: ${total} билетов`);
+    console.log(`Параллельных потоков: ${this.maxConcurrent}`);
+    console.log('========================================');
+    console.log('');
 
     const cookiesObj = await this.setCookie();
 
     if (!cookiesObj) {
-      console.error('❌ Не удалось получить куки\n');
+      console.error('КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить куки');
+      console.log('');
       return results;
     }
 
@@ -481,6 +506,9 @@ class AviasalesPricer {
         results[index] = result;
         completedCount++;
 
+        console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов`);
+        console.log('');
+
         if (nextUrlIndex < total) {
           const pause = Math.floor(Math.random() * 3000) + 5000;
           await this.sleep(pause);
@@ -488,7 +516,8 @@ class AviasalesPricer {
 
         return result;
       } catch (error) {
-        console.error(`[${index + 1}/${total}] ❌ Критическая ошибка\n`);
+        console.error(`[${index + 1}/${total}] КРИТИЧЕСКАЯ ОШИБКА`);
+        console.log('');
         results[index] = null;
         completedCount++;
         return null;
@@ -512,7 +541,14 @@ class AviasalesPricer {
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const validResults = results.filter(r => r !== null);
-    console.log(`✅ Завершено: ${validResults.length}/${total} за ${elapsed}с\n`);
+
+    console.log('');
+    console.log('========================================');
+    console.log('ОБРАБОТКА ЗАВЕРШЕНА');
+    console.log(`Успешно: ${validResults.length} из ${total}`);
+    console.log(`Общее время: ${elapsed} секунд`);
+    console.log('========================================');
+    console.log('');
 
     return results;
   }
