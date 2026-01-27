@@ -774,7 +774,7 @@ class AviasalesPricer {
     console.log('');
     console.log('========================================');
     console.log(`НАЧАЛО ОБРАБОТКИ: ${total} билетов`);
-    console.log(`Размер пачки: ${this.maxConcurrent}`);
+    console.log(`Максимум параллельных запросов: ${this.maxConcurrent}`);
     console.log('========================================');
     console.log('');
 
@@ -790,72 +790,60 @@ class AviasalesPricer {
     let successCount = 0;
     let failedCount = 0;
 
-    const batchSize = this.maxConcurrent;
-    const totalBatches = Math.ceil(total / batchSize);
+    // 🔥 общий индекс следующего URL для всех воркеров
+    let nextIndex = 0;
 
-    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      const batchStart = batchIndex * batchSize;
-      const batchEnd = Math.min(batchStart + batchSize, total);
-      const batchUrls = urls.slice(batchStart, batchEnd);
+    const worker = async (workerId) => {
+      const workerCookies = this.cookiesList[workerId % this.cookiesList.length];
 
-      console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-      console.log(`🔄 ПАЧКА ${batchIndex + 1}/${totalBatches}: билеты ${batchStart + 1}-${batchEnd}`);
-      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+      while (true) {
+        const currentIndex = nextIndex++;
+        if (currentIndex >= total) {
+          break;
+        }
 
-      const batchPromises = [];
+        try {
+          const result = await this.getPriceFromUrl(
+              urls[currentIndex],
+              workerCookies,
+              currentIndex + 1,
+              total,
+              airline,
+              maxLayoverHours,
+              baggage,
+              max_stops
+          );
 
-      for (let i = 0; i < batchUrls.length; i++) {
-        const globalIndex = batchStart + i;
-        const workerCookies = this.cookiesList[i % this.cookiesList.length];
+          results[currentIndex] = result;
+          completedCount++;
 
-        // 🔥 убрал задержку между запуском воркеров в пачке
-
-        const workerPromise = (async () => {
-          try {
-            const result = await this.getPriceFromUrl(
-                batchUrls[i],
-                workerCookies,
-                globalIndex + 1,
-                total,
-                airline,
-                maxLayoverHours,
-                baggage,
-                max_stops
-            );
-
-            results[globalIndex] = result;
-            completedCount++;
-
-            if (result && result.price) {
-              successCount++;
-            } else {
-              failedCount++;
-            }
-
-            console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов (✅ ${successCount} успешно, ❌ ${failedCount} ошибок)`);
-            console.log('');
-
-            return result;
-          } catch (error) {
-            console.error(`[${globalIndex + 1}/${total}] КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`);
-            console.log('');
-            results[globalIndex] = null;
-            completedCount++;
+          if (result && result.price) {
+            successCount++;
+          } else {
             failedCount++;
-            return null;
           }
-        })();
 
-        batchPromises.push(workerPromise);
+          console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов (✅ ${successCount} успешно, ❌ ${failedCount} ошибок)`);
+          console.log('');
+        } catch (error) {
+          console.error(`[${currentIndex + 1}/${total}] КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`);
+          console.log('');
+          results[currentIndex] = null;
+          completedCount++;
+          failedCount++;
+        }
       }
+    };
 
-      console.log(`⏳ Ожидание завершения пачки ${batchIndex + 1}/${totalBatches}...\n`);
-      await Promise.allSettled(batchPromises);
-
-      console.log(`\n✅ Пачка ${batchIndex + 1}/${totalBatches} завершена\n`);
-
-      // 🔥 убрал паузу между пачками
+    // 🔥 запускаем воркеры (не пачками, а сразу до maxConcurrent)
+    const workersCount = Math.min(this.maxConcurrent, total);
+    const workerPromises = [];
+    for (let i = 0; i < workersCount; i++) {
+      workerPromises.push(worker(i));
     }
+
+    // 🔥 ждем только общий конец всех воркеров
+    await Promise.allSettled(workerPromises);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 

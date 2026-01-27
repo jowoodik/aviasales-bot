@@ -123,7 +123,7 @@ class FlexibleMonitor {
       await FlexibleRoute.updateLastCheck(route.id);
 
       if (i < routes.length - 1) {
-        const pause = Math.floor(Math.random() * 30000 + 30000); // 30-60 сек
+        const pause = Math.floor(Math.random() * 10000 + 10000); // 30-60 сек
         const pauseSec = (pause / 1000).toFixed(0);
         console.log(`\n   ⏳ Ожидание ${pauseSec} сек перед следующим маршрутом...`);
         await this.sleep(pause);
