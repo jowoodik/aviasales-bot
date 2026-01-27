@@ -20,9 +20,9 @@ class AviasalesPricer {
     // ПРОКСИ-РОТАЦИЯ
     this.proxyList = [
       'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
-      // 'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
-      // 'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
-      // 'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
+      'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
+      'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
+      'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
       'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
       'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
       'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
@@ -34,7 +34,11 @@ class AviasalesPricer {
     this.currentProxyIndex = 0;
     this.proxyCheckTimeout = 2000;
 
-    // 🔥 массив разных наборов кук
+    // 🔥 Флаги инициализации
+    this.proxiesInitialized = false;
+    this.cookiesInitialized = false;
+
+    // массив разных наборов кук
     this.cookiesList = [];
 
     const tempDir = path.join(__dirname, '../temp');
@@ -97,6 +101,12 @@ class AviasalesPricer {
   }
 
   async initProxies() {
+    // 🔥 Проверяем только один раз
+    if (this.proxiesInitialized) {
+      console.log('✅ Прокси уже проверены, пропускаем...\n');
+      return this.workingProxies.length > 0;
+    }
+
     console.log('\n🔍 ПРОВЕРКА ПРОКСИ');
     console.log(`Проверка ${this.proxyList.length} прокси (таймаут ${this.proxyCheckTimeout}мс)...\n`);
 
@@ -114,7 +124,7 @@ class AviasalesPricer {
         console.log(`❌ Прокси ${i + 1}/${this.proxyList.length}: ОШИБКА (${result.error})`);
       }
 
-      await this.sleep(200);
+      // 🔥 убрал паузу между проверками прокси
     }
 
     console.log(`\n✅ Рабочих прокси: ${this.workingProxies.length}/${this.proxyList.length}\n`);
@@ -123,6 +133,7 @@ class AviasalesPricer {
       console.warn('⚠️ НЕТ РАБОЧИХ ПРОКСИ! Работа без прокси.\n');
     }
 
+    this.proxiesInitialized = true;
     return this.workingProxies.length > 0;
   }
 
@@ -211,13 +222,13 @@ class AviasalesPricer {
 
       console.log('✅ Страница загружена, ждем куки и токены...');
 
-      await this.sleep(5000);
+      await this.sleep(3000); // 🔥 сократил с 5 до 3 сек
 
       try {
         await page.evaluate(() => {
           window.scrollTo(0, 100);
         });
-        await this.sleep(1000);
+        await this.sleep(500); // 🔥 сократил с 1 до 0.5 сек
       } catch (e) {}
 
       const pageCookies = await page.cookies();
@@ -267,12 +278,20 @@ class AviasalesPricer {
     }
   }
 
-  // 🔥 создаем несколько наборов кук
+  // 🔥 создаем несколько наборов кук ТОЛЬКО ОДИН РАЗ
   async initCookiesSets(count) {
+    // 🔥 Если уже инициализированы, пропускаем
+    if (this.cookiesInitialized) {
+      console.log(`✅ Куки уже получены (${this.cookiesList.length} наборов), пропускаем...\n`);
+      return;
+    }
+
     this.cookiesList = [];
 
+    console.log(`\n🍪 ПОЛУЧЕНИЕ ${count} НАБОРОВ КУК\n`);
+
     for (let i = 0; i < count; i++) {
-      console.log(`\n🍪 Получение кук #${i + 1}/${count}...`);
+      console.log(`🍪 Набор кук #${i + 1}/${count}...`);
       const cookiesObj = await this.setCookie();
 
       if (!cookiesObj) {
@@ -282,15 +301,16 @@ class AviasalesPricer {
 
       this.cookiesList.push(cookiesObj);
 
-      const pause = Math.floor(Math.random() * 2000) + 2000; // 2–4 c
-      await this.sleep(pause);
+      // 🔥 убрал паузу между получением кук
     }
 
-    console.log(`\n🍪 Готово: получено ${this.cookiesList.length}/${count} наборов кук\n`);
+    console.log(`\n✅ Готово: получено ${this.cookiesList.length}/${count} наборов кук\n`);
 
     if (this.cookiesList.length === 0) {
       throw new Error('Не удалось получить ни одного набора кук');
     }
+
+    this.cookiesInitialized = true;
   }
 
   formatCookies(cookiesObj) {
@@ -564,11 +584,11 @@ class AviasalesPricer {
           last_update_timestamp = data.last_update_timestamp;
         }
 
-        await this.sleep(this.pollingInterval);
+        await this.sleep(this.pollingInterval); // 🔥 НЕ ТРОГАЛ - оставил 6000мс
 
       } catch (error) {
         if (error.response && error.response.statusCode === 304) {
-          await this.sleep(this.pollingInterval);
+          await this.sleep(this.pollingInterval); // 🔥 НЕ ТРОГАЛ
           continue;
         }
 
@@ -577,7 +597,7 @@ class AviasalesPricer {
           return null;
         }
 
-        await this.sleep(this.pollingInterval);
+        await this.sleep(this.pollingInterval); // 🔥 НЕ ТРОГАЛ
       } finally {
         if (httpsAgent) {
           try {
@@ -720,9 +740,7 @@ class AviasalesPricer {
 
       const searchData = await this.startSearch(params, cookiesObj, prefix);
 
-      // const pauseBeforeResults = Math.floor(Math.random() * 2000) + 2000; // 2–3 сек
-      // console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeResults / 1000).toFixed(1)}с перед получением результатов...`);
-      // await this.sleep(pauseBeforeResults);
+      // 🔥 убрал паузу перед получением результатов
 
       const result = await this.getResults(searchData, cookiesObj, airline, prefix);
 
@@ -760,8 +778,10 @@ class AviasalesPricer {
     console.log('========================================');
     console.log('');
 
+    // 🔥 Инициализируем прокси только один раз
     await this.initProxies();
 
+    // 🔥 Инициализируем куки только один раз
     const cookiesCount = Math.min(this.maxConcurrent, total);
     await this.initCookiesSets(cookiesCount);
 
@@ -788,10 +808,7 @@ class AviasalesPricer {
         const globalIndex = batchStart + i;
         const workerCookies = this.cookiesList[i % this.cookiesList.length];
 
-        if (i > 0) {
-          console.log(`⏳ Запуск воркера ${i + 1}/${batchUrls.length} в пачке через 5 секунд...\n`);
-          await this.sleep(5000);
-        }
+        // 🔥 убрал задержку между запуском воркеров в пачке
 
         const workerPromise = (async () => {
           try {
@@ -837,11 +854,7 @@ class AviasalesPricer {
 
       console.log(`\n✅ Пачка ${batchIndex + 1}/${totalBatches} завершена\n`);
 
-      if (batchIndex < totalBatches - 1) {
-        const pauseBetweenBatches = Math.floor(Math.random() * 3000) + 5000; // 10–15 c
-        console.log(`⏳ Пауза ${(pauseBetweenBatches / 1000).toFixed(1)}с перед следующей пачкой...\n`);
-        await this.sleep(pauseBetweenBatches);
-      }
+      // 🔥 убрал паузу между пачками
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
