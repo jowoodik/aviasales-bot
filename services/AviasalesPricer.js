@@ -770,8 +770,7 @@ class AviasalesPricer {
         console.log('');
 
         if (nextUrlIndex < total) {
-          // Увеличена пауза
-          const pause = Math.floor(Math.random() * 5000) + 10000;
+          const pause = Math.floor(Math.random() * 3000) + 5000; // 🔥 5-8 сек между запросами одного воркера
           await this.sleep(pause);
         }
 
@@ -788,6 +787,7 @@ class AviasalesPricer {
 
     const workers = [];
 
+    // 🔥 ЗАПУСКАЕМ ВОРКЕРЫ С ЗАДЕРЖКОЙ 5 СЕКУНД МЕЖДУ КАЖДЫМ
     for (let i = 0; i < Math.min(this.maxConcurrent, total); i++) {
       const workerChain = (async () => {
         while (nextUrlIndex < total) {
@@ -797,6 +797,12 @@ class AviasalesPricer {
       })();
 
       workers.push(workerChain);
+
+      // 🔥 ПАУЗА 5 СЕКУНД перед запуском следующего воркера (кроме последнего)
+      if (i < Math.min(this.maxConcurrent, total) - 1) {
+        console.log(`⏳ Запуск воркера ${i + 2}/${Math.min(this.maxConcurrent, total)} через 5 секунд...\n`);
+        await this.sleep(5000);
+      }
     }
 
     await Promise.allSettled(workers);
