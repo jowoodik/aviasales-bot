@@ -683,7 +683,6 @@ class AviasalesPricer {
         console.log(`${prefix} Фильтры: ${filters.join(', ')}`);
       }
 
-      // 🔥 ИСПОЛЬЗУЕМ СУЩЕСТВУЮЩИЙ aviasalesAPI.generateSearchLink()
       if (this.aviasalesAPI) {
         const aviasalesUrl = this.aviasalesAPI.generateSearchLink(params);
         console.log(`${prefix} Ссылка: ${aviasalesUrl}`);
@@ -692,6 +691,12 @@ class AviasalesPricer {
       console.log(`${prefix} ========================================`);
 
       const searchData = await this.startSearch(params, cookiesObj, prefix);
+
+      // 🔥 ПАУЗА 2-3 СЕКУНДЫ между search и results
+      const pauseBeforeResults = Math.floor(Math.random() * 1000) + 2000; // 2-3 сек
+      console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeResults / 1000).toFixed(1)}с перед получением результатов...`);
+      await this.sleep(pauseBeforeResults);
+
       const result = await this.getResults(searchData, cookiesObj, airline, prefix);
 
       if (!result) {
@@ -716,6 +721,7 @@ class AviasalesPricer {
       return null;
     }
   }
+
 
   async getPricesFromUrls(urls, airline = null, maxLayoverHours = null, baggage = false, max_stops = null) {
     const total = urls.length;
@@ -801,7 +807,7 @@ class AviasalesPricer {
       // 🔥 ПАУЗА 5 СЕКУНД перед запуском следующего воркера (кроме последнего)
       if (i < Math.min(this.maxConcurrent, total) - 1) {
         console.log(`⏳ Запуск воркера ${i + 2}/${Math.min(this.maxConcurrent, total)} через 5 секунд...\n`);
-        await this.sleep(5000);
+        await this.sleep(2000);
       }
     }
 
@@ -828,6 +834,7 @@ class AviasalesPricer {
       }
     };
   }
+
 }
 
 module.exports = AviasalesPricer;
