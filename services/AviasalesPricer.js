@@ -5,10 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const AviasalesAPI = require('./AviasalesAPI');
 
-// TODO обработать что подходящих билетов нет, наверно по cheapest_price
-// TODO получать прокси динамически один раз при запуске
-// TODO сводить maxConcurrent до работающих прокси и кук
-
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
     this.maxConcurrent = 7;
@@ -22,17 +18,15 @@ class AviasalesPricer {
     this.pollingInterval = 4000;
 
     // ПРОКСИ-РОТАЦИЯ
+    // прокси тут: https://panel.spaceproxy.net/all/?orders=2287916
     this.proxyList = [
-      'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
-      // 'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
-      // 'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
-      // 'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
-      'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
-      'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
-      'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
-      'http://bkczhupt:ww4ng38q6a84@216.10.27.159:6837',
-      'http://bkczhupt:ww4ng38q6a84@23.26.71.145:5628',
-      'http://bkczhupt:ww4ng38q6a84@23.27.208.120:5830'
+      'http://PEesVANV:hiBzhNjR@45.132.129.28:63986',
+      'http://PEesVANV:hiBzhNjR@85.142.0.133:62806',
+      'http://PEesVANV:hiBzhNjR@85.142.1.182:62672',
+      'http://PEesVANV:hiBzhNjR@85.142.5.72:62916',
+      'http://PEesVANV:hiBzhNjR@85.142.7.101:64414',
+      'http://PEesVANV:hiBzhNjR@85.142.46.30:64626',
+      'http://PEesVANV:hiBzhNjR@85.142.81.248:64954',
     ];
     this.workingProxies = [];
     this.currentProxyIndex = 0;
@@ -360,7 +354,7 @@ class AviasalesPricer {
     if (max_layover_hours !== null && max_layover_hours !== undefined) {
       const maxMinutes = max_layover_hours * 60;
       filters_state.transfers_duration = {
-        min: 0,
+        min: 60,
         max: maxMinutes
       };
     }
