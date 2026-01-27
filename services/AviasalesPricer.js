@@ -5,13 +5,13 @@ const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 7;
+    this.maxConcurrent = 3;
     this.debug = debug;
     this.marker = marker;
 
     // API конфигурация
     this.baseURL = 'https://tickets-api.aviasales.ru';
-    this.maxPollingAttempts = 3;
+    this.maxPollingAttempts = 7;
     this.pollingInterval = 4000;
 
     const tempDir = path.join(__dirname, '../temp');
