@@ -21,9 +21,9 @@ class AviasalesPricer {
     // 🔥 ПРОКСИ-РОТАЦИЯ
     this.proxyList = [
       'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
-      'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
-      'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
-      'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
+      // 'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
+      // 'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
+      // 'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
       'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
       'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
       'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
@@ -690,10 +690,13 @@ class AviasalesPricer {
 
       console.log(`${prefix} ========================================`);
 
+      const pauseBeforeSearch = Math.floor(Math.random() * 2000) + 2000; // 2-3 сек
+      console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeSearch / 1000).toFixed(1)}с перед поиском`);
+      await this.sleep(pauseBeforeSearch);
       const searchData = await this.startSearch(params, cookiesObj, prefix);
 
       // 🔥 ПАУЗА 2-3 СЕКУНДЫ между search и results
-      const pauseBeforeResults = Math.floor(Math.random() * 1000) + 2000; // 2-3 сек
+      const pauseBeforeResults = Math.floor(Math.random() * 2000) + 2000; // 2-3 сек
       console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeResults / 1000).toFixed(1)}с перед получением результатов...`);
       await this.sleep(pauseBeforeResults);
 
@@ -807,7 +810,7 @@ class AviasalesPricer {
       // 🔥 ПАУЗА 5 СЕКУНД перед запуском следующего воркера (кроме последнего)
       if (i < Math.min(this.maxConcurrent, total) - 1) {
         console.log(`⏳ Запуск воркера ${i + 2}/${Math.min(this.maxConcurrent, total)} через 5 секунд...\n`);
-        await this.sleep(2000);
+        await this.sleep(7000);
       }
     }
 
