@@ -298,75 +298,6 @@ aviasales-price-bot/
 
 ---
 
-## 🧪 Тестирование
-
-### Запуск тестов
-
-```bash
-# Все тесты
-npm test
-
-# С покрытием кода
-npm run test:coverage
-
-# Конкретный файл
-npm test -- routeHandlers.test.js
-
-# Watch режим
-npm test -- --watch
-```
-
-### Покрытие кода
-
-```
-----------------------------|---------|----------|---------|---------|
-File                        | % Stmts | % Branch | % Funcs | % Lines |
-----------------------------|---------|----------|---------|---------|
-All files                   |   92.5  |   87.3   |   95.1  |   93.2  |
- handlers/                  |   100   |   100    |   100   |   100   |
-  regularRouteHandlers.js          |   100   |   100    |   100   |   100   |
-  flexibleRoutesHandlers.js       |   100   |   100    |   100   |   100   |
-  settingsHandlers.js       |   100   |   100    |   100   |   100   |
- services/                  |   85.3  |   78.5   |   91.2  |   86.7  |
-  RegularMonitor.js           |   88.5  |   82.1   |   93.3  |   89.2  |
-  FlexibleMonitor.js        |   87.2  |   79.8   |   92.5  |   88.1  |
-----------------------------|---------|----------|---------|---------|
-```
-
-### Примеры тестов
-
-```javascript
-// __tests__/routeHandlers.test.js
-describe('handleAddRoute', () => {
-  it('должен добавить маршрут в БД и запустить мониторинг', async () => {
-    const msg = { chat: { id: 12345 } };
-    const route = {
-      origin: 'MOW',
-      destination: 'LED',
-      departure_date: '2026-03-01',
-      return_date: '2026-03-08',
-      adults: 1,
-      children: 0,
-      max_stops: 1
-    };
-
-    await handleAddRoute(bot, msg, route);
-
-    expect(Route.create).toHaveBeenCalledWith({
-      user_id: 12345,
-      ...route,
-      is_active: true
-    });
-    expect(bot.sendMessage).toHaveBeenCalledWith(
-      12345,
-      expect.stringContaining('✅ Маршрут добавлен')
-    );
-  });
-});
-```
-
----
-
 ## 🚀 Деплой
 
 ### Локальный запуск
@@ -541,39 +472,9 @@ pm2 start index.js --name aviasales-bot --max-memory-restart 1G
 
 ---
 
-## 🔧 Troubleshooting
-
-### Проблема: "Селектор не найден"
-**Решение:**
-- Проверить актуальность селектора `[data-testid="serp-ticket-total-sum"]`
-- Увеличить `timeout` в `AviasalesPricer.js`
-- Проверить cookies в `.env`
-
-### Проблема: Высокая нагрузка CPU
-**Решение:**
-- Снизить `MAX_CONCURRENT` до 1
-- Увеличить `MIN_DELAY_MS` до 10000
-- Проверить количество активных маршрутов
-
-### Проблема: Утечка памяти
-**Решение:**
-```javascript
-// Добавить очистку listeners
-page.removeAllListeners('request');
-await page.close();
-```
-
-### Проблема: Антибот блокирует
-**Решение:**
-- Обновить cookies в `.env`
-- Увеличить задержки между запросами
-- Использовать прокси (опционально)
-
----
-
 ## 📝 TODO / Roadmap
 
-- [ ] Поддержка прокси для обхода блокировок
+- [x] Поддержка прокси для обхода блокировок
 - [ ] Экспорт статистики в Excel
 - [ ] Интеграция с другими сайтами (Skyscanner, Google Flights)
 - [ ] Мобильное приложение (React Native)
@@ -581,24 +482,6 @@ await page.close();
 - [ ] Уведомления в Email/WhatsApp
 - [ ] Поддержка групповых чатов в Telegram
 - [ ] Multi-language support (EN, DE, ES)
-
----
-
-## 🤝 Contributing
-
-Мы приветствуем вклад в проект! Если вы хотите помочь:
-
-1. Fork проект
-2. Создайте feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit изменения (`git commit -m 'Add some AmazingFeature'`)
-4. Push в branch (`git push origin feature/AmazingFeature`)
-5. Откройте Pull Request
-
-### Правила
-- ✅ Все тесты должны проходить
-- ✅ Покрытие кода не должно уменьшаться
-- ✅ Код должен соответствовать ESLint правилам
-- ✅ Коммиты на русском языке
 
 ---
 
@@ -626,24 +509,6 @@ copies of the Software...
 - Telegram: [@yourusername](https://t.me/yourusername)
 - GitHub: [@yourusername](https://github.com/yourusername)
 - Email: your.email@example.com
-
----
-
-## 🙏 Благодарности
-
-- [Telegram Bot API](https://core.telegram.org/bots/api)
-- [Puppeteer Team](https://pptr.dev/)
-- [Chart.js](https://www.chartjs.org/)
-- Сообществу разработчиков на Node.js
-
----
-
-## 📞 Поддержка
-
-Если у вас возникли вопросы или проблемы:
-- 🐛 [Создайте Issue](https://github.com/yourusername/aviasales-price-bot/issues)
-- 💬 [Telegram чат поддержки](https://t.me/aviasales_bot_support)
-- 📧 Email: support@yourproject.com
 
 ---
 

@@ -1,7 +1,7 @@
 class AviasalesAPI {
-  constructor(token, marker) {
+  constructor(token = process.env.TRAVELPAYOUTS_TOKEN, marker =  '696196') {
     this.token = token;
-    this.marker = marker || '696196';
+    this.marker = marker;
     this.baseURL = 'https://api.travelpayouts.com';
   }
 
