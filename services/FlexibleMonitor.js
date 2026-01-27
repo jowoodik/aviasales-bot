@@ -11,7 +11,7 @@ class FlexibleMonitor {
   constructor(aviasalesToken, bot, debug = false) {
     this.api = new AviasalesAPI(aviasalesToken);
     this.notificationService = new NotificationService(bot);
-    this.aviasalesPricer = new AviasalesPricer(debug);
+    this.aviasalesPricer = new AviasalesPricer(debug, '696196', this.api); // 🔥 Передаем API для генерации ссылок
     this.bot = bot;
     this.stats = {
       total: 0,
@@ -87,7 +87,11 @@ class FlexibleMonitor {
         success: false,
         bestPrice: null,
         alert: false,
-        screenshot: null
+        screenshot: null,
+        // 🔥 ДОБАВЛЯЕМ СТАТИСТИКУ КОМБИНАЦИЙ
+        combinationsTotal: 0,
+        combinationsSuccess: 0,
+        combinationsFailed: 0
       };
 
       try {
@@ -98,6 +102,10 @@ class FlexibleMonitor {
           routeStats.bestPrice = result.bestPrice;
           routeStats.alert = result.alert;
           routeStats.screenshot = result.screenshot;
+          // 🔥 СОХРАНЯЕМ СТАТИСТИКУ КОМБИНАЦИЙ
+          routeStats.combinationsTotal = result.combinationsStats?.total || 0;
+          routeStats.combinationsSuccess = result.combinationsStats?.success || 0;
+          routeStats.combinationsFailed = result.combinationsStats?.failed || 0;
           this.stats.success++;
 
           if (result.alert) {
@@ -148,12 +156,13 @@ class FlexibleMonitor {
       max_stops: route.max_stops
     }));
 
-    const priceResults = await this.aviasalesPricer.getPricesFromUrls(
-      urls,
-      route.airline,
-      route.max_stops === 0 ? null : route.max_layover_hours,
-      route.baggage,  // 🔥 ПАРАМЕТР БАГАЖА
-      route.max_stops
+    // 🔥 ПОЛУЧАЕМ РЕЗУЛЬТАТЫ И СТАТИСТИКУ
+    const { results: priceResults, stats: combinationsStats } = await this.aviasalesPricer.getPricesFromUrls(
+        urls,
+        route.airline,
+        route.max_stops === 0 ? null : route.max_layover_hours,
+        route.baggage,
+        route.max_stops
     );
 
     const results = [];
@@ -190,7 +199,8 @@ class FlexibleMonitor {
         success: false,
         bestPrice: null,
         alert: false,
-        screenshot: null
+        screenshot: null,
+        combinationsStats // 🔥 ВОЗВРАЩАЕМ СТАТИСТИКУ
       };
     }
 
@@ -211,21 +221,21 @@ class FlexibleMonitor {
       if (!previousBest || currentBest < previousBest) {
         console.log(`   🔥 Новый минимум! ${currentBest} < ${previousBest || 'N/A'}`);
         await this.notificationService.sendFlexibleAlert(
-          route,
-          topResults,
-          'drop',
-          true,
-          topResults[0].screenshot_path
+            route,
+            topResults,
+            'drop',
+            true,
+            topResults[0].screenshot_path
         );
         alertSent = true;
       } else if (currentBest <= route.threshold_price) {
         console.log(`   📉 Цена ниже порога: ${currentBest} <= ${route.threshold_price}`);
         await this.notificationService.sendFlexibleAlert(
-          route,
-          topResults,
-          'drop',
-          true,
-          topResults[0].screenshot_path
+            route,
+            topResults,
+            'drop',
+            true,
+            topResults[0].screenshot_path
         );
         alertSent = true;
       }
@@ -235,7 +245,8 @@ class FlexibleMonitor {
       success: true,
       bestPrice: currentBest,
       alert: alertSent,
-      screenshot: topResults[0].screenshot_path
+      screenshot: topResults[0].screenshot_path,
+      combinationsStats // 🔥 ВОЗВРАЩАЕМ СТАТИСТИКУ
     };
   }
 
@@ -250,7 +261,10 @@ class FlexibleMonitor {
     report += `🔥 Отправлено алертов: ${this.stats.alerts}\n`;
 
     if (this.stats.routes.length > 0) {
-      report += `\nДетали:\n`;
+      report += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+      report += `📋 ДЕТАЛИ ПО МАРШРУТАМ:\n`;
+      report += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
       for (const route of this.stats.routes) {
         const emoji = route.success ? '✅' : '⚠️';
 
@@ -282,6 +296,14 @@ class FlexibleMonitor {
           report += `   🛫 До ${route.max_stops} пересадок\n`;
           if (route.max_layover_hours) {
             report += `   ⏱ Макс. пересадка: ${route.max_layover_hours}ч\n`;
+          }
+        }
+
+        // 🔥 ДОБАВЛЯЕМ СТАТИСТИКУ КОМБИНАЦИЙ
+        if (route.combinationsTotal > 0) {
+          report += `   📊 Проанализировано: ${route.combinationsSuccess}/${route.combinationsTotal} комбинаций\n`;
+          if (route.combinationsFailed > 0) {
+            report += `   ⚠️ Не удалось проверить: ${route.combinationsFailed}\n`;
           }
         }
 

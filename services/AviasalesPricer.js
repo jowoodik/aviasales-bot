@@ -735,11 +735,13 @@ class AviasalesPricer {
     if (!cookiesObj) {
       console.error('КРИТИЧЕСКАЯ ОШИБКА: Не удалось получить куки');
       console.log('');
-      return results;
+      return { results, stats: null };
     }
 
     const startTime = Date.now();
     let completedCount = 0;
+    let successCount = 0;
+    let failedCount = 0;
     let nextUrlIndex = 0;
 
     const processUrl = async (index) => {
@@ -758,7 +760,13 @@ class AviasalesPricer {
         results[index] = result;
         completedCount++;
 
-        console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов`);
+        if (result && result.price) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+
+        console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов (✅ ${successCount} успешно, ❌ ${failedCount} ошибок)`);
         console.log('');
 
         if (nextUrlIndex < total) {
@@ -772,6 +780,7 @@ class AviasalesPricer {
         console.log('');
         results[index] = null;
         completedCount++;
+        failedCount++;
         return null;
       }
     };
@@ -792,17 +801,25 @@ class AviasalesPricer {
     await Promise.allSettled(workers);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const validResults = results.filter(r => r !== null);
 
     console.log('');
     console.log('========================================');
     console.log('ОБРАБОТКА ЗАВЕРШЕНА');
-    console.log(`Успешно: ${validResults.length} из ${total}`);
-    console.log(`Общее время: ${elapsed} секунд`);
+    console.log(`✅ Успешно: ${successCount} из ${total}`);
+    console.log(`❌ Ошибок: ${failedCount} из ${total}`);
+    console.log(`⏱ Общее время: ${elapsed} секунд`);
     console.log('========================================');
     console.log('');
 
-    return results;
+    return {
+      results,
+      stats: {
+        total,
+        success: successCount,
+        failed: failedCount,
+        elapsed: parseFloat(elapsed)
+      }
+    };
   }
 }
 
