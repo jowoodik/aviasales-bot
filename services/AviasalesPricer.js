@@ -720,9 +720,9 @@ class AviasalesPricer {
 
       const searchData = await this.startSearch(params, cookiesObj, prefix);
 
-      const pauseBeforeResults = Math.floor(Math.random() * 2000) + 2000; // 2–3 сек
-      console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeResults / 1000).toFixed(1)}с перед получением результатов...`);
-      await this.sleep(pauseBeforeResults);
+      // const pauseBeforeResults = Math.floor(Math.random() * 2000) + 2000; // 2–3 сек
+      // console.log(`${prefix}  > ⏳ Пауза ${(pauseBeforeResults / 1000).toFixed(1)}с перед получением результатов...`);
+      // await this.sleep(pauseBeforeResults);
 
       const result = await this.getResults(searchData, cookiesObj, airline, prefix);
 
@@ -838,7 +838,7 @@ class AviasalesPricer {
       console.log(`\n✅ Пачка ${batchIndex + 1}/${totalBatches} завершена\n`);
 
       if (batchIndex < totalBatches - 1) {
-        const pauseBetweenBatches = Math.floor(Math.random() * 5000) + 10000; // 10–15 c
+        const pauseBetweenBatches = Math.floor(Math.random() * 3000) + 5000; // 10–15 c
         console.log(`⏳ Пауза ${(pauseBetweenBatches / 1000).toFixed(1)}с перед следующей пачкой...\n`);
         await this.sleep(pauseBetweenBatches);
       }
