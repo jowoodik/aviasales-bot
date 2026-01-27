@@ -1,11 +1,12 @@
 const puppeteer = require('puppeteer');
-const axios = require('axios');
+const got = require('got');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const fs = require('fs');
 const path = require('path');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 2;
+    this.maxConcurrent = 7;
     this.debug = debug;
     this.marker = marker;
 
@@ -13,6 +14,23 @@ class AviasalesPricer {
     this.baseURL = 'https://tickets-api.aviasales.ru';
     this.maxPollingAttempts = 7;
     this.pollingInterval = 4000;
+
+    // 🔥 ПРОКСИ-РОТАЦИЯ
+    this.proxyList = [
+      'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
+      'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
+      'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
+      'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
+      'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
+      'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
+      'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
+      'http://bkczhupt:ww4ng38q6a84@216.10.27.159:6837',
+      'http://bkczhupt:ww4ng38q6a84@23.26.71.145:5628',
+      'http://bkczhupt:ww4ng38q6a84@23.27.208.120:5830'
+    ];
+    this.workingProxies = [];
+    this.currentProxyIndex = 0;
+    this.proxyCheckTimeout = 2000;
 
     const tempDir = path.join(__dirname, '../temp');
     if (!fs.existsSync(tempDir)) {
@@ -22,18 +40,160 @@ class AviasalesPricer {
     this.cleanupOldScreenshots();
   }
 
+  // 🔥 ПРОВЕРКА ПРОКСИ с принудительным таймаутом через Promise.race
+  async testProxy(proxyUrl) {
+    const shortUrl = proxyUrl.substring(0, 50) + '...';
+    console.log(`\n🔍 [ТЕСТ] Начало проверки: ${shortUrl}`);
+
+    let httpsAgent = null;
+
+    try {
+      console.log(`🔍 [ТЕСТ] Создание HttpsProxyAgent...`);
+      httpsAgent = new HttpsProxyAgent(proxyUrl, {
+        keepAlive: false,
+        timeout: this.proxyCheckTimeout,
+        maxFreeSockets: 0,
+        maxSockets: 1,
+        scheduling: 'lifo'
+      });
+      console.log(`✅ [ТЕСТ] HttpsProxyAgent создан`);
+
+      const startTime = Date.now();
+      console.log(`🔍 [ТЕСТ] Отправка GET запроса к ipify.org (таймаут ${this.proxyCheckTimeout}мс)...`);
+
+      // 🔥 ЖЕСТКИЙ ТАЙМАУТ через Promise.race
+      const requestPromise = got.get('https://api.ipify.org?format=json', {
+        agent: {
+          https: httpsAgent
+        },
+        timeout: {
+          request: this.proxyCheckTimeout
+        },
+        responseType: 'json',
+        retry: {
+          limit: 0
+        }
+      });
+
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`Таймаут ${this.proxyCheckTimeout}мс превышен`));
+        }, this.proxyCheckTimeout);
+      });
+
+      // Ждем либо ответа, либо таймаута
+      const response = await Promise.race([requestPromise, timeoutPromise]);
+
+      console.log(`✅ [ТЕСТ] Получен ответ от ipify.org`);
+
+      const elapsed = Date.now() - startTime;
+      const ip = response.body.ip;
+
+      console.log(`✅ [ТЕСТ] Прокси работает (${elapsed}мс, IP: ${ip}): ${shortUrl}`);
+
+      return true;
+
+    } catch (error) {
+      console.error(`❌ [ТЕСТ] Ошибка при проверке прокси: ${shortUrl}`);
+      console.error(`❌ [ТЕСТ] Тип ошибки: ${error.name}`);
+      console.error(`❌ [ТЕСТ] Сообщение: ${error.message}`);
+      if (error.code) {
+        console.error(`❌ [ТЕСТ] Код ошибки: ${error.code}`);
+      }
+      return false;
+    } finally {
+      console.log(`🧹 [ТЕСТ] Блок finally - начало очистки агента...`);
+      if (httpsAgent) {
+        try {
+          console.log(`🧹 [ТЕСТ] Вызов httpsAgent.destroy()...`);
+          httpsAgent.destroy();
+          console.log(`✅ [ТЕСТ] Агент уничтожен`);
+        } catch (e) {
+          console.error(`❌ [ТЕСТ] Ошибка при уничтожении агента: ${e.message}`);
+        }
+      } else {
+        console.log(`ℹ️ [ТЕСТ] Агент не был создан, нечего уничтожать`);
+      }
+      console.log(`✅ [ТЕСТ] Блок finally завершен\n`);
+    }
+  }
+
+  async initProxies() {
+    console.log('\n🔍 ========================================');
+    console.log('🔍 ПРОВЕРКА ПРОКСИ');
+    console.log('🔍 ========================================');
+    console.log(`🔍 Проверка ${this.proxyList.length} прокси (таймаут ${this.proxyCheckTimeout}мс)...\n`);
+
+    this.workingProxies = [];
+
+    for (let i = 0; i < this.proxyList.length; i++) {
+      const proxy = this.proxyList[i];
+      console.log(`\n📍 [${i + 1}/${this.proxyList.length}] Проверка прокси...`);
+
+      const isWorking = await this.testProxy(proxy);
+
+      if (isWorking) {
+        this.workingProxies.push(proxy);
+        console.log(`✅ [${i + 1}/${this.proxyList.length}] Прокси добавлен в рабочие`);
+      } else {
+        console.log(`❌ [${i + 1}/${this.proxyList.length}] Прокси не работает, пропускаем`);
+      }
+
+      // Пауза между проверками
+      console.log(`⏳ Пауза 200мс перед следующей проверкой...`);
+      await this.sleep(200);
+      console.log(`✅ Пауза завершена, переход к следующему прокси\n`);
+    }
+
+    console.log(`\n✅ Рабочих прокси: ${this.workingProxies.length}/${this.proxyList.length}`);
+    console.log('🔍 ========================================\n');
+
+    if (this.workingProxies.length === 0) {
+      console.warn('⚠️ НЕТ РАБОЧИХ ПРОКСИ! Работа без прокси.');
+    }
+
+    return this.workingProxies.length > 0;
+  }
+
+  getNextProxy() {
+    if (this.workingProxies.length === 0) {
+      return null;
+    }
+
+    const proxy = this.workingProxies[this.currentProxyIndex];
+    this.currentProxyIndex = (this.currentProxyIndex + 1) % this.workingProxies.length;
+    return proxy;
+  }
+
+  parseProxy(proxyUrl) {
+    const url = new URL(proxyUrl);
+    return {
+      host: url.hostname,
+      port: parseInt(url.port),
+      auth: {
+        username: url.username,
+        password: url.password
+      }
+    };
+  }
+
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async setCookie() {
-    console.log('Получение куки с aviasales.ru...');
+    console.log('\n🍪 ========================================');
+    console.log('🍪 УСТАНОВКА КУКИ');
+    console.log('🍪 ========================================');
+    console.log('🌐 Запуск браузера для получения куки...');
 
     let browser = null;
     let page = null;
 
     try {
-      browser = await puppeteer.launch({
+      const proxyUrl = this.getNextProxy();
+
+      const launchOptions = {
         headless: true,
         args: [
           '--no-sandbox',
@@ -44,20 +204,55 @@ class AviasalesPricer {
           '--disable-extensions',
           '--disable-blink-features=AutomationControlled'
         ]
-      });
+      };
+
+      if (proxyUrl) {
+        const proxyObj = this.parseProxy(proxyUrl);
+        const proxyServer = `http://${proxyObj.host}:${proxyObj.port}`;
+        launchOptions.args.push(`--proxy-server=${proxyServer}`);
+        console.log('✅ Использую прокси для браузера');
+      }
+
+      browser = await puppeteer.launch(launchOptions);
+      console.log('✅ Браузер запущен');
 
       page = await browser.newPage();
 
+      if (proxyUrl) {
+        const proxyObj = this.parseProxy(proxyUrl);
+        await page.authenticate({
+          username: proxyObj.auth.username,
+          password: proxyObj.auth.password
+        });
+        console.log('✅ Авторизация на прокси выполнена');
+      }
+
       await page.setUserAgent(
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       );
 
+      console.log('🔍 Открытие aviasales.ru...');
+
       await page.goto('https://www.aviasales.ru/', {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle0', // 🔥 Ждем полной загрузки всех ресурсов
         timeout: 60000
       });
 
-      await this.sleep(3000);
+      console.log('✅ Страница загружена, ждем куки и токены...');
+
+      // 🔥 Ждем появления критичных куков (особенно aws-waf-token)
+      await this.sleep(5000); // Увеличили с 3000 до 5000мс
+
+      // 🔥 Небольшое взаимодействие для триггера дополнительных куков
+      try {
+        await page.evaluate(() => {
+          // Скроллим страницу - это может триггернуть загрузку токенов
+          window.scrollTo(0, 100);
+        });
+        await this.sleep(1000);
+      } catch (e) {
+        // Игнорируем ошибки взаимодействия
+      }
 
       const pageCookies = await page.cookies();
 
@@ -69,15 +264,27 @@ class AviasalesPricer {
       cookiesObj.currency = cookiesObj.currency || 'rub';
       cookiesObj.marker = this.marker;
 
+      console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
+      console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));
+
+      // 🔥 ВАЖНАЯ ПРОВЕРКА: наличие критичных токенов
+      if (!cookiesObj['aws-waf-token']) {
+        console.warn('⚠️ ВНИМАНИЕ: Отсутствует aws-waf-token! Может быть 403 ошибка.');
+      }
+      if (!cookiesObj['nuid']) {
+        console.warn('⚠️ ВНИМАНИЕ: Отсутствует nuid!');
+      }
+
       await page.close();
       await browser.close();
 
-      console.log(`Куки получены: ${Object.keys(cookiesObj).length} штук\n`);
+      console.log('✅ Куки успешно установлены');
+      console.log('🍪 ========================================\n');
 
       return cookiesObj;
 
     } catch (error) {
-      console.error('ОШИБКА получения куки:', error.message);
+      console.error('❌ Ошибка установки куки:', error.message);
 
       if (page) {
         try {
@@ -99,25 +306,6 @@ class AviasalesPricer {
     return Object.entries(cookiesObj)
         .map(([key, value]) => `${key}=${value}`)
         .join('; ');
-  }
-
-  getHeaders(cookiesObj) {
-    return {
-      'accept': 'application/json',
-      'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-      'content-type': 'application/json',
-      'origin': 'https://www.aviasales.ru',
-      'referer': 'https://www.aviasales.ru/',
-      'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
-      'sec-fetch-dest': 'empty',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-site': 'same-site',
-      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-      'x-client-type': 'web',
-      'cookie': this.formatCookies(cookiesObj)
-    };
   }
 
   async startSearch(params, cookiesObj, prefix = '') {
@@ -216,17 +404,58 @@ class AviasalesPricer {
       requestBody.filters_state = filters_state;
     }
 
-    try {
-      const response = await axios.post(
-          `${this.baseURL}/search/v2/start`,
-          requestBody,
-          {
-            headers: this.getHeaders(cookiesObj),
-            timeout: 30000
-          }
-      );
+    let httpsAgent = null;
 
-      const data = response.data;
+    try {
+      const proxyUrl = this.getNextProxy();
+
+      console.log(`${prefix}  > Используется прокси: ${proxyUrl ? proxyUrl.substring(0, 50) + '...' : 'без прокси'}`);
+
+      const gotOptions = {
+        headers: {
+          'accept': 'application/json',
+          'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+          'content-type': 'application/json',
+          'origin': 'https://www.aviasales.ru',
+          'referer': 'https://www.aviasales.ru/',
+          'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="120"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"macOS"',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-site',
+          'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'x-client-type': 'web',
+          'cookie': this.formatCookies(cookiesObj)
+        },
+        json: requestBody,
+        responseType: 'json',
+        timeout: {
+          request: 30000
+        },
+        http2: false,
+        retry: {
+          limit: 0
+        }
+      };
+
+      if (proxyUrl) {
+        httpsAgent = new HttpsProxyAgent(proxyUrl, {
+          keepAlive: false,
+          timeout: 30000,
+          maxFreeSockets: 0,
+          maxSockets: 5,
+          scheduling: 'lifo'
+        });
+
+        gotOptions.agent = {
+          https: httpsAgent
+        };
+      }
+
+      const response = await got.post(`${this.baseURL}/search/v2/start`, gotOptions);
+      const data = response.body;
+
       console.log(`${prefix}  > Поиск запущен, search_id: ${data.search_id.substring(0, 12)}...`);
 
       return {
@@ -237,12 +466,22 @@ class AviasalesPricer {
       };
 
     } catch (error) {
-      if (error.response) {
-        console.error(`${prefix}  > ОШИБКА: HTTP ${error.response.status}`);
-      } else {
-        console.error(`${prefix}  > ОШИБКА: ${error.message}`);
+      console.error(`${prefix}  > ОШИБКА: ${error.message}`);
+
+      if (error.response && error.response.statusCode === 403) {
+        console.error(`${prefix}  > 🚫 CloudFront блокирует запрос (403)`);
+        if (this.debug) {
+          console.error(`${prefix}  > Ответ:`, error.response.body);
+        }
       }
+
       throw error;
+    } finally {
+      if (httpsAgent) {
+        try {
+          httpsAgent.destroy();
+        } catch (e) {}
+      }
     }
   }
 
@@ -256,6 +495,7 @@ class AviasalesPricer {
 
     while (attempt < this.maxPollingAttempts) {
       attempt++;
+      let httpsAgent = null;
 
       try {
         const requestBody = {
@@ -270,16 +510,52 @@ class AviasalesPricer {
           requestBody.last_update_timestamp = last_update_timestamp;
         }
 
-        const response = await axios.post(
-            `https://${results_url}/search/v3.2/results`,
-            requestBody,
-            {
-              headers: this.getHeaders(cookiesObj),
-              timeout: 10000
-            }
-        );
+        const proxyUrl = this.getNextProxy();
 
-        const data = response.data[0];
+        const gotOptions = {
+          headers: {
+            'accept': 'application/json',
+            'accept-language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'content-type': 'application/json',
+            'origin': 'https://www.aviasales.ru',
+            'referer': 'https://www.aviasales.ru/',
+            'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'x-client-type': 'web',
+            'cookie': this.formatCookies(cookiesObj)
+          },
+          json: requestBody,
+          responseType: 'json',
+          timeout: {
+            request: 10000
+          },
+          http2: false,
+          retry: {
+            limit: 0
+          }
+        };
+
+        if (proxyUrl) {
+          httpsAgent = new HttpsProxyAgent(proxyUrl, {
+            keepAlive: false,
+            timeout: 10000,
+            maxFreeSockets: 0,
+            maxSockets: 5,
+            scheduling: 'lifo'
+          });
+
+          gotOptions.agent = {
+            https: httpsAgent
+          };
+        }
+
+        const response = await got.post(`https://${results_url}/search/v3.2/results`, gotOptions);
+        const data = response.body[0];
 
         if (data.last_update_timestamp === 0) {
           console.log(`${prefix}  > Загрузка завершена, анализ билетов...`);
@@ -300,7 +576,7 @@ class AviasalesPricer {
         await this.sleep(this.pollingInterval);
 
       } catch (error) {
-        if (error.response && error.response.status === 304) {
+        if (error.response && error.response.statusCode === 304) {
           await this.sleep(this.pollingInterval);
           continue;
         }
@@ -311,6 +587,12 @@ class AviasalesPricer {
         }
 
         await this.sleep(this.pollingInterval);
+      } finally {
+        if (httpsAgent) {
+          try {
+            httpsAgent.destroy();
+          } catch (e) {}
+        }
       }
     }
 
@@ -423,7 +705,6 @@ class AviasalesPricer {
         max_layover_hours: maxLayoverHours
       };
 
-      // Формируем красивое описание
       console.log('');
       console.log(`${prefix} ========================================`);
       console.log(`${prefix} Маршрут: ${origin} -> ${destination}`);
@@ -477,6 +758,8 @@ class AviasalesPricer {
     console.log(`Параллельных потоков: ${this.maxConcurrent}`);
     console.log('========================================');
     console.log('');
+
+    await this.initProxies();
 
     const cookiesObj = await this.setCookie();
 
