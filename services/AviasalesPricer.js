@@ -770,7 +770,8 @@ class AviasalesPricer {
         console.log('');
 
         if (nextUrlIndex < total) {
-          const pause = Math.floor(Math.random() * 3000) + 5000;
+          // Увеличена пауза
+          const pause = Math.floor(Math.random() * 5000) + 10000;
           await this.sleep(pause);
         }
 
