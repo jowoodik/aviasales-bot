@@ -20,9 +20,9 @@ class AviasalesPricer {
     // ПРОКСИ-РОТАЦИЯ
     this.proxyList = [
       'http://bkczhupt:ww4ng38q6a84@142.111.48.253:7030',
-      'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
-      'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
-      'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
+      // 'http://bkczhupt:ww4ng38q6a84@23.95.150.145:6114',
+      // 'http://bkczhupt:ww4ng38q6a84@198.23.239.134:6540',
+      // 'http://bkczhupt:ww4ng38q6a84@107.172.163.27:6543',
       'http://bkczhupt:ww4ng38q6a84@198.105.121.200:6462',
       'http://bkczhupt:ww4ng38q6a84@64.137.96.74:6641',
       'http://bkczhupt:ww4ng38q6a84@84.247.60.125:6095',
