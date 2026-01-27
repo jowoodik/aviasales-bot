@@ -5,6 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const AviasalesAPI = require('./AviasalesAPI');
 
+// TODO обработать что подходящих билетов нет, наверно по cheapest_price
+// TODO получать прокси динамически один раз при запуске
+// TODO сводить maxConcurrent до работающих прокси и кук
+
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
     this.maxConcurrent = 7;
@@ -14,8 +18,8 @@ class AviasalesPricer {
 
     // API конфигурация
     this.baseURL = 'https://tickets-api.aviasales.ru';
-    this.maxPollingAttempts = 7;
-    this.pollingInterval = 6000;
+    this.maxPollingAttempts = 10;
+    this.pollingInterval = 4000;
 
     // ПРОКСИ-РОТАЦИЯ
     this.proxyList = [
@@ -774,7 +778,7 @@ class AviasalesPricer {
     console.log('');
     console.log('========================================');
     console.log(`НАЧАЛО ОБРАБОТКИ: ${total} билетов`);
-    console.log(`Максимум параллельных запросов: ${this.maxConcurrent}`);
+    console.log(`Размер пачки: ${this.maxConcurrent}`);
     console.log('========================================');
     console.log('');
 
@@ -790,60 +794,72 @@ class AviasalesPricer {
     let successCount = 0;
     let failedCount = 0;
 
-    // 🔥 общий индекс следующего URL для всех воркеров
-    let nextIndex = 0;
+    const batchSize = this.maxConcurrent;
+    const totalBatches = Math.ceil(total / batchSize);
 
-    const worker = async (workerId) => {
-      const workerCookies = this.cookiesList[workerId % this.cookiesList.length];
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * batchSize;
+      const batchEnd = Math.min(batchStart + batchSize, total);
+      const batchUrls = urls.slice(batchStart, batchEnd);
 
-      while (true) {
-        const currentIndex = nextIndex++;
-        if (currentIndex >= total) {
-          break;
-        }
+      console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`🔄 ПАЧКА ${batchIndex + 1}/${totalBatches}: билеты ${batchStart + 1}-${batchEnd}`);
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 
-        try {
-          const result = await this.getPriceFromUrl(
-              urls[currentIndex],
-              workerCookies,
-              currentIndex + 1,
-              total,
-              airline,
-              maxLayoverHours,
-              baggage,
-              max_stops
-          );
+      const batchPromises = [];
 
-          results[currentIndex] = result;
-          completedCount++;
+      for (let i = 0; i < batchUrls.length; i++) {
+        const globalIndex = batchStart + i;
+        const workerCookies = this.cookiesList[i % this.cookiesList.length];
 
-          if (result && result.price) {
-            successCount++;
-          } else {
+        // 🔥 убрал задержку между запуском воркеров в пачке
+
+        const workerPromise = (async () => {
+          try {
+            const result = await this.getPriceFromUrl(
+                batchUrls[i],
+                workerCookies,
+                globalIndex + 1,
+                total,
+                airline,
+                maxLayoverHours,
+                baggage,
+                max_stops
+            );
+
+            results[globalIndex] = result;
+            completedCount++;
+
+            if (result && result.price) {
+              successCount++;
+            } else {
+              failedCount++;
+            }
+
+            console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов (✅ ${successCount} успешно, ❌ ${failedCount} ошибок)`);
+            console.log('');
+
+            return result;
+          } catch (error) {
+            console.error(`[${globalIndex + 1}/${total}] КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`);
+            console.log('');
+            results[globalIndex] = null;
+            completedCount++;
             failedCount++;
+            return null;
           }
+        })();
 
-          console.log(`ПРОГРЕСС: Обработано ${completedCount} из ${total} билетов (✅ ${successCount} успешно, ❌ ${failedCount} ошибок)`);
-          console.log('');
-        } catch (error) {
-          console.error(`[${currentIndex + 1}/${total}] КРИТИЧЕСКАЯ ОШИБКА: ${error.message}`);
-          console.log('');
-          results[currentIndex] = null;
-          completedCount++;
-          failedCount++;
-        }
+        batchPromises.push(workerPromise);
       }
-    };
 
-    // 🔥 запускаем воркеры (не пачками, а сразу до maxConcurrent)
-    const workersCount = Math.min(this.maxConcurrent, total);
-    const workerPromises = [];
-    for (let i = 0; i < workersCount; i++) {
-      workerPromises.push(worker(i));
+      console.log(`⏳ Ожидание завершения пачки ${batchIndex + 1}/${totalBatches}...\n`);
+      await Promise.allSettled(batchPromises);
+
+      console.log(`\n✅ Пачка ${batchIndex + 1}/${totalBatches} завершена\n`);
+
+      // 🔥 убрал паузу между пачками
     }
-
-    // 🔥 ждем только общий конец всех воркеров
-    await Promise.allSettled(workerPromises);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
