@@ -429,7 +429,7 @@ class AviasalesPricer {
     if (max_layover_hours !== null && max_layover_hours !== undefined) {
       const maxMinutes = max_layover_hours * 60;
       filters_state.transfers_duration = {
-        min: 60,
+        min: 90,
         max: maxMinutes
       };
     }
