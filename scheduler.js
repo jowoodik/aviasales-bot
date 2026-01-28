@@ -1,88 +1,32 @@
 const cron = require('node-cron');
-const db = require('./config/database');
+const TelegramBot = require('node-telegram-bot-api');
+require('dotenv').config();
 
-function setupScheduler(priceMonitor, flexibleMonitor) {
-  // Каждые 2 часа
-  cron.schedule('0 */1 * * *', async () => {
-    console.log('\n⏰ Запуск автоматической проверки...');
+const UnifiedMonitor = require('./services/UnifiedMonitor');
 
-    try {
-      // 1️⃣ Обычные маршруты
-      console.log('🔍 Проверяем обычные маршруты...');
-      await priceMonitor.checkPrices();
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const bot = new TelegramBot(TOKEN, { polling: false });
 
-      // 🔥 Отправляем отчет СРАЗУ с актуальной статистикой
-      await sendReportsToUsers(priceMonitor, 'regular');
+console.log('📅 Планировщик запущен');
 
-      // 🔥 СБРОС СТАТИСТИКИ после отправки
-      priceMonitor.stats = {
-        total: 0,
-        success: 0,
-        failed: 0,
-        alerts: 0,
-        startTime: null,
-        routes: []
-      };
+// Проверка цен каждый час
+cron.schedule('0 * * * *', async () => {
+  console.log('\n⏰ Запуск проверки маршрутов (по расписанию)...');
 
-      // 2️⃣ Гибкие маршруты
-      console.log('🔍 Проверяем гибкие маршруты...');
-      await flexibleMonitor.checkAllRoutes();
+  const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
 
-      // 🔥 Отправляем отчет СРАЗУ с актуальной статистикой
-      await sendReportsToUsers(flexibleMonitor, 'flexible');
+  try {
+    await monitor.checkAllRoutes();
+    console.log('✅ Проверка завершена успешно\n');
+  } catch (error) {
+    console.error('❌ Ошибка при проверке:', error);
+  }
+});
 
-      // 🔥 СБРОС СТАТИСТИКИ после отправки
-      flexibleMonitor.stats = {
-        total: 0,
-        success: 0,
-        failed: 0,
-        alerts: 0,
-        startTime: null,
-        routes: []
-      };
+console.log('✅ Планировщик настроен: проверка каждый час');
 
-      console.log('✅ Автопроверка завершена');
-    } catch (error) {
-      console.error('Ошибка проверки:', error);
-    }
-  });
-
-  console.log('✅ Scheduler запущен (каждые 2 часа)');
-}
-
-// 🔥 ФУНКЦИЯ: Отправить отчеты всем активным пользователям
-async function sendReportsToUsers(monitor, type) {
-  return new Promise((resolve) => {
-    db.all(`
-      SELECT DISTINCT chat_id 
-      FROM (
-        SELECT chat_id FROM routes WHERE is_paused = 0
-        UNION
-        SELECT chat_id FROM flexible_routes WHERE is_paused = 0
-      )
-    `, [], async (err, users) => {
-      if (err) {
-        console.error('Ошибка получения пользователей:', err);
-        return resolve();
-      }
-
-      console.log(`📤 Отправляем отчеты ${users.length} пользователям (${type})`);
-
-      for (const user of users) {
-        try {
-          await monitor.sendReport(user.chat_id);
-          console.log(`✅ Отчет отправлен: ${user.chat_id}`);
-        } catch (e) {
-          console.error(`❌ Ошибка отчета ${user.chat_id}:`, e.message);
-        }
-
-        // Пауза 500мс между пользователями
-        await new Promise(r => setTimeout(r, 500));
-      }
-
-      resolve();
-    });
-  });
-}
-
-module.exports = setupScheduler;
+// Держим процесс активным
+process.on('SIGINT', () => {
+  console.log('\n⚠️ Остановка планировщика...');
+  process.exit(0);
+});

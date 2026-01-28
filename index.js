@@ -1,724 +1,351 @@
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
-require('./config/database');
-
-const RegularMonitor = require('./services/RegularMonitor');
-const FlexibleMonitor = require('./services/FlexibleMonitor');
-const RouteHandlers = require('./handlers/regularRouteHandlers');
-const FlexibleHandlers = require('./handlers/flexibleRoutesHandlers');
-const SettingsHandlers = require('./handlers/settingsHandlers');
-const setupScheduler = require('./scheduler');
-const Route = require('./models/Route');
-const DateUtils = require('./utils/dateUtils');
-const Formatters = require('./utils/formatters');
 const db = require('./config/database');
-const FlexibleRoute = require('./models/FlexibleRoute');
+const RouteHandlers = require('./handlers/routeHandlers');
+const SettingsHandlers = require('./handlers/settingsHandlers');
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+// Состояния пользователей
 const userStates = {};
 
-const regularMonitor = new RegularMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
-const flexibleMonitor = new FlexibleMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
+// Инициализация обработчиков
 const routeHandlers = new RouteHandlers(bot, userStates);
-const flexibleHandlers = new FlexibleHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
 
-// проверка деплоя
-// проверка деплоя 2
-function getMainMenuKeyboard() {
-  return {
-    reply_markup: {
-      keyboard: [
-        ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
-        ['📋 Мои маршруты', '🔍 Мои гибкие'],
-        ['💎 Лучшее сейчас', '✏️ Редактировать'],
-        ['📊 Статистика', '🗑 Удалить'],
-        ['⚙️ Настройки', '✅ Проверить сейчас'],
-        ['ℹ️ Помощь'],
-      ],
-      resize_keyboard: true,
-      persistent: true
-    }
-  };
-}
-
-function initUserSettings(chatId) {
-  db.run(`INSERT OR IGNORE INTO user_settings (chat_id) VALUES (?)`, [chatId]);
-  db.run(
-    `INSERT OR IGNORE INTO user_stats (chat_id, total_routes, total_flexible)
-     VALUES (?,
-       (SELECT COUNT(*) FROM routes WHERE chat_id = ?),
-       (SELECT COUNT(*) FROM flexible_routes WHERE chat_id = ?)
-     )`,
-    [chatId, chatId, chatId]
-  );
-}
-
-// Команды
-bot.onText(/\/start/, (msg) => {
+/**
+ * КОМАНДА /start
+ */
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  initUserSettings(chatId);
 
-  const welcomeMessage =
-    '👋 Добро пожаловать в бот поиска авиабилетов v3.0!\n\n' +
-    '✈️ ОБЫЧНЫЕ МАРШРУТЫ:\n' +
-    'Конкретные даты вылета и возврата\n\n' +
-    '🔍 ГИБКИЙ ПОИСК:\n' +
-    'Задайте диапазон дат вылета (25 фев - 10 мар) и пребывания (27-30 дней)\n' +
-    '→ Бот найдет все комбинации и покажет топ-3 лучших!\n\n' +
-    '⚡ Автопроверка каждые 2 часа\n' +
-    '🔔 Уведомления о снижении цен\n' +
-    '💎 Лучшие предложения прямо сейчас\n\n' +
-    'Используйте кнопки меню ниже 👇';
+  // Проверяем, первый ли раз пользователь
+  const isFirstTime = await checkIfFirstTime(chatId);
 
-  bot.sendMessage(chatId, welcomeMessage, getMainMenuKeyboard());
-});
-
-bot.onText(/\/add/, (msg) => {
-  routeHandlers.handleAddRoute(msg.chat.id);
-});
-
-bot.onText(/\/flexible/, (msg) => {
-  flexibleHandlers.handleAddFlexible(msg.chat.id);
-});
-
-bot.onText(/\/list/, (msg) => {
-  routeHandlers.handleListRoutes(msg.chat.id);
-});
-
-bot.onText(/\/list_flexible/, (msg) => {
-  flexibleHandlers.handleListFlexible(msg.chat.id);
-});
-
-bot.onText(/\/stats/, (msg) => {
-  settingsHandlers.handleStats(msg.chat.id);
-});
-
-bot.onText(/\/settings/, (msg) => {
-  settingsHandlers.handleSettings(msg.chat.id);
-});
-
-bot.onText(/\/check/, async (msg) => {
-  const chatId = msg.chat.id;
-  bot.sendMessage(chatId, '🔄 Запускаю проверку всех маршрутов...');
-  await regularMonitor.checkPrices();
-  await flexibleMonitor.checkAllRoutes();
-  bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard());
-});
-
-bot.onText(/\/check_prices/, async (msg) => {
-  const chatId = msg.chat.id;
-  try {
-    await bot.sendMessage(chatId, '🔍 Запускаю проверку цен...\n⏳ Это может занять несколько минут.');
-
-    const FlexibleMonitor = require('./services/FlexibleMonitor');
-    const monitor = new FlexibleMonitor(process.env.AVIASALES_TOKEN, bot);
-    await monitor.checkAllRoutes();
-
-    await bot.sendMessage(chatId, '✅ Проверка завершена! Если найдены хорошие цены, вы получите уведомление.');
-  } catch (error) {
-    console.error('Ошибка проверки:', error);
-    await bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
-  }
-});
-
-bot.onText(/\/report/, (msg) => {
-  regularMonitor.generateDailyReport(msg.chat.id);
-});
-
-bot.on('callback_query', async (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
-
-  try {
-    // Проверка цены обычного маршрута
-    if (data.startsWith('check_price_')) {
-      const routeId = parseInt(data.replace('check_price_', ''));
-      console.log(`📸 Запрос цены для маршрута ${routeId} от пользователя ${chatId}`);
-
-      bot.answerCallbackQuery(query.id, { text: '🔄 Проверяю цены...' });
-      await bot.sendMessage(chatId, '⏳ Загружаю Aviasales...\n(10-40 сек)');
-
-      try {
-        await routeHandlers.handleCheckPrice(chatId, routeId);
-        await bot.sendMessage(chatId, '✅ Цены проверены!', getMainMenuKeyboard());
-      } catch (error) {
-        console.error('checkprice error:', error);
-        await bot.sendMessage(chatId, `❌ Ошибка: ${error.message}`);
+  if (isFirstTime) {
+    // Велком-сообщение с настройкой таймзоны
+    const keyboard = {
+      reply_markup: {
+        keyboard: [
+          ['⚙️ Настроить таймзону сейчас'],
+          ['Продолжить с текущей']
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true
       }
+    };
 
-      return;
-    }
+    bot.sendMessage(
+        chatId,
+        '👋 Добро пожаловать в бот мониторинга цен на авиабилеты!\n\n' +
+        'Я помогу отслеживать цены на билеты и сообщу, когда найду выгодные предложения.\n\n' +
+        '⚠️ Важно! Для корректного отображения времени уведомлений настройте вашу таймзону.\n\n' +
+        '🌍 По умолчанию установлена таймзона: Asia/Yekaterinburg (UTC+5)\n\n' +
+        'Хотите настроить таймзону сейчас?',
+        keyboard
+    );
 
-    // Обработчики статистики
-    if (data === 'regular_route_stats') {
-      await settingsHandlers.handleRegularRouteStats(chatId);
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
+    userStates[chatId] = { step: 'welcome_timezone' };
 
-    if (data === 'flexible_route_stats') {
-      await settingsHandlers.handleFlexibleRouteStats(chatId);
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
+    // Создаем настройки пользователя
+    await initializeUserSettings(chatId);
 
-    if (data.startsWith('route_stats_')) {
-      const routeId = parseInt(data.replace('route_stats_', ''));
-      bot.answerCallbackQuery(query.id);
-      await settingsHandlers.showRouteStatistics(chatId, routeId);
-      return;
-    }
-
-    if (data.startsWith('flex_stats_')) {
-      const routeId = parseInt(data.replace('flex_stats_', ''));
-      bot.answerCallbackQuery(query.id);
-      await settingsHandlers.showFlexibleRouteStatistics(chatId, routeId);
-      return;
-    }
-
-    if (data === 'back_to_stats') {
-      await settingsHandlers.handleStats(chatId);
-      bot.answerCallbackQuery(query.id);
-      return;
-    }
-
-    bot.answerCallbackQuery(query.id);
-  } catch (error) {
-    console.error('Ошибка callback:', error);
-    bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
+  } else {
+    // Обычное приветствие
+    bot.sendMessage(
+        chatId,
+        'С возвращением! 👋\n\n' +
+        'Используйте меню ниже для управления маршрутами.',
+        routeHandlers.getMainMenuKeyboard(chatId)
+    );
   }
 });
 
-// Обработка кнопок и сообщений
+/**
+ * ОБРАБОТКА СООБЩЕНИЙ
+ */
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  if (text.startsWith('/')) return;
-
-  // Главное меню
-  if (text === '➕ Добавить маршрут') {
-    routeHandlers.handleAddRoute(chatId);
-    return;
-  }
-
-  if (text === '🔍 Гибкий поиск') {
-    flexibleHandlers.handleAddFlexible(chatId);
-    return;
-  }
-
-  if (text === '📋 Мои маршруты') {
-    routeHandlers.handleListRoutes(chatId);
-    return;
-  }
-
-  if (text === '🔍 Мои гибкие') {
-    flexibleHandlers.handleListFlexible(chatId);
-    return;
-  }
-
-  if (text === '💎 Лучшее сейчас') {
-    flexibleHandlers.handleShowTopResults(chatId);
-    return;
-  }
-
-  if (text === '✏️ Редактировать') {
-    bot.sendMessage(chatId, 'Выберите тип маршрута:', {
-      reply_markup: {
-        keyboard: [
-          ['✈️ Обычный маршрут'],
-          ['🔍 Гибкий маршрут'],
-          ['◀️ Главное меню']
-        ],
-        one_time_keyboard: true,
-        resize_keyboard: true
-      }
-    });
-    userStates[chatId] = { step: 'edit_type_select' };
-    return;
-  }
-
-  if (text === '🗑 Удалить') {
-    bot.sendMessage(chatId, 'Выберите тип маршрута:', {
-      reply_markup: {
-        keyboard: [
-          ['✈️ Обычный маршрут'],
-          ['🔍 Гибкий маршрут'],
-          ['◀️ Главное меню']
-        ],
-        one_time_keyboard: true,
-        resize_keyboard: true
-      }
-    });
-    userStates[chatId] = { step: 'delete_type_select' };
-    return;
-  }
-
-  if (text === '📊 Статистика') {
-    settingsHandlers.handleStats(chatId);
-    return;
-  }
-
-  if (text === '⚙️ Настройки') {
-    settingsHandlers.handleSettings(chatId);
-    return;
-  }
-
-  if (text === '✅ Проверить сейчас') {
-    flexibleHandlers.handleCheckNow(chatId);
-    return;
-  }
-
-  if (text === 'ℹ️ Помощь') {
-    const helpMessage =
-      '📖 СПРАВКА\n\n' +
-      '✈️ ОБЫЧНЫЕ МАРШРУТЫ:\n' +
-      '• Конкретные даты вылета/возврата\n' +
-      '• Редактирование порога цены\n' +
-      '• Топ-3 лучших цен\n' +
-      '• Автоудаление прошедших\n\n' +
-      '🔍 ГИБКИЙ ПОИСК:\n' +
-      '• Диапазон дат вылета (25.02-10.03)\n' +
-      '• Диапазон пребывания (27-30 дней)\n' +
-      '• Автоматический поиск всех комбинаций\n' +
-      '• Топ-3 лучших вариантов\n\n' +
-      '💡 Коды аэропортов:\n' +
-      '• SVX - Екатеринбург\n' +
-      '• MOW - Москва\n' +
-      '• DXB - Дубай\n' +
-      '• DPS - Денпасар (Бали)\n' +
-      '• LED - Санкт-Петербург\n\n' +
-      '📱 Команды:\n' +
-      '/add - обычный маршрут\n' +
-      '/flexible - гибкий поиск\n' +
-      '/list - мои маршруты\n' +
-      '/stats - статистика\n' +
-      '/settings - настройки\n' +
-      '/check - проверить сейчас\n\n' +
-      '⚠️ Цены примерные с учетом всех пассажиров';
-
-    bot.sendMessage(chatId, helpMessage, getMainMenuKeyboard());
-    return;
-  }
-
-  if (text === '◀️ Главное меню' || text === '◀️ Отмена') {
-    delete userStates[chatId];
-    bot.sendMessage(chatId, 'Главное меню:', getMainMenuKeyboard());
-    return;
-  }
-
-  // Обработка состояний
-  if (!userStates[chatId]) return;
+  if (!text || text.startsWith('/')) return;
 
   const state = userStates[chatId];
 
-  // Выбор типа для редактирования
-  if (state.step === 'edit_type_select') {
-    if (text === '✈️ Обычный маршрут') {
-      delete userStates[chatId];
-      routeHandlers.handleEditRoute(chatId);
-    } else if (text === '🔍 Гибкий маршрут') {
-      delete userStates[chatId];
-      flexibleHandlers.handleEditFlexible(chatId);
-    }
-    return;
-  }
-
-  if (state && state.step === 'flex_check_select') {
-    if (await flexibleHandlers.handleCheckSelectStep(chatId, text)) return;
-  }
-
-  // Выбор типа для удаления
-  if (state.step === 'delete_type_select') {
-    if (text === '✈️ Обычный маршрут') {
-      delete userStates[chatId];
-      routeHandlers.handleDeleteRoute(chatId);
-    } else if (text === '🔍 Гибкий маршрут') {
-      delete userStates[chatId];
-      flexibleHandlers.handleDeleteFlexible(chatId);
-    }
-    return;
-  }
-
-  // Обработка шагов обычного маршрута
-  if (state.type === 'regular') {
-    if (routeHandlers.handleRouteStep(chatId, text)) {
-      return;
-    }
-  }
-
-  // Обработка шагов гибкого поиска
-  if (state.type === 'flexible') {
-    if (flexibleHandlers.handleFlexibleStep(chatId, text)) {
-      return;
-    }
-  }
-
-  // Обработка настроек
-
-  if (state.step === 'settings_menu') {
-    if (settingsHandlers.handleSettingsStep(chatId, text)) {
-      return;
-    }
-  }
-
-  if (state.step === 'settings_quiet') {
-    if (settingsHandlers.handleQuietHours(chatId, text)) {
-      return;
-    }
-  }
-
-  if (state.step === 'settings_frequency') {
-    if (settingsHandlers.handleFrequency(chatId, text)) {
-      return;
-    }
-  }
-
-  if (state.step === 'settings_notify') {
-    if (settingsHandlers.handleNotifications(chatId, text)) {
-      return;
-    }
-  }
-
-  if (state.step === 'stats_select_type') {
-    if (settingsHandlers.handleStatsTypeSelect(chatId, text)) {
-      return;
-    }
-  }
-
-  // Обработка статистики
-  if (state.step === 'stats_menu') {
-    if (settingsHandlers.handleStatsMenuStep(chatId, text)) {
-      return;
-    }
-  }
-
-  if (state.step === 'stats_back') {
-    if (text === '◀️ Назад к статистике') {
-      settingsHandlers.handleStats(chatId);
-      return;
-    }
-  }
-
-  if (state.step === 'route_stats_select') {
-    if (text === '◀️ Назад к статистике') {
-      settingsHandlers.handleStats(chatId);
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        await settingsHandlers.showRouteStatistics(chatId, route);
-      }
-    }
-    return;
-  }
-
-  if (state.step === 'flex_stats_select') {
-    if (text === '◀️ Назад к статистике') {
-      settingsHandlers.handleStats(chatId);
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        await settingsHandlers.showFlexibleRouteStatistics(chatId, route);
-      }
-    }
-    return;
-  }
-
-  // Редактирование гибкого маршрута - выбор маршрута
-  if (state.step === 'flex_edit_select') {
-    if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
-      delete userStates[chatId];
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        const keyboard = {
-          reply_markup: {
-            keyboard: [
-              ['💰 Изменить порог цены'],
-              ['⏸️ Приостановить', '▶️ Возобновить'],
-              ['◀️ Отмена']
-            ],
-            one_time_keyboard: true,
-            resize_keyboard: true
-          }
-        };
-
+  try {
+    // ========================================
+    // ПРИВЕТСТВЕННАЯ НАСТРОЙКА ТАЙМЗОНЫ
+    // ========================================
+    if (state?.step === 'welcome_timezone') {
+      if (text.includes('Настроить')) {
+        await settingsHandlers.handleTimezone(chatId);
+        return;
+      } else {
         bot.sendMessage(
-          chatId,
-          `✏️ Редактирование гибкого маршрута:\n` +
-          `${route.origin} → ${route.destination}\n` +
-          `Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n` +
-          `Пребывание: ${route.min_days}-${route.max_days} дней\n` +
-          `Текущий порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n` +
-          `Статус: ${route.is_paused ? '⏸️ Приостановлен' : '✅ Активен'}\n\n` +
-          `Что изменить?`,
-          keyboard
-        );
-
-        state.step = 'flex_edit_action';
-        state.selected_route = route;
-      }
-    }
-    return;
-  }
-
-  // Редактирование гибкого маршрута - выбор действия
-  if (state.step === 'flex_edit_action') {
-    if (text === '💰 Изменить порог цены') {
-      bot.sendMessage(
-        chatId,
-        `Текущий порог: ${Formatters.formatPrice(state.selected_route.threshold_price, state.selected_route.currency)}\n\n` +
-        `Введите новый порог цены в рублях:`,
-        { reply_markup: { remove_keyboard: true } }
-      );
-      state.step = 'flex_edit_price';
-    } else if (text === '⏸️ Приостановить') {
-      FlexibleRoute.togglePause(state.selected_route.id, chatId, 1).then(() => {
-        bot.sendMessage(chatId, '⏸️ Гибкий маршрут приостановлен', getMainMenuKeyboard());
-        delete userStates[chatId];
-      });
-    } else if (text === '▶️ Возобновить') {
-      FlexibleRoute.togglePause(state.selected_route.id, chatId, 0).then(() => {
-        bot.sendMessage(chatId, '▶️ Гибкий маршрут возобновлен', getMainMenuKeyboard());
-        delete userStates[chatId];
-      });
-    } else if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
-      delete userStates[chatId];
-    }
-    return;
-  }
-
-  // Редактирование гибкого маршрута - ввод новой цены
-  if (state.step === 'flex_edit_price') {
-    const newPrice = parseFloat(text);
-    if (isNaN(newPrice) || newPrice <= 0) {
-      bot.sendMessage(chatId, '❌ Неверная цена. Введите число:');
-      return;
-    }
-
-    FlexibleRoute.updateThreshold(state.selected_route.id, chatId, newPrice).then(() => {
-      bot.sendMessage(
-        chatId,
-        `✅ Порог цены обновлен!\n` +
-        `${state.selected_route.origin} → ${state.selected_route.destination}\n` +
-        `Было: ${Formatters.formatPrice(state.selected_route.threshold_price, state.selected_route.currency)}\n` +
-        `Стало: ${Formatters.formatPrice(newPrice, state.selected_route.currency)}`,
-        getMainMenuKeyboard()
-      );
-      delete userStates[chatId];
-    });
-    return;
-  }
-
-  // Редактирование обычного маршрута
-  if (state.step === 'edit_select' && state.type === 'regular') {
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        const keyboard = {
-          reply_markup: {
-            keyboard: [
-              ['💰 Изменить порог цены'],
-              ['⏸️ Приостановить', '▶️ Возобновить'],
-              ['◀️ Отмена']
-            ],
-            one_time_keyboard: true,
-            resize_keyboard: true
-          }
-        };
-
-        bot.sendMessage(
-          chatId,
-          `✏️ Редактирование маршрута:\n` +
-          `${route.origin} → ${route.destination}\n` +
-          `Текущий порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n` +
-          `Статус: ${route.is_paused ? '⏸️ Приостановлен' : '✅ Активен'}\n\n` +
-          `Что изменить?`,
-          keyboard
-        );
-
-        state.step = 'edit_action';
-        state.selected_route = route;
-      }
-    }
-    return;
-  }
-
-  if (state.step === 'edit_action' && state.type === 'regular') {
-    if (text === '💰 Изменить порог цены') {
-      bot.sendMessage(
-        chatId,
-        `Текущий порог: ${Formatters.formatPrice(state.selected_route.threshold_price, state.selected_route.currency)}\n\n` +
-        `Введите новый порог цены в рублях:`,
-        { reply_markup: { remove_keyboard: true } }
-      );
-      state.step = 'edit_price';
-    } else if (text === '⏸️ Приостановить') {
-      Route.togglePause(state.selected_route.id, chatId, 1).then(() => {
-        bot.sendMessage(chatId, '⏸️ Маршрут приостановлен', getMainMenuKeyboard());
-        delete userStates[chatId];
-      });
-    } else if (text === '▶️ Возобновить') {
-      Route.togglePause(state.selected_route.id, chatId, 0).then(() => {
-        bot.sendMessage(chatId, '▶️ Маршрут возобновлен', getMainMenuKeyboard());
-        delete userStates[chatId];
-      });
-    } else if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
-      delete userStates[chatId];
-    }
-    return;
-  }
-
-  if (state.step === 'edit_price' && state.type === 'regular') {
-    const newPrice = parseFloat(text);
-    if (isNaN(newPrice) || newPrice <= 0) {
-      bot.sendMessage(chatId, '❌ Неверная цена. Введите число:');
-      return;
-    }
-
-    Route.updateThreshold(state.selected_route.id, chatId, newPrice).then(() => {
-      bot.sendMessage(
-        chatId,
-        `✅ Порог цены обновлен!\n` +
-        `${state.selected_route.origin} → ${state.selected_route.destination}\n` +
-        `Было: ${Formatters.formatPrice(state.selected_route.threshold_price, state.selected_route.currency)}\n` +
-        `Стало: ${Formatters.formatPrice(newPrice, state.selected_route.currency)}`,
-        getMainMenuKeyboard()
-      );
-      delete userStates[chatId];
-    });
-    return;
-  }
-
-  // Удаление обычного маршрута
-  if (state.step === 'delete_confirm' && state.type === 'regular') {
-    if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Удаление отменено', getMainMenuKeyboard());
-      delete userStates[chatId];
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        Route.delete(route.id, chatId).then(() => {
-          bot.sendMessage(
             chatId,
-            `✅ Маршрут ${route.origin} → ${route.destination} удален`,
-            getMainMenuKeyboard()
-          );
-          delete userStates[chatId];
-        });
-      }
-    }
-    return;
-  }
-
-  if (state.step === 'show_top_results') {
-    if (text === '◀️ Отмена') {
-      delete userStates[chatId];
-      bot.sendMessage(chatId, 'Отменено', getMainMenuKeyboard());
-      return;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        await flexibleHandlers.sendTopResultsWithScreenshots(chatId, route);
+            'Отлично! Вы всегда можете изменить таймзону в разделе Настройки.\n\nНачнем работу! 🚀',
+            routeHandlers.getMainMenuKeyboard(chatId)
+        );
         delete userStates[chatId];
         return;
       }
     }
-  }
 
-  // Удаление гибкого маршрута
-  if (state.step === 'flex_delete_confirm') {
-    if (text === '◀️ Отмена') {
-      bot.sendMessage(chatId, 'Удаление отменено', getMainMenuKeyboard());
+    // ========================================
+    // ГЛАВНОЕ МЕНЮ
+    // ========================================
+    if (text === '📋 Мои маршруты') {
+      await routeHandlers.handleMyRoutes(chatId);
+      return;
+    }
+
+    if (text === '⚙️ Настройки') {
+      settingsHandlers.handleSettings(chatId);
+      return;
+    }
+
+    if (text === 'ℹ️ Помощь') {
+      handleHelp(chatId);
+      return;
+    }
+
+    if (text === '✅ Проверить сейчас' && chatId === 341508411) {
+      await handleCheckNow(chatId);
+      return;
+    }
+
+    if (text === '🏠 Главное меню') {
+      bot.sendMessage(
+          chatId,
+          'Главное меню',
+          routeHandlers.getMainMenuKeyboard(chatId)
+      );
       delete userStates[chatId];
       return;
     }
 
-    const match = text.match(/^(\d+)\./);
-    if (match) {
-      const index = parseInt(match[1]) - 1;
-      const route = state.routes[index];
-      if (route) {
-        const FlexibleRoute = require('./models/FlexibleRoute');
-        FlexibleRoute.delete(route.id, chatId).then(() => {
-          bot.sendMessage(
-            chatId,
-            `✅ Гибкий маршрут ${route.origin} → ${route.destination} удален`,
-            getMainMenuKeyboard()
-          );
-          delete userStates[chatId];
-        });
-      }
-    }
-    return;
-  }
-
-  if (state.step === 'flex_check_select') {
-    if (await flexibleHandlers.handleCheckSelectStep(chatId, text)) {
+    if (text === '◀️ Назад к маршрутам') {
+      await routeHandlers.handleMyRoutes(chatId);
       return;
     }
+
+    // ========================================
+    // РАБОТА С МАРШРУТАМИ
+    // ========================================
+    if (text === '➕ Создать маршрут' || text.includes('Создать маршрут')) {
+      routeHandlers.handleCreateRoute(chatId);
+      return;
+    }
+
+    // Выбор маршрута из списка
+    if (state?.step === 'select_route' && text.match(/^\d+\./)) {
+      const index = parseInt(text.match(/^(\d+)\./)[1]) - 1;
+      await routeHandlers.handleRouteDetails(chatId, index);
+      return;
+    }
+
+    // Создание маршрута (многошаговый процесс)
+    if (state && state.routeData) {
+      const handled = await routeHandlers.handleCreateStep(chatId, text);
+      if (handled) return;
+    }
+
+    // Действия с маршрутом
+    if (state?.step === 'route_action') {
+      if (text === '✏️ Редактировать') {
+        routeHandlers.handleEditRoute(chatId);
+        return;
+      }
+      if (text === '📊 График цен') {
+        await routeHandlers.handleShowChart(chatId, state.route);
+        return;
+      }
+      if (text === '🗺️ Heatmap') {
+        await routeHandlers.handleShowHeatmap(chatId, state.route);
+        return;
+      }
+      if (text === '🗑️ Удалить') {
+        routeHandlers.handleDeleteRoute(chatId);
+        return;
+      }
+    }
+
+    // Редактирование маршрута
+    if (state?.step === 'edit_action') {
+      const handled = await routeHandlers.handleEditAction(chatId, text);
+      if (handled) return;
+    }
+
+    if (state?.step === 'edit_threshold') {
+      const handled = await routeHandlers.handleEditThreshold(chatId, text);
+      if (handled) return;
+    }
+
+    // Подтверждение удаления
+    if (state?.step === 'confirm_delete') {
+      const handled = await routeHandlers.handleConfirmDelete(chatId, text);
+      if (handled) return;
+    }
+
+    // ========================================
+    // НАСТРОЙКИ (ЦЕНТРАЛИЗОВАННЫЙ ОБРАБОТЧИК)
+    // ========================================
+    const settingsHandled = await settingsHandlers.handleMessage(chatId, text, userStates);
+    if (settingsHandled) return;
+
+    // ========================================
+    // УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК КНОПКИ "НАЗАД"
+    // ========================================
+    if (text === '◀️ Назад') {
+      const state = userStates[chatId];
+
+      // Если мы в деталях маршрута -> назад к списку маршрутов
+      if (state?.step === 'route_action') {
+        await routeHandlers.handleMyRoutes(chatId);
+        return;
+      }
+
+      // Если мы в редактировании маршрута -> назад к деталям
+      if (state?.step === 'edit_action') {
+        const routeIndex = state.routes.findIndex(r => r.id === state.route.id);
+        await routeHandlers.handleRouteDetails(chatId, routeIndex);
+        return;
+      }
+
+      // Если мы в списке маршрутов -> главное меню
+      if (state?.step === 'select_route') {
+        bot.sendMessage(
+            chatId,
+            'Главное меню',
+            routeHandlers.getMainMenuKeyboard(chatId)
+        );
+        delete userStates[chatId];
+        return;
+      }
+
+      // Если мы в создании маршрута -> отмена и главное меню
+      if (state?.routeData) {
+        delete userStates[chatId];
+        bot.sendMessage(
+            chatId,
+            '❌ Создание маршрута отменено.\n\nВы в главном меню.',
+            routeHandlers.getMainMenuKeyboard(chatId)
+        );
+        return;
+      }
+
+      // Фоллбек — просто главное меню
+      bot.sendMessage(
+          chatId,
+          'Главное меню',
+          routeHandlers.getMainMenuKeyboard(chatId)
+      );
+      delete userStates[chatId];
+      return;
+    }
+
+    // ========================================
+    // НЕИЗВЕСТНАЯ КОМАНДА
+    // ========================================
+    bot.sendMessage(
+        chatId,
+        '❓ Неизвестная команда. Используйте меню ниже.',
+        routeHandlers.getMainMenuKeyboard(chatId)
+    );
+
+  } catch (error) {
+    console.error('Ошибка обработки сообщения:', error);
+    bot.sendMessage(
+        chatId,
+        '❌ Произошла ошибка. Попробуйте еще раз.',
+        routeHandlers.getMainMenuKeyboard(chatId)
+    );
+    delete userStates[chatId];
   }
 });
 
-// Graceful shutdown
-let isShuttingDown = false;
-const shutdown = async () => {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
+/**
+ * ПОМОЩЬ
+ */
+function handleHelp(chatId) {
+  const helpText = `
+ℹ️ СПРАВКА
 
-  console.log('\n⚠️ Получен сигнал остановки, завершаем работу...');
-  if (global.flexibleMonitor) {
-    await global.flexibleMonitor.close();
-  }
+📋 Мои маршруты - просмотр и управление вашими маршрутами
 
-  console.log('👋 Бот остановлен');
-  process.exit(0);
-};
+⚙️ Настройки:
+  🌙 Тихие часы - время, когда бот не отправляет уведомления
+  🌍 Таймзона - для корректного отображения времени
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-process.on('SIGQUIT', shutdown);
+✈️ Создание маршрута:
+  • Выберите откуда и куда летите
+  • Укажите тип поиска (конкретная дата или диапазон)
+  • Выберите нужен ли обратный билет
+  • Настройте фильтры (пассажиры, багаж, пересадки)
+  • Установите пороговую цену для уведомлений
 
-global.flexibleMonitor = flexibleMonitor;
+🔔 Уведомления:
+  Бот проверяет цены автоматически каждый час и отправляет уведомления, когда находит билеты дешевле вашего порога.
 
-setupScheduler(regularMonitor, flexibleMonitor);
+📊 Аналитика:
+  • График цен - динамика изменения цен
+  • Heatmap - лучшее время для покупки билетов
 
-if (process.env.ENABLE_WEB === 'true') {
-  require('./web/server');
+⚠️ Лимиты (бесплатно):
+  • 1 гибкий маршрут (диапазон дат)
+  • 3 фиксированных маршрута (конкретные даты)
+  • Максимум 20 комбинаций для гибкого поиска
+
+💎 В будущем будет доступна платная подписка для расширенных возможностей.
+`;
+
+  bot.sendMessage(chatId, helpText, routeHandlers.getMainMenuKeyboard(chatId));
 }
 
-console.log('\n========================================');
-console.log('🤖 Бот v3.0 запущен успешно!');
-console.log('✈️ Обычные маршруты + 🔍 Гибкий поиск');
-console.log('========================================\n');
-// Test deploy notification Wed Jan 21 14:23:23 +05 2026
+/**
+ * ПРОВЕРКА СЕЙЧАС (только для админа)
+ */
+async function handleCheckNow(chatId) {
+  try {
+    bot.sendMessage(chatId, '🔍 Запускаю проверку всех маршрутов...\n⏳ Это может занять несколько минут.');
+
+    const UnifiedMonitor = require('./services/UnifiedMonitor');
+    const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
+
+    await monitor.checkAllRoutes();
+    await monitor.sendReport(chatId);
+
+    bot.sendMessage(chatId, '✅ Проверка завершена!', routeHandlers.getMainMenuKeyboard(chatId));
+  } catch (error) {
+    console.error('Ошибка проверки:', error);
+    bot.sendMessage(chatId, '❌ Ошибка при проверке: ' + error.message);
+  }
+}
+
+/**
+ * ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+ */
+function checkIfFirstTime(chatId) {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT chat_id FROM user_settings WHERE chat_id = ?', [chatId], (err, row) => {
+      if (err) reject(err);
+      else resolve(!row); // true если пользователь новый
+    });
+  });
+}
+
+function initializeUserSettings(chatId) {
+  return new Promise((resolve, reject) => {
+    db.run(
+        'INSERT OR IGNORE INTO user_settings (chat_id, timezone) VALUES (?, ?)',
+        [chatId, 'Asia/Yekaterinburg'],
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        }
+    );
+  });
+}
+
+console.log('✅ Бот запущен успешно!');

@@ -1,917 +1,518 @@
 const db = require('../config/database');
-const Route = require('../models/Route');
-const FlexibleRoute = require('../models/FlexibleRoute');
-const PriceAnalytics = require('../services/PriceAnalytics');
-const DateUtils = require('../utils/dateUtils');
-const ChartGenerator = require('../services/ChartGenerator');
+const TimezoneUtils = require('../utils/timezoneUtils');
 
 class SettingsHandlers {
-  constructor(bot, userStates) {
+  constructor(bot) {
     this.bot = bot;
-    this.userStates = userStates;
-    this.chartGenerator = new ChartGenerator();
   }
 
-  getMainMenuKeyboard() {
+  /**
+   * Получить главное меню клавиатуру (из RouteHandlers)
+   */
+  getMainMenuKeyboard(chatId) {
+    const keyboard = [
+      ['📋 Мои маршруты'],
+      ['⚙️ Настройки', 'ℹ️ Помощь']
+    ];
+
+    if (chatId === 341508411) {
+      keyboard.push(['✅ Проверить сейчас']);
+    }
+
     return {
       reply_markup: {
-        keyboard: [
-          ['➕ Добавить маршрут', '🔍 Гибкий поиск'],
-          ['📋 Мои маршруты', '🔍 Мои гибкие'],
-          ['💎 Лучшее сейчас', '✏️ Редактировать'],
-          ['📊 Статистика', '🗑 Удалить'],
-          ['⚙️ Настройки', '✅ Проверить сейчас'],
-          ['ℹ️ Помощь'],
-        ],
+        keyboard,
         resize_keyboard: true,
         persistent: true
       }
     };
   }
 
-  async handleStats(chatId) {
+  /**
+   * ГЛАВНОЕ МЕНЮ НАСТРОЕК
+   */
+  async handleSettings(chatId) {
     try {
-      const routes = await Route.findByUser(chatId);
-      const flexRoutes = await FlexibleRoute.findByUser(chatId);
+      const settings = await this._getUserSettings(chatId);
 
-      if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
-        await this.bot.sendMessage(
-          chatId,
-          '📊 У вас нет маршрутов для просмотра статистики',
-          this.getMainMenuKeyboard()
-        );
-        return;
-      }
-
-      let message = '📊 СТАТИСТИКА\n\nВыберите тип маршрута:';
-
-      // 🔥 КНОПКИ ПОД ПОЛЕМ ВВОДА (reply_markup)
       const keyboard = {
         reply_markup: {
           keyboard: [
-            ['✈️ Статистика обычных маршрутов'],
-            ['🔍 Статистика гибких маршрутов'],
-            ['◀️ Главное меню']
+            ['🌙 Тихие часы'],
+            ['🌍 Таймзона'],
+            ['🏠 Главное меню']
           ],
-          one_time_keyboard: true,
-          resize_keyboard: true
+          resize_keyboard: true,
+          one_time_keyboard: false
         }
       };
 
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'stats_select_type' };
+      const startHour = settings.quiet_hours_start !== null ? String(settings.quiet_hours_start).padStart(2, '0') : 'не настроено';
+      const endHour = settings.quiet_hours_end !== null ? String(settings.quiet_hours_end).padStart(2, '0') : 'не настроено';
+      const timezone = settings.timezone || 'Asia/Yekaterinburg';
+      const offset = TimezoneUtils.getTimezoneOffset(timezone);
+
+      this.bot.sendMessage(
+          chatId,
+          `⚙️ *НАСТРОЙКИ*\n\n` +
+          `🌙 Тихие часы: ${settings.quiet_hours_start !== null ? `${startHour}:00 - ${endHour}:00` : 'Отключены'}\n` +
+          `🌍 Таймзона: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})\n\n` +
+          `Выберите раздел для настройки:`,
+          { parse_mode: 'Markdown', ...keyboard }
+      );
     } catch (error) {
-      console.error('Ошибка статистики:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики');
+      console.error('Ошибка загрузки настроек:', error);
+      this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
     }
   }
 
-  async handleStatsTypeSelect(chatId, text) {
-    const state = this.userStates[chatId];
-    if (!state || state.step !== 'stats_select_type') return false;
+  /**
+   * НАСТРОЙКА ТИХИХ ЧАСОВ
+   */
+  async handleQuietHours(chatId) {
+    try {
+      const settings = await this._getUserSettings(chatId);
 
-    if (text === '✈️ Статистика обычных маршрутов') {
-      await this.handleRegularRouteStats(chatId);
-      return true;
+      const startHour = settings.quiet_hours_start !== null ? settings.quiet_hours_start : 23;
+      const endHour = settings.quiet_hours_end !== null ? settings.quiet_hours_end : 7;
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['⏰ Изменить начало'],
+            ['⏰ Изменить конец'],
+            ['🔕 Отключить тихие часы'],
+            ['◀️ Назад']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      };
+
+      this.bot.sendMessage(
+          chatId,
+          `🌙 *ТИХИЕ ЧАСЫ*\n\n` +
+          `В это время бот не будет отправлять уведомления о найденных билетах.\n\n` +
+          `Текущие настройки: ${String(startHour).padStart(2, '0')}:00 - ${String(endHour).padStart(2, '0')}:00\n\n` +
+          `Что хотите изменить?`,
+          { parse_mode: 'Markdown', ...keyboard }
+      );
+
+      return { step: 'quiet_hours_menu', settings };
+
+    } catch (error) {
+      console.error('Ошибка загрузки настроек:', error);
+      this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
+      return null;
+    }
+  }
+
+  handleQuietHoursAction(chatId, text, state) {
+    if (!state || state.step !== 'quiet_hours_menu') {
+      return false;
     }
 
-    if (text === '🔍 Статистика гибких маршрутов') {
-      await this.handleFlexibleRouteStats(chatId);
-      return true;
+    if (text.includes('Изменить начало')) {
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['22:00', '23:00', '00:00'],
+            ['01:00', '02:00', '03:00'],
+            ['◀️ Отмена']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      };
+
+      this.bot.sendMessage(
+          chatId,
+          '⏰ Введите начало тихих часов (час от 0 до 23):\n\nНапример: 23',
+          keyboard
+      );
+      return { handled: true, newState: { step: 'quiet_hours_start', settings: state.settings } };
     }
 
-    if (text === '◀️ Главное меню') {
-      delete this.userStates[chatId];
-      await this.bot.sendMessage(chatId, 'Главное меню:', this.getMainMenuKeyboard());
-      return true;
+    if (text.includes('Изменить конец')) {
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['06:00', '07:00', '08:00'],
+            ['09:00', '10:00'],
+            ['◀️ Отмена']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      };
+
+      this.bot.sendMessage(
+          chatId,
+          '⏰ Введите конец тихих часов (час от 0 до 23):\n\nНапример: 7',
+          keyboard
+      );
+      return { handled: true, newState: { step: 'quiet_hours_end', settings: state.settings } };
+    }
+
+    if (text.includes('Отключить')) {
+      this._updateQuietHours(chatId, null, null);
+      this.bot.sendMessage(
+          chatId,
+          '✅ Тихие часы отключены. Бот будет отправлять уведомления в любое время.',
+          this.getMainMenuKeyboard(chatId)
+      );
+      return { handled: true, deleteState: true };
     }
 
     return false;
   }
 
-  async handleRegularRouteStats(chatId) {
+  async handleQuietHoursStart(chatId, text, state) {
+    if (!state || state.step !== 'quiet_hours_start') {
+      return false;
+    }
+
+    if (text === '◀️ Отмена') {
+      await this.handleQuietHours(chatId);
+      return { handled: true, deleteState: true };
+    }
+
+    const hour = parseInt(text.replace(/[^\d]/g, ''));
+    if (isNaN(hour) || hour < 0 || hour > 23) {
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
+      return { handled: true, keepState: true };
+    }
+
+    const settings = state.settings;
+    await this._updateQuietHours(chatId, hour, settings.quiet_hours_end);
+
+    this.bot.sendMessage(
+        chatId,
+        `✅ Начало тихих часов установлено на ${String(hour).padStart(2, '0')}:00`,
+        this.getMainMenuKeyboard(chatId)
+    );
+
+    return { handled: true, deleteState: true };
+  }
+
+  async handleQuietHoursEnd(chatId, text, state) {
+    if (!state || state.step !== 'quiet_hours_end') {
+      return false;
+    }
+
+    if (text === '◀️ Отмена') {
+      await this.handleQuietHours(chatId);
+      return { handled: true, deleteState: true };
+    }
+
+    const hour = parseInt(text.replace(/[^\d]/g, ''));
+    if (isNaN(hour) || hour < 0 || hour > 23) {
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
+      return { handled: true, keepState: true };
+    }
+
+    const settings = state.settings;
+    await this._updateQuietHours(chatId, settings.quiet_hours_start, hour);
+
+    this.bot.sendMessage(
+        chatId,
+        `✅ Конец тихих часов установлен на ${String(hour).padStart(2, '0')}:00`,
+        this.getMainMenuKeyboard(chatId)
+    );
+
+    return { handled: true, deleteState: true };
+  }
+
+  /**
+   * НАСТРОЙКА ТАЙМЗОНЫ
+   */
+  async handleTimezone(chatId) {
     try {
-      const routes = await Route.findByUser(chatId);
-
-      if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(
-          chatId,
-          '✈️ У вас нет обычных маршрутов',
-          this.getMainMenuKeyboard()
-        );
-        return;
-      }
-
-      let message = '📊 ВЫБЕРИТЕ ОБЫЧНЫЙ МАРШРУТ\n\n';
+      const settings = await this._getUserSettings(chatId);
+      const currentTimezone = settings.timezone || 'Asia/Yekaterinburg';
+      const offset = TimezoneUtils.getTimezoneOffset(currentTimezone);
 
       const keyboard = {
         reply_markup: {
-          keyboard: [],
-          one_time_keyboard: true,
-          resize_keyboard: true
+          keyboard: [
+            ['Europe/Moscow (UTC+3)'],
+            ['Asia/Yekaterinburg (UTC+5)'],
+            ['Asia/Novosibirsk (UTC+7)'],
+            ['Asia/Vladivostok (UTC+10)'],
+            ['✏️ Ввести вручную'],
+            ['◀️ Назад']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
         }
       };
 
-      routes.forEach((route, index) => {
-        // 🔥 ПОДРОБНОЕ НАЗВАНИЕ КАК ВЕЗДЕ
-        const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
-        const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
-        const airline = route.airline || 'Все';
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depDate}-${retDate}`;
-
-        message += `${routeText}\n`;
-        keyboard.reply_markup.keyboard.push([routeText]);
-      });
-
-      keyboard.reply_markup.keyboard.push(['◀️ Назад к статистике']);
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'route_stats_select', routes };
-    } catch (error) {
-      console.error('Ошибка:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
-    }
-  }
-
-  async handleFlexibleRouteStats(chatId) {
-    try {
-      const routes = await FlexibleRoute.findByUser(chatId);
-
-      if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(
+      this.bot.sendMessage(
           chatId,
-          '🔍 У вас нет гибких маршрутов',
-          this.getMainMenuKeyboard()
+          `🌍 *ТАЙМЗОНА*\n\n` +
+          `Ваша таймзона: ${currentTimezone} (UTC${offset >= 0 ? '+' : ''}${offset})\n\n` +
+          `Таймзона используется для корректного отображения времени уведомлений и тихих часов.\n\n` +
+          `Выберите вашу таймзону:`,
+          { parse_mode: 'Markdown', ...keyboard }
+      );
+
+      return { step: 'timezone_menu' };
+
+    } catch (error) {
+      console.error('Ошибка загрузки настроек:', error);
+      this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
+      return null;
+    }
+  }
+
+  async handleTimezoneAction(chatId, text, state) {
+    if (!state || state.step !== 'timezone_menu') {
+      return false;
+    }
+
+    if (text === '◀️ Назад') {
+      this.handleSettings(chatId);
+      return { handled: true, deleteState: true };
+    }
+
+    if (text.includes('Ввести вручную')) {
+      this.bot.sendMessage(
+          chatId,
+          `✏️ Введите таймзону в формате:\n\n` +
+          `Europe/Moscow\n` +
+          `Asia/Tokyo\n` +
+          `America/New_York\n\n` +
+          `Список всех таймзон:\n` +
+          `https://en.wikipedia.org/wiki/List_of_tz_database_time_zones\n\n` +
+          `Введите таймзону или /cancel для отмены:`,
+          { reply_markup: { remove_keyboard: true } }
+      );
+      return { handled: true, newState: { step: 'timezone_input' } };
+    }
+
+    // Парсим таймзону из текста
+    const match = text.match(/([A-Za-z]+\/[A-Za-z_]+)/);
+    if (match) {
+      const timezone = match[1];
+
+      if (TimezoneUtils.isValidTimezone(timezone)) {
+        await this._updateTimezone(chatId, timezone);
+        const offset = TimezoneUtils.getTimezoneOffset(timezone);
+
+        this.bot.sendMessage(
+            chatId,
+            `✅ Таймзона установлена: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})`,
+            this.getMainMenuKeyboard(chatId)
         );
-        return;
-      }
 
-      let message = '📊 ВЫБЕРИТЕ ГИБКИЙ МАРШРУТ\n\n';
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      routes.forEach((route, index) => {
-        // 🔥 ПОДРОБНОЕ НАЗВАНИЕ КАК ВЕЗДЕ
-        const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
-        const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-        const airline = route.airline || 'Все';
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd} ${route.min_days}-${route.max_days}д`;
-
-        message += `${routeText}\n`;
-        keyboard.reply_markup.keyboard.push([routeText]);
-      });
-
-      keyboard.reply_markup.keyboard.push(['◀️ Назад к статистике']);
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'flex_stats_select', routes };
-    } catch (error) {
-      console.error('Ошибка:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
-    }
-  }
-
-  async showRouteStatistics(chatId, route) {
-    try {
-      const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
-      const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
-      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
-      const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
-
-      let message = `📊 СТАТИСТИКА МАРШРУТА #${route.id}\n\n`;
-      message += `📍 ${route.origin} → ${route.destination}\n`;
-      message += `📅 ${DateUtils.formatDateDisplay(route.departure_date)} - ${DateUtils.formatDateDisplay(route.return_date)}\n\n`;
-
-      if (stats && stats.total_checks > 0) {
-        message += `📈 Проверок: ${stats.total_checks}\n`;
-        message += `💰 Мин. цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n`;
+        return { handled: true, deleteState: true };
       } else {
-        message += `⚠️ Недостаточно данных\n`;
+        this.bot.sendMessage(chatId, '❌ Неверная таймзона. Попробуйте еще раз.');
+        return { handled: true, keepState: true };
       }
-
-      // Лучший час для покупки (MIN)
-      if (hourAnalysis.length > 0) {
-        const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `\n⏰ Лучший час для покупки:\n`;
-        message += `   ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽ - MIN\n`;
-      }
-
-      // Лучший день недели (MIN)
-      if (dayAnalysis.length > 0) {
-        const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-        const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `\n📅 Лучший день для покупки:\n`;
-        message += `   ${days[bestDay.day_of_week]}\n`;
-        message += `   ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n`;
-      }
-
-      // Топ-5 дней с минимальными ценами
-      if (dailyStats.minDays && dailyStats.minDays.length > 0) {
-        message += `\n💚 Топ-5 дней с MIN ценами:\n`;
-        dailyStats.minDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
-          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-        message += `\n`;
-      }
-
-      // Топ-5 дней с максимальными ценами
-      if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
-        message += `💔 Топ-5 дней с MAX ценами:\n`;
-        dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '💀' : '  ';
-          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-      }
-
-      await this.bot.sendMessage(chatId, message);
-
-      // График динамики цен (min/max)
-      try {
-        await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
-
-        const chartBuffer = await this.chartGenerator.generateRegularRoutePriceChart(route, chatId);
-
-        if (chartBuffer) {
-          await this.bot.sendPhoto(chatId, chartBuffer, {
-            caption: `📊 График изменения цен`,
-            contentType: 'image/png'
-          });
-        }
-      } catch (chartError) {
-        console.error('Ошибка генерации графика:', chartError);
-      }
-
-      // 🔥 Тепловая карта (МИНИМАЛЬНЫЕ ЦЕНЫ)
-      try {
-        await this.bot.sendMessage(chatId, '⏳ Генерирую тепловую карту...');
-
-        const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, 'regular');
-
-        if (!heatmapBuffer) {
-          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для тепловой карты');
-        } else {
-          await this.bot.sendPhoto(chatId, heatmapBuffer, {
-            caption: `🔥 Тепловая карта: лучшие часы и дни для покупки (мин. цены)`,
-            contentType: 'image/png'
-          });
-        }
-      } catch (heatmapError) {
-        console.error('Ошибка генерации тепловой карты:', heatmapError);
-      }
-
-      // Кнопки возврата
-      await this.bot.sendMessage(chatId, 'Графики готовы!', {
-        reply_markup: {
-          keyboard: [
-            ['◀️ Назад к статистике'],
-            ['◀️ Главное меню']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      });
-
-      this.userStates[chatId] = { step: 'stats_back' };
-
-    } catch (error) {
-      console.error('Ошибка показа статистики:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики', this.getMainMenuKeyboard());
     }
+
+    return false;
   }
 
-  async showFlexibleRouteStatistics(chatId, route) {
-    try {
-      const stats = await PriceAnalytics.getRouteStatsById(route.id, chatId);
-      const hourAnalysis = await PriceAnalytics.analyzeByHourForRoute(route.id, chatId);
-      const dayAnalysis = await PriceAnalytics.analyzeByDayOfWeekForRoute(route.id, chatId);
-      const dailyStats = await PriceAnalytics.getDailyPriceStats(route.id, chatId);
-
-      let message = `📊 СТАТИСТИКА ГИБКОГО МАРШРУТА\n\n`;
-      message += `📍 ${route.origin} → ${route.destination}\n`;
-      message += `📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n`;
-      message += `🛫 Пребывание: ${route.min_days}-${route.max_days} дней\n`;
-      message += `✈️ ${route.airline || 'EY'}\n\n`;
-
-      if (stats && stats.total_checks > 0) {
-        message += `📈 Проверок: ${stats.total_checks}\n`;
-        message += `💰 Мин. цена: ${Math.floor(stats.min_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📊 Средняя: ${Math.floor(stats.avg_price).toLocaleString('ru-RU')} ₽\n`;
-        message += `📈 Макс. цена: ${Math.floor(stats.max_price).toLocaleString('ru-RU')} ₽\n`;
-      } else {
-        message += `⚠️ Недостаточно данных\n`;
-      }
-
-      if (hourAnalysis.length > 0) {
-        const bestHour = hourAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `\n⏰ Лучший час для покупки:\n`;
-        message += `   ${bestHour.hour_of_day}:00-${bestHour.hour_of_day + 1}:00\n`;
-        message += `   ${Math.floor(bestHour.min_price).toLocaleString('ru-RU')} ₽ - MIN\n`;
-      }
-
-      if (dayAnalysis.length > 0) {
-        const days = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
-        const bestDay = dayAnalysis.sort((a, b) => a.min_price - b.min_price)[0];
-        message += `\n📅 Лучший день для покупки:\n`;
-        message += `   ${days[bestDay.day_of_week]}\n`;
-        message += `   ${Math.floor(bestDay.min_price).toLocaleString('ru-RU')} ₽\n`;
-      }
-
-      if (dailyStats.minDays && dailyStats.minDays.length > 0) {
-        message += `\n💚 Топ-5 дней с MIN ценами:\n`;
-        dailyStats.minDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '  ';
-          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.min_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-        message += `\n`;
-      }
-
-      if (dailyStats.maxDays && dailyStats.maxDays.length > 0) {
-        message += `💔 Топ-5 дней с MAX ценами:\n`;
-        dailyStats.maxDays.slice(0, 5).forEach((day, i) => {
-          const emoji = i === 0 ? '💀' : '  ';
-          message += `${emoji} ${day.day_of_month}.${day.month}: ${Math.floor(day.max_price).toLocaleString('ru-RU')} ₽\n`;
-        });
-      }
-
-      await this.bot.sendMessage(chatId, message);
-
-      // График динамики цен
-      try {
-        await this.bot.sendMessage(chatId, '⏳ Генерирую график цен...');
-
-        const chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
-
-        if (chartBuffer) {
-          await this.bot.sendPhoto(chatId, chartBuffer, {
-            caption: `📊 График изменения цен (гибкий поиск)`,
-            contentType: 'image/png'
-          });
-        }
-      } catch (chartError) {
-        console.error('Ошибка генерации графика:', chartError);
-      }
-
-      // 🔥 Тепловая карта
-      try {
-        await this.bot.sendMessage(chatId, '⏳ Генерирую тепловую карту...');
-
-        const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, 'flexible');
-
-        if (!heatmapBuffer) {
-          await this.bot.sendMessage(chatId, '⚠️ Недостаточно данных для тепловой карты');
-        } else {
-          await this.bot.sendPhoto(chatId, heatmapBuffer, {
-            caption: `🔥 Тепловая карта: лучшие часы и дни для покупки`,
-            contentType: 'image/png'
-          });
-        }
-      } catch (heatmapError) {
-        console.error('Ошибка генерации тепловой карты:', heatmapError);
-      }
-
-      // Кнопки возврата
-      await this.bot.sendMessage(chatId, 'Графики готовы!', {
-        reply_markup: {
-          keyboard: [
-            ['◀️ Назад к статистике'],
-            ['◀️ Главное меню']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      });
-
-      this.userStates[chatId] = { step: 'stats_back' };
-
-    } catch (error) {
-      console.error('Ошибка показа статистики:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки статистики', this.getMainMenuKeyboard());
+  async handleTimezoneInput(chatId, text, state) {
+    if (!state || state.step !== 'timezone_input') {
+      return false;
     }
+
+    if (text === '/cancel') {
+      await this.handleTimezone(chatId);
+      return { handled: true, deleteState: true };
+    }
+
+    const timezone = text.trim();
+
+    if (!TimezoneUtils.isValidTimezone(timezone)) {
+      this.bot.sendMessage(
+          chatId,
+          `❌ Неверная таймзона: ${timezone}\n\n` +
+          `Используйте формат: Europe/Moscow, Asia/Tokyo и т.д.\n\n` +
+          `Список всех таймзон:\n` +
+          `https://en.wikipedia.org/wiki/List_of_tz_database_time_zones\n\n` +
+          `Попробуйте еще раз или /cancel для отмены:`
+      );
+      return { handled: true, keepState: true };
+    }
+
+    await this._updateTimezone(chatId, timezone);
+    const offset = TimezoneUtils.getTimezoneOffset(timezone);
+
+    this.bot.sendMessage(
+        chatId,
+        `✅ Таймзона установлена: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})`,
+        this.getMainMenuKeyboard(chatId)
+    );
+
+    return { handled: true, deleteState: true };
   }
 
-  async handleSettings(chatId) {
+  /**
+   * ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ
+   */
+  async handleMessage(chatId, text, userStates) {
+    const state = userStates[chatId];
+
+    if (text === '◀️ Назад' && (
+        state?.step === 'quiet_hours_menu' ||
+        state?.step === 'quiet_hours_start' ||
+        state?.step === 'quiet_hours_end' ||
+        state?.step === 'timezone_menu' ||
+        state?.step === 'timezone_input'
+    )) {
+      if (state.step === 'quiet_hours_menu' || state.step === 'timezone_menu') {
+        this.handleSettings(chatId);
+      } else if (state.step === 'quiet_hours_start' || state.step === 'quiet_hours_end') {
+        await this.handleQuietHours(chatId);
+      } else if (state.step === 'timezone_input') {
+        await this.handleTimezone(chatId);
+      }
+      delete userStates[chatId];
+      return true;
+    }
+
+    // Обработка кнопки "Назад" из главного меню настроек
+    if (text === '◀️ Назад' && (!state || state.step === undefined)) {
+      this.bot.sendMessage(
+          chatId,
+          '◀️ Возврат в главное меню',
+          this.getMainMenuKeyboard(chatId)
+      );
+      delete userStates[chatId];
+      return true;
+    }
+
+    // Тихие часы
+    if (text === '🌙 Тихие часы') {
+      const newState = await this.handleQuietHours(chatId);
+      if (newState) userStates[chatId] = newState;
+      return true;
+    }
+
+    // Таймзона
+    if (text === '🌍 Таймзона') {
+      const newState = await this.handleTimezone(chatId);
+      if (newState) userStates[chatId] = newState;
+      return true;
+    }
+
+    // Обработка действий в меню тихих часов
+    if (state?.step === 'quiet_hours_menu') {
+      const result = this.handleQuietHoursAction(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    // Обработка ввода начала тихих часов
+    if (state?.step === 'quiet_hours_start') {
+      const result = await this.handleQuietHoursStart(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (!result.keepState && result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    // Обработка ввода конца тихих часов
+    if (state?.step === 'quiet_hours_end') {
+      const result = await this.handleQuietHoursEnd(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (!result.keepState && result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    // Обработка действий в меню таймзоны
+    if (state?.step === 'timezone_menu') {
+      const result = await this.handleTimezoneAction(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    // Обработка ввода таймзоны вручную
+    if (state?.step === 'timezone_input') {
+      const result = await this.handleTimezoneInput(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (!result.keepState && result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+   */
+  _getUserSettings(chatId) {
     return new Promise((resolve, reject) => {
-      db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, settings) => {
-        if (err) {
-          this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
-          reject(err);
-          return;
-        }
-
-        const s = settings || {
-          notify_on_drop: 1,
-          notify_on_new_min: 1,
-          quiet_hours_start: null,
-          quiet_hours_end: null,
-          check_frequency: 2
-        };
-
-        const message =
-          '⚙️ НАСТРОЙКИ\n\n' +
-          `🔔 Уведомления при падении цены: ${s.notify_on_drop ? '✅ Вкл' : '❌ Выкл'}\n` +
-          `⭐ Уведомления о новом минимуме: ${s.notify_on_new_min ? '✅ Вкл' : '❌ Выкл'}\n` +
-          `🌙 Тихие часы: ${s.quiet_hours_start && s.quiet_hours_end ? `${s.quiet_hours_start}:00 - ${s.quiet_hours_end}:00` : 'Не установлены'}\n` +
-          `⏰ Частота проверки: каждые ${s.check_frequency} часа\n\n` +
-          'Что изменить?';
-
-        const keyboard = {
-          reply_markup: {
-            keyboard: [
-              ['🔔 Уведомления'],
-              ['🌙 Тихие часы'],
-              ['⏰ Частота проверки'],
-              ['◀️ Главное меню']
-            ],
-            one_time_keyboard: true,
-            resize_keyboard: true
+      db.get(
+          'SELECT * FROM user_settings WHERE chat_id = ?',
+          [chatId],
+          (err, row) => {
+            if (err) {
+              reject(err);
+            } else if (row) {
+              resolve(row);
+            } else {
+              // Создаем настройки по умолчанию
+              db.run(
+                  'INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end, timezone) VALUES (?, ?, ?, ?)',
+                  [chatId, 23, 7, 'Asia/Yekaterinburg'],
+                  (err) => {
+                    if (err) reject(err);
+                    else resolve({
+                      chat_id: chatId,
+                      quiet_hours_start: 23,
+                      quiet_hours_end: 7,
+                      timezone: 'Asia/Yekaterinburg'
+                    });
+                  }
+              );
+            }
           }
-        };
-
-        this.bot.sendMessage(chatId, message, keyboard);
-        this.userStates[chatId] = { step: 'settings_menu' };
-        resolve();
-      });
+      );
     });
   }
 
-  handleSettingsStep(chatId, text) {
-    if (text === '🔔 Уведомления') {
-      this.handleNotifications(chatId, null);
-      return true;
-    }
-
-    if (text === '🌙 Тихие часы') {
-      this.handleQuietHours(chatId, null);
-      return true;
-    }
-
-    if (text === '⏰ Частота проверки') {
-      this.handleFrequency(chatId, null);
-      return true;
-    }
-
-    if (text === '◀️ Главное меню') {
-      delete this.userStates[chatId];
-      this.bot.sendMessage(chatId, 'Главное меню:', this.getMainMenuKeyboard());
-      return true;
-    }
-
-    return false;
-  }
-
-  handleNotifications(chatId, text) {
-    if (!text) {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['✅ Включить все'],
-            ['❌ Выключить все'],
-            ['◀️ Назад к настройкам']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(chatId, '🔔 Управление уведомлениями:', keyboard);
-      this.userStates[chatId] = { step: 'settings_notify' };
-      return true;
-    }
-
-    if (text === '✅ Включить все') {
+  _updateQuietHours(chatId, startHour, endHour) {
+    return new Promise((resolve, reject) => {
       db.run(
-        'UPDATE user_settings SET notify_on_drop = 1, notify_on_new_min = 1 WHERE chat_id = ?',
-        [chatId],
-        () => {
-          this.bot.sendMessage(chatId, '✅ Все уведомления включены', this.getMainMenuKeyboard());
-          delete this.userStates[chatId];
-        }
+          `UPDATE user_settings
+           SET quiet_hours_start = ?, quiet_hours_end = ?
+           WHERE chat_id = ?`,
+          [startHour, endHour, chatId],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
       );
-      return true;
-    }
+    });
+  }
 
-    if (text === '❌ Выключить все') {
+  _updateTimezone(chatId, timezone) {
+    return new Promise((resolve, reject) => {
       db.run(
-        'UPDATE user_settings SET notify_on_drop = 0, notify_on_new_min = 0 WHERE chat_id = ?',
-        [chatId],
-        () => {
-          this.bot.sendMessage(chatId, '❌ Все уведомления выключены', this.getMainMenuKeyboard());
-          delete this.userStates[chatId];
-        }
+          'UPDATE user_settings SET timezone = ? WHERE chat_id = ?',
+          [timezone, chatId],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
       );
-      return true;
-    }
-
-    if (text === '◀️ Назад к настройкам') {
-      this.handleSettings(chatId);
-      return true;
-    }
-
-    return false;
-  }
-
-  handleQuietHours(chatId, text) {
-    if (!text) {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['22:00 - 08:00'],
-            ['23:00 - 09:00'],
-            ['❌ Отключить тихие часы'],
-            ['◀️ Назад к настройкам']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(chatId, '🌙 Установите тихие часы (время Екатеринбурга):', keyboard);
-      this.userStates[chatId] = { step: 'settings_quiet' };
-      return true;
-    }
-
-    if (text === '❌ Отключить тихие часы') {
-      db.run(
-        'UPDATE user_settings SET quiet_hours_start = NULL, quiet_hours_end = NULL WHERE chat_id = ?',
-        [chatId],
-        () => {
-          this.bot.sendMessage(chatId, '✅ Тихие часы отключены', this.getMainMenuKeyboard());
-          delete this.userStates[chatId];
-        }
-      );
-      return true;
-    }
-
-    if (text === '◀️ Назад к настройкам') {
-      this.handleSettings(chatId);
-      return true;
-    }
-
-    const match = text.match(/(\d{2}):00 - (\d{2}):00/);
-    if (match) {
-      const start = parseInt(match[1]);
-      const end = parseInt(match[2]);
-
-      db.run(
-        'UPDATE user_settings SET quiet_hours_start = ?, quiet_hours_end = ? WHERE chat_id = ?',
-        [start, end, chatId],
-        () => {
-          this.bot.sendMessage(
-            chatId,
-            `✅ Тихие часы установлены: ${start}:00 - ${end}:00`,
-            this.getMainMenuKeyboard()
-          );
-          delete this.userStates[chatId];
-        }
-      );
-      return true;
-    }
-
-    return false;
-  }
-
-  handleFrequency(chatId, text) {
-    if (!text) {
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['⏰ Каждый час'],
-            ['⏰ Каждые 2 часа'],
-            ['⏰ Каждые 3 часа'],
-            ['⏰ Каждые 6 часов'],
-            ['◀️ Назад к настройкам']
-          ],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      this.bot.sendMessage(chatId, '⏰ Как часто проверять цены?', keyboard);
-      this.userStates[chatId] = { step: 'settings_frequency' };
-      return true;
-    }
-
-    if (text === '◀️ Назад к настройкам') {
-      this.handleSettings(chatId);
-      return true;
-    }
-
-    const match = text.match(/(\d+)/);
-    if (match) {
-      const hours = parseInt(match[1]);
-
-      db.run(
-        'UPDATE user_settings SET check_frequency = ? WHERE chat_id = ?',
-        [hours, chatId],
-        () => {
-          this.bot.sendMessage(
-            chatId,
-            `✅ Частота проверки установлена: каждые ${hours} часа`,
-            this.getMainMenuKeyboard()
-          );
-          delete this.userStates[chatId];
-        }
-      );
-      return true;
-    }
-
-    return false;
-  }
-
-  handleStatsMenuStep(chatId, text) {
-    return false;
-  }
-
-  /**
-   * 🔥 НОВЫЙ МЕТОД: Обработка запроса графика
-   */
-  async handleChartRequest(chatId, text) {
-    const state = this.userStates[chatId];
-
-    if (text === '📊 График цен') {
-      await this.showChartMenu(chatId);
-      return true;
-    }
-
-    if (state && state.step === 'chart_type_select') {
-      if (text === '✈️ Обычный маршрут') {
-        await this.handleRegularRouteChartSelect(chatId);
-        return true;
-      }
-
-      if (text === '🔍 Гибкий маршрут') {
-        await this.handleFlexibleRouteChartSelect(chatId);
-        return true;
-      }
-
-      if (text === '◀️ Главное меню') {
-        delete this.userStates[chatId];
-        await this.bot.sendMessage(chatId, 'Главное меню:', this.getMainMenuKeyboard());
-        return true;
-      }
-    }
-
-    if (state && state.step === 'chart_route_select') {
-      return await this.handleRouteChartGeneration(chatId, text);
-    }
-
-    if (state && state.step === 'chart_flex_route_select') {
-      return await this.handleFlexRouteChartGeneration(chatId, text);
-    }
-
-    return false;
-  }
-
-  /**
-   * Меню выбора типа графика
-   */
-  async showChartMenu(chatId) {
-    const routes = await Route.findByUser(chatId);
-    const flexRoutes = await FlexibleRoute.findByUser(chatId);
-
-    if ((!routes || routes.length === 0) && (!flexRoutes || flexRoutes.length === 0)) {
-      await this.bot.sendMessage(
-        chatId,
-        '📊 У вас нет маршрутов для построения графиков',
-        this.getMainMenuKeyboard()
-      );
-      return;
-    }
-
-    const keyboard = {
-      reply_markup: {
-        keyboard: [
-          ['✈️ Обычный маршрут'],
-          ['🔍 Гибкий маршрут'],
-          ['◀️ Главное меню']
-        ],
-        one_time_keyboard: true,
-        resize_keyboard: true
-      }
-    };
-
-    await this.bot.sendMessage(
-      chatId,
-      '📊 ГРАФИКИ ЦЕН\n\nВыберите тип маршрута:',
-      keyboard
-    );
-
-    this.userStates[chatId] = { step: 'chart_type_select' };
-  }
-
-  /**
-   * Выбор обычного маршрута для графика
-   */
-  async handleRegularRouteChartSelect(chatId) {
-    try {
-      const routes = await Route.findByUser(chatId);
-
-      if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(
-          chatId,
-          '✈️ У вас нет обычных маршрутов',
-          this.getMainMenuKeyboard()
-        );
-        return;
-      }
-
-      let message = '📊 ВЫБЕРИТЕ МАРШРУТ ДЛЯ ГРАФИКА\n\n';
-      const keyboard = {
-        reply_markup: {
-          keyboard: [],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      routes.forEach((route, index) => {
-        const depDate = DateUtils.formatDateDisplay(route.departure_date).substring(0, 5);
-        const retDate = DateUtils.formatDateDisplay(route.return_date).substring(0, 5);
-        const airline = route.airline || 'Все';
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depDate}-${retDate}`;
-
-        message += `${routeText}\n`;
-        keyboard.reply_markup.keyboard.push([routeText]);
-      });
-
-      keyboard.reply_markup.keyboard.push(['◀️ Назад']);
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'chart_route_select', routes };
-
-    } catch (error) {
-      console.error('Ошибка:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
-    }
-  }
-
-  /**
-   * Выбор гибкого маршрута для графика
-   */
-  async handleFlexibleRouteChartSelect(chatId) {
-    try {
-      const routes = await FlexibleRoute.findByUser(chatId);
-
-      if (!routes || routes.length === 0) {
-        await this.bot.sendMessage(
-          chatId,
-          '🔍 У вас нет гибких маршрутов',
-          this.getMainMenuKeyboard()
-        );
-        return;
-      }
-
-      let message = '📊 ВЫБЕРИТЕ ГИБКИЙ МАРШРУТ\n\n';
-      const keyboard = {
-        reply_markup: {
-          keyboard: [],
-          one_time_keyboard: true,
-          resize_keyboard: true
-        }
-      };
-
-      routes.forEach((route, index) => {
-        const depStart = DateUtils.formatDateDisplay(route.departure_start).substring(0, 5);
-        const depEnd = DateUtils.formatDateDisplay(route.departure_end).substring(0, 5);
-        const airline = route.airline || 'Все';
-        const routeText = `${index + 1}. ${route.origin}→${route.destination} ${airline} ${depStart}-${depEnd}`;
-
-        message += `${routeText}\n`;
-        keyboard.reply_markup.keyboard.push([routeText]);
-      });
-
-      keyboard.reply_markup.keyboard.push(['◀️ Назад']);
-
-      await this.bot.sendMessage(chatId, message, keyboard);
-      this.userStates[chatId] = { step: 'chart_flex_route_select', routes };
-
-    } catch (error) {
-      console.error('Ошибка:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов');
-    }
-  }
-
-  /**
-   * Генерация графика для обычного маршрута
-   */
-  async handleRouteChartGeneration(chatId, text) {
-    const state = this.userStates[chatId];
-
-    if (text === '◀️ Назад') {
-      await this.showChartMenu(chatId);
-      return true;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (!match) return false;
-
-    const index = parseInt(match[1]) - 1;
-    const route = state.routes[index];
-
-    if (!route) {
-      await this.bot.sendMessage(chatId, '❌ Маршрут не найден');
-      return true;
-    }
-
-    try {
-      await this.bot.sendMessage(chatId, '⏳ Генерирую график...');
-
-      const chartBuffer = await this.chartGenerator.generateRegularRoutePriceChart(route, chatId);
-
-      if (!chartBuffer) {
-        await this.bot.sendMessage(
-          chatId,
-          '⚠️ Недостаточно данных для построения графика.\nНужно минимум 2 проверки цен.',
-          this.getMainMenuKeyboard()
-        );
-        delete this.userStates[chatId];
-        return true;
-      }
-
-      const caption = `📊 График цен\n${route.origin} → ${route.destination}\n` +
-        `📅 ${DateUtils.formatDateDisplay(route.departure_date)} → ${DateUtils.formatDateDisplay(route.return_date)}`;
-
-      await this.bot.sendPhoto(chatId, chartBuffer, {
-        caption: caption,
-        contentType: 'image/png'
-      });
-
-      await this.bot.sendMessage(chatId, '✅ График готов!', this.getMainMenuKeyboard());
-      delete this.userStates[chatId];
-
-    } catch (error) {
-      console.error('Ошибка генерации графика:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика');
-    }
-
-    return true;
-  }
-
-  /**
-   * Генерация графика для гибкого маршрута
-   */
-  async handleFlexRouteChartGeneration(chatId, text) {
-    const state = this.userStates[chatId];
-
-    if (text === '◀️ Назад') {
-      await this.showChartMenu(chatId);
-      return true;
-    }
-
-    const match = text.match(/^(\d+)\./);
-    if (!match) return false;
-
-    const index = parseInt(match[1]) - 1;
-    const route = state.routes[index];
-
-    if (!route) {
-      await this.bot.sendMessage(chatId, '❌ Маршрут не найден');
-      return true;
-    }
-
-    try {
-      await this.bot.sendMessage(chatId, '⏳ Генерирую график...');
-
-      const chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
-
-      if (!chartBuffer) {
-        await this.bot.sendMessage(
-          chatId,
-          '⚠️ Недостаточно данных для построения графика.\nНужно минимум 2 проверки цен.',
-          this.getMainMenuKeyboard()
-        );
-        delete this.userStates[chatId];
-        return true;
-      }
-
-      const caption = `📊 График цен (гибкий поиск)\n${route.origin} → ${route.destination}\n` +
-        `📅 ${DateUtils.formatDateDisplay(route.departure_start)} - ${DateUtils.formatDateDisplay(route.departure_end)}\n` +
-        `🛫 ${route.min_days}-${route.max_days} дней`;
-
-      await this.bot.sendPhoto(chatId, chartBuffer, {
-        caption: caption,
-        contentType: 'image/png'
-      });
-
-      await this.bot.sendMessage(chatId, '✅ График готов!', this.getMainMenuKeyboard());
-      delete this.userStates[chatId];
-
-    } catch (error) {
-      console.error('Ошибка генерации графика:', error);
-      await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика');
-    }
-
-    return true;
+    });
   }
 }
 
