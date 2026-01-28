@@ -36,6 +36,10 @@ class AviasalesPricer {
     this.proxiesInitialized = false;
     this.cookiesInitialized = false;
 
+    // 🔥 TTL для кук (30 минут)
+    this.cookiesTTL = 30 * 60 * 1000; // 30 минут в миллисекундах
+    this.cookiesInitializedAt = null; // timestamp инициализации
+
     // массив разных наборов кук
     this.cookiesList = [];
 
@@ -332,14 +336,29 @@ class AviasalesPricer {
 
   // 🔥 создаем несколько наборов кук ТОЛЬКО ОДИН РАЗ
   async initCookiesSets(count) {
-    // 🔥 Если уже инициализированы, пропускаем
-    if (this.cookiesInitialized) {
-      console.log(`✅ Куки уже получены (${this.cookiesList.length} наборов), пропускаем...\n`);
-      return;
+    const now = Date.now();
+
+    // 🔥 Проверка 1: Если куки уже инициализированы
+    if (this.cookiesInitialized && this.cookiesInitializedAt) {
+      const elapsed = now - this.cookiesInitializedAt;
+      const elapsedMinutes = Math.floor(elapsed / 60000);
+
+      // 🔥 Проверка 2: TTL не истек (меньше 30 минут)
+      if (elapsed < this.cookiesTTL) {
+        console.log(`✅ Куки актуальны (получены ${elapsedMinutes} мин назад, TTL: 30 мин)`);
+        console.log(`   Наборов: ${this.cookiesList.length}, пропускаем...\n`);
+        return;
+      }
+
+      // 🔥 TTL истёк — сбрасываем флаги и регенерируем
+      console.log(`⚠️ Куки устарели (прошло ${elapsedMinutes} мин, TTL: 30 мин)`);
+      console.log(`🔄 Регенерация кук...\n`);
+      this.cookiesInitialized = false;
+      this.cookiesInitializedAt = null;
+      this.cookiesList = [];
     }
 
-    this.cookiesList = [];
-
+    // 🔥 Первая инициализация или регенерация после TTL
     console.log(`\n🍪 ПОЛУЧЕНИЕ ${count} НАБОРОВ КУК\n`);
 
     for (let i = 0; i < count; i++) {
@@ -352,8 +371,6 @@ class AviasalesPricer {
       }
 
       this.cookiesList.push(cookiesObj);
-
-      // 🔥 убрал паузу между получением кук
     }
 
     console.log(`\n✅ Готово: получено ${this.cookiesList.length}/${count} наборов кук\n`);
@@ -362,7 +379,11 @@ class AviasalesPricer {
       throw new Error('Не удалось получить ни одного набора кук');
     }
 
+    // 🔥 Устанавливаем флаги и timestamp
     this.cookiesInitialized = true;
+    this.cookiesInitializedAt = Date.now();
+
+    console.log(`🕐 Куки действительны до: ${new Date(this.cookiesInitializedAt + this.cookiesTTL).toLocaleString('ru-RU')}\n`);
   }
 
   formatCookies(cookiesObj) {
