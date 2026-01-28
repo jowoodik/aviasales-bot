@@ -161,10 +161,10 @@ class AviasalesPricer {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async setCookie() {
-    console.log('\n🍪 ========================================');
-    console.log('🍪 УСТАНОВКА КУКИ');
-    console.log('🍪 ========================================');
+  async setCookie(attempt = 1, maxAttempts = 3) {
+    console.log(`\n🍪 ========================================`);
+    console.log(`🍪 УСТАНОВКА КУКИ (попытка ${attempt}/${maxAttempts})`);
+    console.log(`🍪 ========================================`);
     console.log('🌐 Запуск браузера для получения куки...');
 
     let browser = null;
@@ -214,21 +214,47 @@ class AviasalesPricer {
       console.log('🔍 Открытие aviasales.ru...');
 
       await page.goto('https://www.aviasales.ru/', {
-        waitUntil: 'networkidle0',
+        waitUntil: 'domcontentloaded',
         timeout: 60000
       });
 
-      console.log('✅ Страница загружена, ждем куки и токены...');
+      console.log('✅ DOM загружен');
 
-      await this.sleep(3000); // 🔥 сократил с 5 до 3 сек
+      // 🔥 ШАГ 1: Небольшая базовая пауза для начала выполнения скриптов
+      await this.sleep(3000);
 
+      // 🔥 ШАГ 2: Скролл для триггера lazy-load скриптов
       try {
         await page.evaluate(() => {
           window.scrollTo(0, 100);
         });
-        await this.sleep(500); // 🔥 сократил с 1 до 0.5 сек
+        await this.sleep(500);
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
       } catch (e) {}
 
+      // 🔥 ШАГ 3: ЯВНОЕ ОЖИДАНИЕ NUID (до 15 сек)
+      console.log('⏳ Ожидание критической куки nuid...');
+
+      let nuidReceived = false;
+      try {
+        await page.waitForFunction(
+            () => document.cookie.includes('nuid='),
+            { timeout: 15000 }
+        );
+        nuidReceived = true;
+        console.log('✅ Кука nuid получена!');
+      } catch (timeoutError) {
+        console.warn('⚠️ Таймаут ожидания nuid (15 сек)');
+      }
+
+      // 🔥 ШАГ 4: Дополнительная пауза для остальных кук после nuid
+      if (nuidReceived) {
+        await this.sleep(2000);
+      }
+
+      // 🔥 ШАГ 5: Собираем все куки
       const pageCookies = await page.cookies();
 
       const cookiesObj = {};
@@ -242,23 +268,43 @@ class AviasalesPricer {
       console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
       console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));
 
-      if (!cookiesObj['aws-waf-token']) {
-        console.warn('⚠️ ВНИМАНИЕ: Отсутствует aws-waf-token! Может быть 403 ошибка.');
+      // 🔥 ШАГ 6: ВАЛИДАЦИЯ КРИТИЧЕСКИХ КУК
+      const requiredCookies = ['nuid'];
+      const missingCookies = requiredCookies.filter(key => !cookiesObj[key]);
+
+      if (missingCookies.length > 0) {
+        console.error(`❌ ОТСУТСТВУЮТ КРИТИЧЕСКИЕ КУКИ: ${missingCookies.join(', ')}`);
+
+        await page.close();
+        await browser.close();
+
+        // 🔥 RETRY если не последняя попытка
+        if (attempt < maxAttempts) {
+          console.log(`🔄 Повторная попытка получения кук (${attempt + 1}/${maxAttempts}) через 3 сек...`);
+          await this.sleep(3000);
+          return this.setCookie(attempt + 1, maxAttempts);
+        } else {
+          console.error(`❌ НЕ УДАЛОСЬ ПОЛУЧИТЬ КРИТИЧЕСКИЕ КУКИ ЗА ${maxAttempts} ПОПЫТОК`);
+          console.error(`❌ Этот набор кук будет пропущен или вызовет 403 ошибки`);
+          return null;
+        }
       }
-      if (!cookiesObj['nuid']) {
-        console.warn('⚠️ ВНИМАНИЕ: Отсутствует nuid!');
+
+      // 🔥 ШАГ 7: Опциональные предупреждения
+      if (!cookiesObj['aws-waf-token']) {
+        console.warn('⚠️ Отсутствует aws-waf-token (может вызвать 403, но не критично)');
       }
 
       await page.close();
       await browser.close();
 
-      console.log('✅ Куки успешно установлены');
+      console.log('✅ Все критические куки получены успешно');
       console.log('🍪 ========================================\n');
 
       return cookiesObj;
 
     } catch (error) {
-      console.error('❌ Ошибка установки куки:', error.message);
+      console.error('❌ Критическая ошибка при установке куки:', error.message);
 
       if (page) {
         try {
@@ -272,6 +318,14 @@ class AviasalesPricer {
         } catch (e) {}
       }
 
+      // 🔥 RETRY при любой критической ошибке
+      if (attempt < maxAttempts) {
+        console.log(`🔄 Повторная попытка после ошибки (${attempt + 1}/${maxAttempts}) через 3 сек...`);
+        await this.sleep(3000);
+        return this.setCookie(attempt + 1, maxAttempts);
+      }
+
+      console.error(`❌ ВСЕ ${maxAttempts} ПОПЫТКИ ИСЧЕРПАНЫ`);
       return null;
     }
   }
