@@ -109,7 +109,7 @@ db.serialize(() => {
   `);
 
   // ============================================
-  // НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ (+ timezone)
+  // НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ (+ timezone, + notify_on_check)
   // ============================================
   db.run(`
     CREATE TABLE IF NOT EXISTS user_settings (
@@ -117,6 +117,7 @@ db.serialize(() => {
       quiet_hours_start INTEGER DEFAULT 23,
       quiet_hours_end INTEGER DEFAULT 7,
       timezone TEXT DEFAULT 'Asia/Yekaterinburg',
+      notify_on_check INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -298,6 +299,15 @@ db.serialize(() => {
       console.error('❌ Ошибка добавления timezone:', err.message);
     } else if (!err) {
       console.log('✅ Добавлена колонка timezone в user_settings');
+    }
+  });
+
+  // Добавляем notify_on_check в user_settings (если её нет)
+  db.run(`ALTER TABLE user_settings ADD COLUMN notify_on_check INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления notify_on_check:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка notify_on_check в user_settings');
     }
   });
 

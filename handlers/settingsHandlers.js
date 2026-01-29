@@ -40,6 +40,7 @@ class SettingsHandlers {
           keyboard: [
             ['🌙 Тихие часы'],
             ['🌍 Таймзона'],
+            ['🔔 Уведомления о проверках'], // Новая кнопка
             ['🏠 Главное меню']
           ],
           resize_keyboard: true,
@@ -51,12 +52,14 @@ class SettingsHandlers {
       const endHour = settings.quiet_hours_end !== null ? String(settings.quiet_hours_end).padStart(2, '0') : 'не настроено';
       const timezone = settings.timezone || 'Asia/Yekaterinburg';
       const offset = TimezoneUtils.getTimezoneOffset(timezone);
+      const notifyStatus = settings.notify_on_check ? '✅ Включены' : '❌ Отключены';
 
       this.bot.sendMessage(
           chatId,
           `⚙️ *НАСТРОЙКИ*\n\n` +
           `🌙 Тихие часы: ${settings.quiet_hours_start !== null ? `${startHour}:00 - ${endHour}:00` : 'Отключены'}\n` +
-          `🌍 Таймзона: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})\n\n` +
+          `🌍 Таймзона: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})\n` +
+          `🔔 Уведомления о проверках: ${notifyStatus}\n\n` +
           `Выберите раздел для настройки:`,
           { parse_mode: 'Markdown', ...keyboard }
       );
@@ -73,9 +76,6 @@ class SettingsHandlers {
     try {
       const settings = await this._getUserSettings(chatId);
 
-      const startHour = settings.quiet_hours_start !== null ? settings.quiet_hours_start : 23;
-      const endHour = settings.quiet_hours_end !== null ? settings.quiet_hours_end : 7;
-
       const keyboard = {
         reply_markup: {
           keyboard: [
@@ -89,12 +89,22 @@ class SettingsHandlers {
         }
       };
 
+      let message = `🌙 *ТИХИЕ ЧАСЫ*\n\n`;
+      message += `В это время бот не будет отправлять уведомления о найденных билетах.\n\n`;
+
+      if (settings.quiet_hours_start === null || settings.quiet_hours_end === null) {
+        message += `Текущие настройки: отключены\n\n`;
+      } else {
+        const startHour = String(settings.quiet_hours_start).padStart(2, '0');
+        const endHour = String(settings.quiet_hours_end).padStart(2, '0');
+        message += `Текущие настройки: ${startHour}:00 - ${endHour}:00\n\n`;
+      }
+
+      message += `Что хотите изменить?`;
+
       this.bot.sendMessage(
           chatId,
-          `🌙 *ТИХИЕ ЧАСЫ*\n\n` +
-          `В это время бот не будет отправлять уведомления о найденных билетах.\n\n` +
-          `Текущие настройки: ${String(startHour).padStart(2, '0')}:00 - ${String(endHour).padStart(2, '0')}:00\n\n` +
-          `Что хотите изменить?`,
+          message,
           { parse_mode: 'Markdown', ...keyboard }
       );
 
@@ -177,21 +187,30 @@ class SettingsHandlers {
       return { handled: true, deleteState: true };
     }
 
-    const hour = parseInt(text.replace(/:/g, ''));
+    // Извлекаем час из строки (может быть "23" или "23:00")
+    let hour;
+    if (text.includes(':')) {
+      hour = parseInt(text.split(':')[0]);
+    } else {
+      hour = parseInt(text);
+    }
+
     if (isNaN(hour) || hour < 0 || hour > 23) {
-      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23');
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
       return { handled: true, keepState: true };
     }
 
     const settings = state.settings;
-    const endHour = settings.quiet_hours_end !== null ? settings.quiet_hours_end : 7;
+    await this._updateQuietHours(chatId, hour, settings.quiet_hours_end);
 
-    await this._updateQuietHours(chatId, hour, endHour);
+    // Получаем обновленные настройки для корректного отображения
+    const updatedSettings = await this._getUserSettings(chatId);
+    const endHour = updatedSettings.quiet_hours_end !== null ?
+        String(updatedSettings.quiet_hours_end).padStart(2, '0') : 'не установлено';
 
     this.bot.sendMessage(
         chatId,
-        `✅ Начало тихих часов установлено на ${String(hour).padStart(2, '0')}:00\n` +
-        `Текущие настройки: ${String(hour).padStart(2, '0')}:00 - ${String(endHour).padStart(2, '0')}:00`,
+        `✅ Начало тихих часов установлено на ${String(hour).padStart(2, '0')}:00, конец: ${endHour}:00`,
         this.getMainMenuKeyboard(chatId)
     );
 
@@ -208,21 +227,30 @@ class SettingsHandlers {
       return { handled: true, deleteState: true };
     }
 
-    const hour = parseInt(text.replace(/:/g, ''));
+    // Извлекаем час из строки (может быть "7" или "07:00")
+    let hour;
+    if (text.includes(':')) {
+      hour = parseInt(text.split(':')[0]);
+    } else {
+      hour = parseInt(text);
+    }
+
     if (isNaN(hour) || hour < 0 || hour > 23) {
-      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23');
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
       return { handled: true, keepState: true };
     }
 
     const settings = state.settings;
-    const startHour = settings.quiet_hours_start !== null ? settings.quiet_hours_start : 23;
+    await this._updateQuietHours(chatId, settings.quiet_hours_start, hour);
 
-    await this._updateQuietHours(chatId, startHour, hour);
+    // Получаем обновленные настройки для корректного отображения
+    const updatedSettings = await this._getUserSettings(chatId);
+    const startHour = updatedSettings.quiet_hours_start !== null ?
+        String(updatedSettings.quiet_hours_start).padStart(2, '0') : 'не установлено';
 
     this.bot.sendMessage(
         chatId,
-        `✅ Конец тихих часов установлен на ${String(hour).padStart(2, '0')}:00\n` +
-        `Текущие настройки: ${String(startHour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:00`,
+        `✅ Конец тихих часов установлен на ${String(hour).padStart(2, '0')}:00, начало: ${startHour}:00`,
         this.getMainMenuKeyboard(chatId)
     );
 
@@ -406,6 +434,13 @@ class SettingsHandlers {
       return true;
     }
 
+    // Уведомления о проверках
+    if (text === '🔔 Уведомления о проверках') {
+      const newState = await this.handleNotifyOnCheck(chatId);
+      if (newState) userStates[chatId] = newState;
+      return true;
+    }
+
     // Обработка действий в меню тихих часов
     if (state?.step === 'quiet_hours_menu') {
       const result = this.handleQuietHoursAction(chatId, text, state);
@@ -456,6 +491,86 @@ class SettingsHandlers {
       }
     }
 
+    // Обработка действий в меню уведомлений
+    if (state?.step === 'notify_on_check_menu') {
+      const result = await this.handleNotifyOnCheckAction(chatId, text, state);
+      if (result) {
+        if (result.deleteState) delete userStates[chatId];
+        else if (result.newState) userStates[chatId] = result.newState;
+        return result.handled;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * НАСТРОЙКА УВЕДОМЛЕНИЙ О ПРОВЕРКАХ
+   */
+  async handleNotifyOnCheck(chatId) {
+    try {
+      const settings = await this._getUserSettings(chatId);
+
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['🔔 Включить уведомления'],
+            ['🔕 Отключить уведомления'],
+            ['◀️ Назад']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      };
+
+      const status = settings.notify_on_check ? 'включены' : 'отключены';
+
+      this.bot.sendMessage(
+          chatId,
+          `🔔 *УВЕДОМЛЕНИЯ О ПРОВЕРКАХ*\n\n` +
+          `При включении этой опции бот будет отправлять отчет после каждой автоматической проверки (каждый час).\n\n` +
+          `Текущий статус: ${status}\n\n` +
+          `Выберите действие:`,
+          { parse_mode: 'Markdown', ...keyboard }
+      );
+
+      return { step: 'notify_on_check_menu' };
+
+    } catch (error) {
+      console.error('Ошибка загрузки настроек:', error);
+      this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
+      return null;
+    }
+  }
+
+  async handleNotifyOnCheckAction(chatId, text, state) {
+    if (!state || state.step !== 'notify_on_check_menu') {
+      return false;
+    }
+
+    if (text === '◀️ Назад') {
+      this.handleSettings(chatId);
+      return { handled: true, deleteState: true };
+    }
+
+    let newValue = null;
+    if (text.includes('Включить уведомления')) {
+      newValue = 1;
+    } else if (text.includes('Отключить уведомления')) {
+      newValue = 0;
+    }
+
+    if (newValue !== null) {
+      await this._updateNotifyOnCheck(chatId, newValue);
+      const status = newValue ? 'включены' : 'отключены';
+      this.bot.sendMessage(
+          chatId,
+          `✅ Уведомления о проверках ${status}.`,
+          this.getMainMenuKeyboard(chatId)
+      );
+      return { handled: true, deleteState: true };
+    }
+
     return false;
   }
 
@@ -475,15 +590,16 @@ class SettingsHandlers {
             } else {
               // Создаем настройки по умолчанию
               db.run(
-                  'INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end, timezone) VALUES (?, ?, ?, ?)',
-                  [chatId, 23, 7, 'Asia/Yekaterinburg'],
+                  'INSERT INTO user_settings (chat_id, quiet_hours_start, quiet_hours_end, timezone, notify_on_check) VALUES (?, ?, ?, ?, ?)',
+                  [chatId, 23, 7, 'Asia/Yekaterinburg', 0],
                   (err) => {
                     if (err) reject(err);
                     else resolve({
                       chat_id: chatId,
                       quiet_hours_start: 23,
                       quiet_hours_end: 7,
-                      timezone: 'Asia/Yekaterinburg'
+                      timezone: 'Asia/Yekaterinburg',
+                      notify_on_check: 0
                     });
                   }
               );
@@ -513,6 +629,19 @@ class SettingsHandlers {
       db.run(
           'UPDATE user_settings SET timezone = ? WHERE chat_id = ?',
           [timezone, chatId],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+      );
+    });
+  }
+
+  _updateNotifyOnCheck(chatId, value) {
+    return new Promise((resolve, reject) => {
+      db.run(
+          'UPDATE user_settings SET notify_on_check = ? WHERE chat_id = ?',
+          [value, chatId],
           (err) => {
             if (err) reject(err);
             else resolve();

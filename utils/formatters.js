@@ -6,13 +6,33 @@ class Formatters {
    * Парсинг кода аэропорта из текста
    */
   static parseAirportCode(text) {
-    const match = text.match(/\(([A-Z]{3})\)|^([A-Z]{3})$/i);
-    if (match) {
-      return (match[1] || match[2]).toUpperCase();
+    if (!text) return null;
+
+    const trimmed = text.trim();
+
+    // Случай 1: Текст в формате "Город (КОД)" или "КОД (Город)"
+    const matchBrackets = trimmed.match(/\(([A-Z]{3})\)/);
+    if (matchBrackets) {
+      return matchBrackets[1].toUpperCase();
     }
 
-    if (/^[A-Z]{3}$/i.test(text.trim())) {
-      return text.trim().toUpperCase();
+    // Случай 2: Просто код аэропорта (3 заглавные буквы)
+    if (/^[A-Z]{3}$/.test(trimmed)) {
+      return trimmed.toUpperCase();
+    }
+
+    // Случай 3: Код в начале или конце строки с пробелом
+    const parts = trimmed.split(' ');
+    for (const part of parts) {
+      if (/^[A-Z]{3}$/.test(part)) {
+        return part.toUpperCase();
+      }
+    }
+
+    // Случай 4: Попробуем извлечь 3 заглавные буквы из любого места
+    const matchAnywhere = trimmed.match(/[A-Z]{3}/);
+    if (matchAnywhere) {
+      return matchAnywhere[0].toUpperCase();
     }
 
     return null;

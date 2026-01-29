@@ -94,13 +94,21 @@ class RouteHandlers {
                 return;
             }
 
+            // Получаем лучшие цены с датами для всех маршрутов
+            const routesWithBestPrices = await Promise.all(
+                routes.map(async (route) => {
+                    const bestResult = await this.getBestPriceWithDate(route.id);
+                    return { ...route, bestResult };
+                })
+            );
+
             // Формируем сообщение со списком
             let message = `📋 МОИ МАРШРУТЫ\n\nУ вас ${routes.length} ${this._pluralize(routes.length, 'активный маршрут', 'активных маршрута', 'активных маршрутов')}:\n\n`;
 
             const buttons = [['➕ Создать маршрут']];
 
-            for (let i = 0; i < routes.length; i++) {
-                const r = routes[i];
+            for (let i = 0; i < routesWithBestPrices.length; i++) {
+                const r = routesWithBestPrices[i];
                 const statusIcon = r.is_paused ? '⏸️' : '✅';
 
                 // Формат даты
@@ -141,9 +149,14 @@ class RouteHandlers {
                     }
                 }
 
-                // Лучшая цена
-                const bestPrice = await RouteResult.getBestPrice(r.id);
-                const bestPriceText = bestPrice ? Formatters.formatPrice(bestPrice, r.currency) : 'Нет данных';
+                // Лучшая цена с датой
+                let bestPriceText;
+                if (r.bestResult && r.bestResult.total_price) {
+                    const timeAgo = r.bestResult.found_at ? Formatters.formatTimeAgo(r.bestResult.found_at) : 'давно';
+                    bestPriceText = `${Formatters.formatPrice(r.bestResult.total_price, r.currency)} (найдено ${timeAgo})`;
+                } else {
+                    bestPriceText = 'Нет данных';
+                }
 
                 message += `${statusIcon} ${i + 1}. ✈️ ${r.origin} → ${r.destination}\n`;
                 message += `   📅 ${dateStr}\n`;
@@ -195,6 +208,26 @@ class RouteHandlers {
             console.error('Ошибка получения маршрутов:', error);
             this.bot.sendMessage(chatId, '❌ Ошибка загрузки маршрутов: ' + error.message);
         }
+    }
+
+    /**
+     * Получить лучшую цену с датой для маршрута
+     */
+    async getBestPriceWithDate(routeId) {
+        return new Promise((resolve, reject) => {
+            const db = require('../config/database');
+            db.get(
+                `SELECT total_price, found_at
+                 FROM route_results
+                 WHERE route_id = ?
+                 ORDER BY total_price ASC, found_at DESC LIMIT 1`,
+                [routeId],
+                (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row);
+                }
+            );
+        });
     }
 
     /**
@@ -266,44 +299,35 @@ class RouteHandlers {
 
             if (topResults.length === 0) {
                 message += 'Пока нет данных о ценах.\nБот начнет проверку автоматически.';
+                await this.bot.sendMessage(chatId, message);
             } else {
+                // Отправляем основное сообщение с деталями маршрута
+                await this.bot.sendMessage(chatId, message);
+
+                // Отправляем каждое предложение отдельным сообщением с улучшенной информацией
                 for (let i = 0; i < topResults.length; i++) {
                     const result = topResults[i];
                     const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
 
-                    message += `${icon} ${Formatters.formatPrice(result.total_price, route.currency)} - ${result.airline}\n`;
+                    const timeAgo = result.found_at ? Formatters.formatTimeAgo(result.found_at) : 'недавно';
+                    const airlineName = result.airline ? Formatters.getAirlineName(result.airline) : 'Любая';
 
-                    if (route.is_flexible || result.days_in_country) {
-                        message += `   📅 ${DateUtils.formatDateDisplay(result.departure_date)}`;
-                        if (result.return_date) {
-                            message += ` → ${DateUtils.formatDateDisplay(result.return_date)}`;
-                            if (result.days_in_country) {
-                                message += ` (${result.days_in_country} ${this._pluralize(result.days_in_country, 'день', 'дня', 'дней')})`;
-                            }
+                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, route.currency)}* - ${airlineName}\n`;
+                    resultMessage += `📅 ${DateUtils.formatDateDisplay(result.departure_date)}`;
+
+                    if (result.return_date) {
+                        resultMessage += ` → ${DateUtils.formatDateDisplay(result.return_date)}`;
+                        if (result.days_in_country) {
+                            resultMessage += ` (${result.days_in_country} ${this._pluralize(result.days_in_country, 'день', 'дня', 'дней')})`;
                         }
-                        message += '\n';
                     }
 
-                    if (result.found_at) {
-                        const foundDate = await TimezoneUtils.formatDateForUser(result.found_at, chatId);
-                        message += `   🕐 Найдено: ${foundDate}\n`;
-                    }
+                    resultMessage += `\n🕐 Найдено: ${timeAgo}`;
 
                     if (result.total_price <= route.threshold_price) {
                         const savings = route.threshold_price - result.total_price;
-                        message += `   🔥 Ниже порога! Экономия: ${Formatters.formatPrice(savings, route.currency)}\n`;
+                        resultMessage += `\n🔥 *НИЖЕ ПОРОГА!* Экономия: ${Formatters.formatPrice(savings, route.currency)}`;
                     }
-
-                    message += '\n';
-                }
-
-                // Отправляем сообщение
-                await this.bot.sendMessage(chatId, message);
-
-                // Отправляем ссылки на покупку
-                for (let i = 0; i < topResults.length; i++) {
-                    const result = topResults[i];
-                    const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
 
                     const linkKeyboard = {
                         inline_keyboard: [[
@@ -313,8 +337,8 @@ class RouteHandlers {
 
                     await this.bot.sendMessage(
                         chatId,
-                        `${icon} ${Formatters.formatPrice(result.total_price, route.currency)} - ${result.airline}`,
-                        { reply_markup: linkKeyboard }
+                        resultMessage,
+                        { parse_mode: 'Markdown', reply_markup: linkKeyboard }
                     );
 
                     await new Promise(resolve => setTimeout(resolve, 300));
@@ -336,7 +360,7 @@ class RouteHandlers {
             };
 
             this.bot.sendMessage(chatId, 'Выберите действие:', keyboard);
-            this.userStates[chatId] = { step: 'route_action', route };
+            this.userStates[chatId] = { step: 'route_action', route, routeIndex };
 
         } catch (error) {
             console.error('Ошибка просмотра маршрута:', error);
