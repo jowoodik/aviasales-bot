@@ -2,15 +2,16 @@ const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
-const TimezoneUtils = require('../utils/timezoneUtils');
 const ChartGenerator = require("../services/ChartGenerator");
-const state = require("express/lib/application");
+const AirportService = require('../services/AirportService');
+const AirportFormatter = require('../utils/airportFormatter');
 
 class RouteHandlers {
     constructor(bot, userStates) {
         this.bot = bot;
         this.userStates = userStates;
         this.chartGenerator = new ChartGenerator();
+        this.airportService = new AirportService();
     }
 
     getMainMenuKeyboard(chatId) {
@@ -369,20 +370,22 @@ class RouteHandlers {
     }
 
     /**
-     * СОЗДАНИЕ НОВОГО МАРШРУТА
+     * НАЧАЛО СОЗДАНИЯ МАРШРУТА
      */
-    handleCreateRoute(chatId) {
+    async handleCreateRoute(chatId) {
         this.userStates[chatId] = {
             step: 'origin',
             routeData: {}
         };
 
+        // Получаем популярные аэропорты для России
+        const popularAirports = await this.airportService.getPopularAirports('russia', 6);
+
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ['SVX (Екатеринбург)', 'MOW (Москва)'],
-                    ['LED (Санкт-Петербург)', 'DXB (Дубай)'],
-                    ['DPS (Бали)', 'IST (Стамбул)'],
+                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ['🔍 Поиск аэропорта'],
                     ['🔙 Отмена']
                 ],
                 one_time_keyboard: true,
@@ -392,7 +395,8 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            '✈️ СОЗДАНИЕ МАРШРУТА\n\n📍 Шаг 1/12: Откуда вылетаете?\n\nВыберите аэропорт или введите код (например, SVX):',
+            '✈️ СОЗДАНИЕ МАРШРУТА\n\n📍 Шаг 1/12: Откуда вылетаете?\n\n' +
+            'Выберите аэропорт из списка популярных или нажмите "Поиск аэропорта" для поиска по названию города.',
             keyboard
         );
     }
@@ -408,8 +412,20 @@ class RouteHandlers {
             switch (state.step) {
                 case 'origin':
                     return await this._handleOriginStep(chatId, text, state);
+                case 'origin_search':
+                    return await this._handleOriginSearchStep(chatId, text, state);
+                case 'origin_confirm':
+                    return await this._handleAirportConfirmStep(chatId, text, state);
+                case 'origin_select':
+                    return await this._handleAirportSelectStep(chatId, text, state);
                 case 'destination':
                     return await this._handleDestinationStep(chatId, text, state);
+                case 'destination_search':
+                    return await this._handleDestinationSearchStep(chatId, text, state);
+                case 'destination_confirm':
+                    return await this._handleAirportConfirmStep(chatId, text, state);
+                case 'destination_select':
+                    return await this._handleAirportSelectStep(chatId, text, state);
                 case 'search_type':
                     return await this._handleSearchTypeStep(chatId, text, state);
                 case 'has_return':
@@ -456,6 +472,66 @@ class RouteHandlers {
     // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ КАЖДОГО ШАГА
     // ========================================
 
+    /**
+     * ПОКАЗАТЬ ШАГ ВЫБОРА ТИПА ПОИСКА
+     */
+    async _showSearchTypeStep(chatId, state) {
+        const originCity = state.routeData.origin_city || state.routeData.origin;
+        const destinationCity = state.routeData.destination_city || state.routeData.destination;
+
+        const keyboard = {
+            reply_markup: {
+                keyboard: [
+                    ['📅 Конкретная дата'],
+                    ['📆 Диапазон дат'],
+                    ['🔙 Назад']
+                ],
+                one_time_keyboard: true,
+                resize_keyboard: true
+            }
+        };
+
+        this.bot.sendMessage(
+            chatId,
+            `✅ Маршрут: ${originCity} [${state.routeData.origin}] → ${destinationCity} [${state.routeData.destination}]\n\n` +
+            `📍 Шаг 3/12: Тип поиска\n\n` +
+            `🔹 Конкретная дата - вы ищете билеты на точную дату вылета и возврата.\n\n` +
+            `🔹 Диапазон дат - бот найдет лучшие комбинации дат в указанном диапазоне (максимум 20 комбинаций для бесплатного использования).\n\n` +
+            `Что выбираете?`,
+            keyboard
+        );
+    }
+
+    /**
+     * ПОКАЗАТЬ ШАГ ВЫБОРА АЭРОПОРТА ВЫЛЕТА (повторно)
+     */
+    async _showOriginStep(chatId) {
+        // Получаем популярные аэропорты для России
+        const popularAirports = await this.airportService.getPopularAirports('russia', 6);
+
+        const keyboard = {
+            reply_markup: {
+                keyboard: [
+                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ['🔍 Поиск аэропорта'],
+                    ['🔙 Отмена']
+                ],
+                one_time_keyboard: true,
+                resize_keyboard: true
+            }
+        };
+
+        this.bot.sendMessage(
+            chatId,
+            '✈️ СОЗДАНИЕ МАРШРУТА\n\n📍 Шаг 1/12: Откуда вылетаете?\n\n' +
+            'Выберите аэропорт из списка популярных или нажмите "Поиск аэропорта" для поиска по названию города.',
+            keyboard
+        );
+    }
+
+    /**
+     * ОБРАБОТКА ШАГА ВЫБОРА АЭРОПОРТА ВЫЛЕТА
+     */
     async _handleOriginStep(chatId, text, state) {
         if (text === '🔙 Отмена') {
             delete this.userStates[chatId];
@@ -463,64 +539,374 @@ class RouteHandlers {
             return true;
         }
 
-        const origin = Formatters.parseAirportCode(text);
-        if (!origin) {
-            this.bot.sendMessage(chatId, '❌ Неверный код аэропорта. Попробуйте еще раз:');
+        if (text === '🔍 Поиск аэропорта') {
+            state.step = 'origin_search';
+            this.bot.sendMessage(
+                chatId,
+                '🔍 Введите название города, страны или код аэропорта (например: "Москва", "Россия", или "SVX"):',
+                { reply_markup: { remove_keyboard: true } }
+            );
             return true;
         }
 
-        state.routeData.origin = origin;
-        state.step = 'destination';
+        // Пытаемся распарсить IATA код из текста
+        const iataCode = AirportFormatter.parseAirportInput(text);
 
-        const keyboard = {
-            reply_markup: {
-                keyboard: [
-                    ['SVX (Екатеринбург)', 'MOW (Москва)'],
-                    ['LED (Санкт-Петербург)', 'DXB (Дубай)'],
-                    ['DPS (Бали)', 'IST (Стамбул)'],
-                    ['🔙 Отмена']
-                ],
-                one_time_keyboard: true,
-                resize_keyboard: true
+        if (iataCode) {
+            // Проверяем существование аэропорта
+            const airport = await this.airportService.getAirportByCode(iataCode);
+            if (airport) {
+                state.routeData.origin = iataCode;
+                state.routeData.origin_city = airport.city_name;
+                state.routeData.origin_country = airport.country_name;
+                state.step = 'destination';
+
+                // Показываем популярные аэропорты для пункта назначения
+                await this._showDestinationStep(chatId, state);
+                return true;
             }
-        };
+        }
 
-        this.bot.sendMessage(
-            chatId,
-            `✅ Вылет: ${origin}\n\n📍 Шаг 2/12: Куда летите?\n\nВыберите аэропорт или введите код:`,
-            keyboard
-        );
+        // Если не удалось распарсить код, ищем аэропорты
+        await this._searchAndShowAirports(chatId, text, 'origin');
+        return true;
+    }
+
+    /**
+     * ПОИСК АЭРОПОРТОВ ДЛЯ ПУНКТА ВЫЛЕТА
+     */
+    async _handleOriginSearchStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'origin';
+            // Вместо вызова handleCreateRoute, просто показываем шаг origin
+            await this._showOriginStep(chatId, state);
+            return true;
+        }
+
+        await this._searchAndShowAirports(chatId, text, 'origin');
+        return true;
+    }
+
+    /**
+     * ОБРАБОТКА ШАГА ВЫБОРА АЭРОПОРТА ПРИЛЕТА
+     */
+    async _handleDestinationStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'origin';
+            await this._showOriginStep(chatId, state);
+            return true;
+        }
+
+        if (text === '🔍 Поиск аэропорта') {
+            state.step = 'destination_search';
+            this.bot.sendMessage(
+                chatId,
+                '🔍 Введите название города, страны или код аэропорта для пункта назначения:',
+                { reply_markup: { remove_keyboard: true } }
+            );
+            return true;
+        }
+
+        // Пытаемся распарсить IATA код из текста
+        const iataCode = AirportFormatter.parseAirportInput(text);
+
+        if (iataCode) {
+            // Проверяем существование аэропорта
+            const airport = await this.airportService.getAirportByCode(iataCode);
+            if (airport) {
+                // Проверяем, не совпадает ли с пунктом вылета
+                if (iataCode === state.routeData.origin) {
+                    this.bot.sendMessage(chatId, '❌ Пункт назначения не может совпадать с пунктом вылета. Выберите другой аэропорт:');
+                    return true;
+                }
+
+                state.routeData.destination = iataCode;
+                state.routeData.destination_city = airport.city_name;
+                state.routeData.destination_country = airport.country_name;
+                state.step = 'search_type';
+
+                // Переходим к следующему шагу
+                await this._showSearchTypeStep(chatId, state);
+                return true;
+            }
+        }
+
+        // Если не удалось распарсить код, ищем аэропорты
+        await this._searchAndShowAirports(chatId, text, 'destination');
+        return true;
+    }
+
+    /**
+     * ПОИСК АЭРОПОРТОВ ДЛЯ ПУНКТА НАЗНАЧЕНИЯ
+     */
+    async _handleDestinationSearchStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'destination';
+            // Показываем шаг destination снова
+            await this._showDestinationStep(chatId, state);
+            return true;
+        }
+
+        await this._searchAndShowAirports(chatId, text, 'destination');
+        return true;
+    }
+
+    /**
+     * ОБЩИЙ МЕТОД ПОИСКА И ОТОБРАЖЕНИЯ АЭРОПОРТОВ
+     */
+    async _searchAndShowAirports(chatId, query, stepType) {
+        if (!query || query.trim().length < 2) {
+            this.bot.sendMessage(
+                chatId,
+                '❌ Введите хотя бы 2 символа для поиска.',
+                { reply_markup: { remove_keyboard: true } }
+            );
+            return;
+        }
+
+        // Показываем сообщение о поиске
+        const searchingMsg = await this.bot.sendMessage(chatId, `🔍 Ищу аэропорты по запросу: "${query}"...`);
+
+        try {
+            // Ищем аэропорты - используем улучшенный поиск
+            const airports = await this.airportService.searchAirportsEnhanced(query, 8);
+
+            // Получаем состояние пользователя
+            const state = this.userStates[chatId];
+            if (!state) return;
+
+            // Удаляем сообщение о поиске
+            await this.bot.deleteMessage(chatId, searchingMsg.message_id);
+
+            if (airports.length === 0) {
+                const keyboard = {
+                    reply_markup: {
+                        keyboard: [['🔙 Назад']],
+                        resize_keyboard: true,
+                        one_time_keyboard: true
+                    }
+                };
+
+                this.bot.sendMessage(
+                    chatId,
+                    `❌ По запросу "${query}" аэропорты не найдены.\n\nПопробуйте:\n` +
+                    '• Ввести название города (например, "Москва")\n' +
+                    '• Ввести название страны (например, "Россия")\n' +
+                    '• Использовать IATA код (например, "SVX")\n' +
+                    '• Уточнить название (например, "Новосибирск" вместо "Нск")',
+                    keyboard
+                );
+                return;
+            }
+
+            if (airports.length === 1) {
+                // Если найден только один аэропорт, автоматически выбираем его
+                const airport = airports[0];
+
+                // Проверяем, есть ли у аэропорта английское название
+                const englishName = airport.airport_name_en ?
+                    `\n🏴 ${airport.airport_name_en}` : '';
+
+                const message = `✅ Найден аэропорт:\n\n` +
+                    `${airport.airport_name} [${airport.iata_code}]${englishName}\n` +
+                    `${airport.city_name}, ${airport.country_name}\n\n` +
+                    `Используем этот аэропорт?`;
+
+                const keyboard = {
+                    reply_markup: {
+                        keyboard: [
+                            ['✅ Да, использовать'],
+                            ['❌ Нет, искать другой'],
+                            ['🔙 Назад']
+                        ],
+                        resize_keyboard: true,
+                        one_time_keyboard: true
+                    }
+                };
+
+                this.bot.sendMessage(chatId, message, keyboard);
+
+                // Сохраняем найденный аэропорт во временное состояние
+                state.tempAirport = airport;
+                state.tempStepType = stepType;
+                state.step = `${stepType}_confirm`;
+
+                return;
+            }
+
+            // Если найдено несколько аэропортов, показываем список
+            const message = AirportFormatter.createSearchResultsMessage(airports, query);
+            const keyboard = AirportFormatter.createAirportsKeyboard(airports, false);
+
+            // Добавляем кнопку "Назад"
+            keyboard.reply_markup.keyboard.push(['🔙 Назад']);
+
+            this.bot.sendMessage(chatId, message, keyboard);
+
+            // Сохраняем найденные аэропорты во временное состояние
+            state.searchResults = airports;
+            state.searchQuery = query;
+            state.step = `${stepType}_select`;
+
+        } catch (error) {
+            console.error('Ошибка при поиске аэропортов:', error);
+
+            // Удаляем сообщение о поиске в случае ошибки
+            try {
+                await this.bot.deleteMessage(chatId, searchingMsg.message_id);
+            } catch (e) {}
+
+            this.bot.sendMessage(
+                chatId,
+                `❌ Ошибка при поиске аэропортов: ${error.message}\n\nПопробуйте еще раз.`,
+                { reply_markup: { keyboard: [['🔙 Назад']], resize_keyboard: true } }
+            );
+        }
+    }
+
+    /**
+     * ПОДТВЕРЖДЕНИЕ ВЫБОРА ЕДИНСТВЕННОГО АЭРОПОРТА
+     */
+    async _handleAirportConfirmStep(chatId, text, state) {
+        const stepType = state.tempStepType;
+        const airport = state.tempAirport;
+
+        if (text === '✅ Да, использовать') {
+            if (stepType === 'origin') {
+                state.routeData.origin = airport.iata_code;
+                state.routeData.origin_city = airport.city_name;
+                state.routeData.origin_country = airport.country_name;
+                state.routeData.origin_city_code = airport.city_code;
+                state.step = 'destination';
+                delete state.tempAirport;
+                delete state.tempStepType;
+
+                await this._showDestinationStep(chatId, state);
+            } else if (stepType === 'destination') {
+                // Проверяем, не совпадает ли с пунктом вылета
+                if (airport.iata_code === state.routeData.origin) {
+                    this.bot.sendMessage(chatId, '❌ Пункт назначения не может совпадать с пунктом вылета. Выберите другой аэропорт:');
+                    // Возвращаем к поиску
+                    state.step = 'destination_search';
+                    this.bot.sendMessage(
+                        chatId,
+                        '🔍 Введите название города, страны или код аэропорта для пункта назначения:',
+                        { reply_markup: { remove_keyboard: true } }
+                    );
+                    return true;
+                }
+
+                state.routeData.destination = airport.iata_code;
+                state.routeData.destination_city = airport.city_name;
+                state.routeData.destination_country = airport.country_name;
+                state.routeData.destination_city_code = airport.city_code;
+                state.step = 'search_type';
+                delete state.tempAirport;
+                delete state.tempStepType;
+
+                await this._showSearchTypeStep(chatId, state);
+            }
+        } else if (text === '❌ Нет, искать другой') {
+            state.step = `${stepType}_search`;
+            delete state.tempAirport;
+            delete state.tempStepType;
+
+            this.bot.sendMessage(
+                chatId,
+                `🔍 Введите название города, страны или код аэропорта${stepType === 'origin' ? ' вылета' : ' назначения'}:`,
+                { reply_markup: { remove_keyboard: true } }
+            );
+        } else if (text === '🔙 Назад') {
+            state.step = stepType;
+            delete state.tempAirport;
+            delete state.tempStepType;
+
+            if (stepType === 'origin') {
+                this.handleCreateRoute(chatId);
+            } else {
+                await this._showDestinationStep(chatId, state);
+            }
+        }
 
         return true;
     }
 
-    async _handleDestinationStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+    /**
+     * ВЫБОР АЭРОПОРТА ИЗ СПИСКА РЕЗУЛЬТАТОВ
+     */
+    async _handleAirportSelectStep(chatId, text, state) {
+        const stepType = state.step.replace('_select', '');
+        const airports = state.searchResults;
+
+        if (text === '🔙 Назад') {
+            state.step = stepType;
+            delete state.searchResults;
+            delete state.searchQuery;
+
+            if (stepType === 'origin') {
+                this.handleCreateRoute(chatId);
+            } else {
+                await this._showDestinationStep(chatId, state);
+            }
             return true;
         }
 
-        const destination = Formatters.parseAirportCode(text);
-        if (!destination) {
-            this.bot.sendMessage(chatId, '❌ Неверный код аэропорта. Попробуйте еще раз:');
-            return true;
+        // Пытаемся найти выбранный аэропорт
+        const selectedAirport = airports.find(airport =>
+            AirportFormatter.formatButtonText(airport) === text ||
+            airport.iata_code === AirportFormatter.parseAirportInput(text)
+        );
+
+        if (selectedAirport) {
+            if (stepType === 'origin') {
+                state.routeData.origin = selectedAirport.iata_code;
+                state.routeData.origin_city = selectedAirport.city_name;
+                state.routeData.origin_country = selectedAirport.country_name;
+                state.routeData.origin_city_code = selectedAirport.city_code;
+                state.step = 'destination';
+                delete state.searchResults;
+                delete state.searchQuery;
+
+                await this._showDestinationStep(chatId, state);
+            } else if (stepType === 'destination') {
+                // Проверяем, не совпадает ли с пунктом вылета
+                if (selectedAirport.iata_code === state.routeData.origin) {
+                    this.bot.sendMessage(chatId, '❌ Пункт назначения не может совпадать с пунктом вылета. Выберите другой аэропорт из списка:');
+                    return true;
+                }
+
+                state.routeData.destination = selectedAirport.iata_code;
+                state.routeData.destination_city = selectedAirport.city_name;
+                state.routeData.destination_country = selectedAirport.country_name;
+                state.routeData.destination_city_code = selectedAirport.city_code;
+                state.step = 'search_type';
+                delete state.searchResults;
+                delete state.searchQuery;
+
+                await this._showSearchTypeStep(chatId, state);
+            }
+        } else {
+            this.bot.sendMessage(chatId, '❌ Аэропорт не найден в списке. Выберите аэропорт из предложенных вариантов.');
         }
 
-        if (destination === state.routeData.origin) {
-            this.bot.sendMessage(chatId, '❌ Пункт назначения не может совпадать с пунктом вылета. Попробуйте еще раз:');
-            return true;
-        }
+        return true;
+    }
 
-        state.routeData.destination = destination;
-        state.step = 'search_type';
+    /**
+     * ПОКАЗАТЬ ШАГ ВЫБОРА ПУНКТА НАЗНАЧЕНИЯ
+     */
+    async _showDestinationStep(chatId, state) {
+        const originCity = state.routeData.origin_city || state.routeData.origin;
+
+        // Получаем популярные аэропорты для международных направлений
+        const popularAirports = await this.airportService.getPopularAirports('international', 6);
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ['📅 Конкретная дата'],
-                    ['📆 Диапазон дат'],
-                    ['🔙 Отмена']
+                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ['🔍 Поиск аэропорта'],
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -529,15 +915,11 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            `✅ Маршрут: ${state.routeData.origin} → ${destination}\n\n` +
-            `📍 Шаг 3/12: Тип поиска\n\n` +
-            `🔹 Конкретная дата - вы ищете билеты на точную дату вылета и возврата.\n\n` +
-            `🔹 Диапазон дат - бот найдет лучшие комбинации дат в указанном диапазоне (максимум 20 комбинаций для бесплатного использования).\n\n` +
-            `Что выбираете?`,
+            `✅ Вылет: ${originCity} [${state.routeData.origin}]\n\n` +
+            `📍 Шаг 2/12: Куда летите?\n\n` +
+            `Выберите аэропорт назначения из списка популярных или нажмите "Поиск аэропорта".`,
             keyboard
         );
-
-        return true;
     }
 
     async _handleSearchTypeStep(chatId, text, state) {
@@ -1132,7 +1514,7 @@ class RouteHandlers {
         return true;
     }
 
-    _showThresholdInput(chatId, state) {
+    _showThresholdInput(chatId) {
         const stepNumber = '12/12'; // Последний шаг
 
         this.bot.sendMessage(
@@ -1416,7 +1798,21 @@ class RouteHandlers {
 
     async handleShowChart(chatId, route) {
         try {
-            await this.bot.sendMessage(chatId, '📊 Генерирую график цен...');
+            // Кнопки действий
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['✏️ Редактировать'],
+                        ['📊 График цен', '🗺️ Heatmap'],
+                        ['🗑️ Удалить'],
+                        ['◀️ Назад к маршрутам']
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            await this.bot.sendMessage(chatId, '📊 Генерирую график цен...', keyboard);
 
             let chartBuffer;
 
@@ -1438,6 +1834,8 @@ class RouteHandlers {
                 caption: `📊 График цен: ${route.origin} → ${route.destination}`
             });
 
+            return true;
+
         } catch (error) {
             console.error('Ошибка генерации графика:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка генерации графика: ' + error.message);
@@ -1449,7 +1847,21 @@ class RouteHandlers {
      */
     async handleShowHeatmap(chatId, route) {
         try {
-            await this.bot.sendMessage(chatId, '🔥 Генерирую тепловую карту...');
+            // Кнопки действий
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['✏️ Редактировать'],
+                        ['📊 График цен', '🗺️ Heatmap'],
+                        ['🗑️ Удалить'],
+                        ['◀️ Назад к маршрутам']
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            await this.bot.sendMessage(chatId, '🔥 Генерирую тепловую карту...', keyboard);
 
             const routeType = route.is_flexible ? 'flexible' : 'regular';
             const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, routeType);

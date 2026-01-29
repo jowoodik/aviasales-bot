@@ -9,8 +9,8 @@ class AviasalesAPI {
     const baseLink = 'https://www.aviasales.ru/search';
 
     const formatDate = (dateStr) => {
-      const [year, month, day] = dateStr.split('-');
-      return `${day}${month}`;
+      const [year, month, day] = dateStr ? dateStr.split('-') : [];
+      return `${day || ''}${month || ''}`;
     };
 
     const depDate = formatDate(params.departure_date);

@@ -178,6 +178,11 @@ TRAVELPAYOUTS_TOKEN=your_travelpayouts_token
 
 База данных создается автоматически при первом запуске.
 
+Для импорта списка аэропортов:
+```bash
+node data/importAirports.js
+```
+
 Для создания тестовых данных:
 
 ```bash

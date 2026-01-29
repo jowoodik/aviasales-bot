@@ -159,6 +159,66 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_time ON price_analytics(hour_of_day, day_of_week)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_chat ON price_analytics(chat_id)`);
 
+// ============================================
+// ТАБЛИЦА АЭРОПОРТОВ (обновленная структура)
+// ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS airports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    iata_code TEXT NOT NULL UNIQUE,
+    icao_code TEXT,
+    
+    -- Названия аэропортов
+    airport_name TEXT NOT NULL,
+    airport_name_en TEXT,
+    airport_name_lower TEXT,
+    
+    -- Города
+    city_code TEXT,
+    city_name TEXT NOT NULL,
+    city_name_en TEXT,
+    city_name_lower TEXT,
+    
+    -- Страны
+    country_code TEXT NOT NULL,
+    country_name TEXT NOT NULL,
+    country_name_lower TEXT,
+    
+    -- Географические данные
+    latitude REAL,
+    longitude REAL,
+    timezone TEXT,
+    altitude INTEGER,
+    
+    -- Классификация
+    airport_type TEXT,
+    is_major INTEGER DEFAULT 0,
+    is_popular INTEGER DEFAULT 0,
+    is_international INTEGER DEFAULT 0,
+    display_order INTEGER DEFAULT 0,
+    region TEXT,
+    
+    -- Служебные
+    source TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+`);
+
+  // ============================================
+  // ОПТИМИЗИРОВАННЫЕ ИНДЕКСЫ ДЛЯ ПОИСКА
+  // ============================================
+
+  // 1. Основные индексы для поиска по отдельным полям
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_iata_code ON airports(iata_code)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_city_name_lower ON airports(city_name_lower)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_airport_name_lower ON airports(airport_name_lower)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_name_lower ON airports(country_name_lower)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_popular ON airports(is_popular)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_international ON airports(is_international)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_code ON airports(country_code)`),
+    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_region ON airports(region)`),
+
   // ============================================
   // МИГРАЦИЯ ДАННЫХ ИЗ СТАРЫХ ТАБЛИЦ
   // ============================================
