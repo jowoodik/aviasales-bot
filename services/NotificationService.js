@@ -10,33 +10,37 @@ class NotificationService {
 
   async canSendNotification(chatId) {
     return new Promise((resolve) => {
-      db.get(
-        'SELECT * FROM user_settings WHERE chat_id = ?',
-        [chatId],
-        (err, settings) => {
-          if (err || !settings) {
-            resolve(true);
+      db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, settings) => {
+        if (err || !settings) {
+          resolve(true);
+          return;
+        }
+
+        // Если тихие часы отключены (null), разрешаем уведомления
+        if (settings.quiet_hours_start === null || settings.quiet_hours_end === null) {
+          resolve(true);
+          return;
+        }
+
+        const now = new Date();
+        const currentHour = now.getHours();
+
+        if (settings.quiet_hours_start < settings.quiet_hours_end) {
+          // Обычный диапазон внутри суток (например 1:00 - 6:00)
+          if (currentHour >= settings.quiet_hours_start && currentHour < settings.quiet_hours_end) {
+            resolve(false);
             return;
           }
-
-          const now = new Date();
-          const currentHour = now.getHours();
-
-          if (settings.quiet_hours_start > settings.quiet_hours_end) {
-            if (currentHour >= settings.quiet_hours_start || currentHour < settings.quiet_hours_end) {
-              resolve(false);
-              return;
-            }
-          } else {
-            if (currentHour >= settings.quiet_hours_start && currentHour < settings.quiet_hours_end) {
-              resolve(false);
-              return;
-            }
+        } else {
+          // Диапазон через полночь (например 23:00 - 7:00)
+          if (currentHour >= settings.quiet_hours_start || currentHour < settings.quiet_hours_end) {
+            resolve(false);
+            return;
           }
-
-          resolve(true);
         }
-      );
+
+        resolve(true);
+      });
     });
   }
 

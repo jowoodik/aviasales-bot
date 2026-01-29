@@ -177,18 +177,21 @@ class SettingsHandlers {
       return { handled: true, deleteState: true };
     }
 
-    const hour = parseInt(text.replace(/[^\d]/g, ''));
+    const hour = parseInt(text.replace(/:/g, ''));
     if (isNaN(hour) || hour < 0 || hour > 23) {
-      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23');
       return { handled: true, keepState: true };
     }
 
     const settings = state.settings;
-    await this._updateQuietHours(chatId, hour, settings.quiet_hours_end);
+    const endHour = settings.quiet_hours_end !== null ? settings.quiet_hours_end : 7;
+
+    await this._updateQuietHours(chatId, hour, endHour);
 
     this.bot.sendMessage(
         chatId,
-        `✅ Начало тихих часов установлено на ${String(hour).padStart(2, '0')}:00`,
+        `✅ Начало тихих часов установлено на ${String(hour).padStart(2, '0')}:00\n` +
+        `Текущие настройки: ${String(hour).padStart(2, '0')}:00 - ${String(endHour).padStart(2, '0')}:00`,
         this.getMainMenuKeyboard(chatId)
     );
 
@@ -205,18 +208,21 @@ class SettingsHandlers {
       return { handled: true, deleteState: true };
     }
 
-    const hour = parseInt(text.replace(/[^\d]/g, ''));
+    const hour = parseInt(text.replace(/:/g, ''));
     if (isNaN(hour) || hour < 0 || hour > 23) {
-      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23:');
+      this.bot.sendMessage(chatId, '❌ Введите число от 0 до 23');
       return { handled: true, keepState: true };
     }
 
     const settings = state.settings;
-    await this._updateQuietHours(chatId, settings.quiet_hours_start, hour);
+    const startHour = settings.quiet_hours_start !== null ? settings.quiet_hours_start : 23;
+
+    await this._updateQuietHours(chatId, startHour, hour);
 
     this.bot.sendMessage(
         chatId,
-        `✅ Конец тихих часов установлен на ${String(hour).padStart(2, '0')}:00`,
+        `✅ Конец тихих часов установлен на ${String(hour).padStart(2, '0')}:00\n` +
+        `Текущие настройки: ${String(startHour).padStart(2, '0')}:00 - ${String(hour).padStart(2, '0')}:00`,
         this.getMainMenuKeyboard(chatId)
     );
 
