@@ -309,7 +309,6 @@ class RouteHandlers {
                 for (let i = 0; i < topResults.length; i++) {
                     const result = topResults[i];
                     const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-
                     const timeAgo = result.found_at ? Formatters.formatTimeAgo(result.found_at) : 'недавно';
                     const airlineName = result.airline ? Formatters.getAirlineName(result.airline) : 'Любая';
 
@@ -555,6 +554,7 @@ class RouteHandlers {
         if (iataCode) {
             // Проверяем существование аэропорта
             const airport = await this.airportService.getAirportByCode(iataCode);
+
             if (airport) {
                 state.routeData.origin = iataCode;
                 state.routeData.origin_city = airport.city_name;
@@ -613,6 +613,7 @@ class RouteHandlers {
         if (iataCode) {
             // Проверяем существование аэропорта
             const airport = await this.airportService.getAirportByCode(iataCode);
+
             if (airport) {
                 // Проверяем, не совпадает ли с пунктом вылета
                 if (iataCode === state.routeData.origin) {
@@ -730,7 +731,6 @@ class RouteHandlers {
                 state.tempAirport = airport;
                 state.tempStepType = stepType;
                 state.step = `${stepType}_confirm`;
-
                 return;
             }
 
@@ -780,7 +780,6 @@ class RouteHandlers {
                 state.step = 'destination';
                 delete state.tempAirport;
                 delete state.tempStepType;
-
                 await this._showDestinationStep(chatId, state);
             } else if (stepType === 'destination') {
                 // Проверяем, не совпадает ли с пунктом вылета
@@ -803,14 +802,12 @@ class RouteHandlers {
                 state.step = 'search_type';
                 delete state.tempAirport;
                 delete state.tempStepType;
-
                 await this._showSearchTypeStep(chatId, state);
             }
         } else if (text === '❌ Нет, искать другой') {
             state.step = `${stepType}_search`;
             delete state.tempAirport;
             delete state.tempStepType;
-
             this.bot.sendMessage(
                 chatId,
                 `🔍 Введите название города, страны или код аэропорта${stepType === 'origin' ? ' вылета' : ' назначения'}:`,
@@ -820,7 +817,6 @@ class RouteHandlers {
             state.step = stepType;
             delete state.tempAirport;
             delete state.tempStepType;
-
             if (stepType === 'origin') {
                 this.handleCreateRoute(chatId);
             } else {
@@ -842,7 +838,6 @@ class RouteHandlers {
             state.step = stepType;
             delete state.searchResults;
             delete state.searchQuery;
-
             if (stepType === 'origin') {
                 this.handleCreateRoute(chatId);
             } else {
@@ -866,7 +861,6 @@ class RouteHandlers {
                 state.step = 'destination';
                 delete state.searchResults;
                 delete state.searchQuery;
-
                 await this._showDestinationStep(chatId, state);
             } else if (stepType === 'destination') {
                 // Проверяем, не совпадает ли с пунктом вылета
@@ -882,7 +876,6 @@ class RouteHandlers {
                 state.step = 'search_type';
                 delete state.searchResults;
                 delete state.searchQuery;
-
                 await this._showSearchTypeStep(chatId, state);
             }
         } else {
@@ -980,7 +973,7 @@ class RouteHandlers {
             this.bot.sendMessage(
                 chatId,
                 `✅ ${hasReturn ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
-                `📍 Шаг 5/12: Начало диапазона вылета\n\n` +
+                `📍 Шаг 5/${hasReturn ? '12' : '10'}: Начало диапазона вылета\n\n` +
                 `${hasReturn ? '⚠️ Помните: максимум 20 комбинаций для бесплатного использования!\n\n' : ''}` +
                 `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
                 { reply_markup: { remove_keyboard: true } }
@@ -991,7 +984,7 @@ class RouteHandlers {
             this.bot.sendMessage(
                 chatId,
                 `✅ ${hasReturn ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
-                `📍 Шаг 5/12: Дата вылета\n\n` +
+                `📍 Шаг 5/${hasReturn ? '12' : '11'}: Дата вылета\n\n` +
                 `Введите дату в формате ДД.ММ.ГГГГ, например: 15.03.2026`,
                 { reply_markup: { remove_keyboard: true } }
             );
@@ -1002,6 +995,7 @@ class RouteHandlers {
 
     async _handleDepartureDateStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
+
         if (!date) {
             this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ, например: 15.03.2026');
             return true;
@@ -1039,6 +1033,7 @@ class RouteHandlers {
 
     async _handleReturnDateStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
+
         if (!date) {
             this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ, например: 20.03.2026');
             return true;
@@ -1061,6 +1056,7 @@ class RouteHandlers {
 
     async _handleDepartureStartStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
+
         if (!date) {
             this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД-ММ-ГГГГ, например: 25-02-2026');
             return true;
@@ -1081,7 +1077,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `✅ Начало диапазона: ${DateUtils.formatDateDisplay(date)}\n\n` +
-            `📍 Шаг 6/12: Конец диапазона вылета\n\n` +
+            `📍 Шаг 6/${state.routeData.has_return ? '12' : '10'}: Конец диапазона вылета\n\n` +
             `Введите дату в формате ДД-ММ-ГГГГ:`,
             { reply_markup: { remove_keyboard: true } }
         );
@@ -1091,6 +1087,7 @@ class RouteHandlers {
 
     async _handleDepartureEndStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
+
         if (!date) {
             this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД-ММ-ГГГГ, например: 10-03-2026');
             return true;
@@ -1108,6 +1105,7 @@ class RouteHandlers {
 
         if (state.routeData.has_return) {
             state.step = 'min_days';
+
             const keyboard = {
                 reply_markup: {
                     keyboard: [
@@ -1161,6 +1159,7 @@ class RouteHandlers {
 
     async _handleMinDaysStep(chatId, text, state) {
         const minDays = parseInt(text);
+
         if (isNaN(minDays) || minDays < 1 || minDays > 365) {
             this.bot.sendMessage(chatId, '❌ Введите число от 1 до 365:');
             return true;
@@ -1194,6 +1193,7 @@ class RouteHandlers {
 
     async _handleMaxDaysStep(chatId, text, state) {
         const maxDays = parseInt(text);
+
         if (isNaN(maxDays) || maxDays < state.routeData.min_days || maxDays > 365) {
             this.bot.sendMessage(chatId, `❌ Введите число от ${state.routeData.min_days} до 365:`);
             return true;
@@ -1241,9 +1241,16 @@ class RouteHandlers {
     }
 
     _showAirlineKeyboard(chatId, state) {
-        const stepNumber = state.routeData.is_flexible ?
-            (state.routeData.has_return ? '9/12' : '7/12') :
-            (state.routeData.has_return ? '7/12' : '6/12');
+        const data = state.routeData;
+        let currentStep, totalSteps;
+
+        if (data.is_flexible) {
+            currentStep = data.has_return ? 9 : 7;
+            totalSteps = data.has_return ? 12 : 10;
+        } else {
+            currentStep = data.has_return ? 7 : 6;
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         const keyboard = {
             reply_markup: {
@@ -1261,7 +1268,7 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            `📍 Шаг ${stepNumber}: Авиакомпания\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Авиакомпания\n\n` +
             `Выберите предпочитаемую авиакомпанию или "Любая":`,
             keyboard
         );
@@ -1285,9 +1292,16 @@ class RouteHandlers {
         state.routeData.airline = airline;
         state.step = 'adults';
 
-        const stepNumber = state.routeData.is_flexible ?
-            (state.routeData.has_return ? '10/12' : '8/12') :
-            (state.routeData.has_return ? '8/12' : '7/12');
+        const data = state.routeData;
+        let currentStep, totalSteps;
+
+        if (data.is_flexible) {
+            currentStep = data.has_return ? 10 : 8;
+            totalSteps = data.has_return ? 12 : 10;
+        } else {
+            currentStep = data.has_return ? 8 : 7;
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         const keyboard = {
             reply_markup: {
@@ -1304,7 +1318,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `✅ Авиакомпания: ${airline ? Formatters.getAirlineName(airline) : 'Любая'}\n\n` +
-            `📍 Шаг ${stepNumber}: Количество взрослых пассажиров (от 18 лет)\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Количество взрослых пассажиров (от 18 лет)\n\n` +
             `Выберите или введите число:`,
             keyboard
         );
@@ -1320,6 +1334,7 @@ class RouteHandlers {
         }
 
         const adults = parseInt(text);
+
         if (isNaN(adults) || adults < 1 || adults > 9) {
             this.bot.sendMessage(chatId, '❌ Введите число от 1 до 9:');
             return true;
@@ -1328,9 +1343,16 @@ class RouteHandlers {
         state.routeData.adults = adults;
         state.step = 'children';
 
-        const stepNumber = state.routeData.is_flexible ?
-            (state.routeData.has_return ? '11/12' : '9/12') :
-            (state.routeData.has_return ? '9/12' : '8/12');
+        const data = state.routeData;
+        let currentStep, totalSteps;
+
+        if (data.is_flexible) {
+            currentStep = data.has_return ? 11 : 9;
+            totalSteps = data.has_return ? 12 : 10;
+        } else {
+            currentStep = data.has_return ? 9 : 8;
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         const keyboard = {
             reply_markup: {
@@ -1347,7 +1369,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `✅ Взрослых: ${adults}\n\n` +
-            `📍 Шаг ${stepNumber}: Количество детей (до 18 лет)\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Количество детей (до 18 лет)\n\n` +
             `Выберите или введите число:`,
             keyboard
         );
@@ -1363,6 +1385,7 @@ class RouteHandlers {
         }
 
         const children = text.includes('без') ? 0 : parseInt(text);
+
         if (isNaN(children) || children < 0 || children > 8) {
             this.bot.sendMessage(chatId, '❌ Введите число от 0 до 8:');
             return true;
@@ -1371,9 +1394,16 @@ class RouteHandlers {
         state.routeData.children = children;
         state.step = 'baggage';
 
-        const stepNumber = state.routeData.is_flexible ?
-            (state.routeData.has_return ? '12/12' : '10/12') :
-            (state.routeData.has_return ? '10/12' : '9/12');
+        const data = state.routeData;
+        let currentStep, totalSteps;
+
+        if (data.is_flexible) {
+            currentStep = data.has_return ? 12 : 10;
+            totalSteps = data.has_return ? 12 : 10;
+        } else {
+            currentStep = data.has_return ? 10 : 9;
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         const keyboard = {
             reply_markup: {
@@ -1390,7 +1420,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `✅ Детей: ${children}\n\n` +
-            `📍 Шаг ${stepNumber}: Багаж\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Багаж\n\n` +
             `Нужен ли багаж? (20 кг в багажном отделении)`,
             keyboard
         );
@@ -1409,9 +1439,16 @@ class RouteHandlers {
         state.routeData.baggage = baggage;
         state.step = 'max_stops';
 
-        const stepNumber = state.routeData.is_flexible ?
-            (state.routeData.has_return ? '13/12' : '11/12') :
-            (state.routeData.has_return ? '11/12' : '10/12');
+        const data = state.routeData;
+        let currentStep, totalSteps;
+
+        if (data.is_flexible) {
+            currentStep = data.has_return ? 13 : 11;
+            totalSteps = data.has_return ? 13 : 11;
+        } else {
+            currentStep = data.has_return ? 11 : 10;
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         const keyboard = {
             reply_markup: {
@@ -1429,7 +1466,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `✅ Багаж: ${baggage ? '20 кг' : 'Только ручная кладь'}\n\n` +
-            `📍 Шаг ${stepNumber}: Пересадки\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Пересадки\n\n` +
             `Сколько пересадок допустимо?`,
             keyboard
         );
@@ -1466,9 +1503,16 @@ class RouteHandlers {
             // Есть пересадки - спрашиваем максимальное время
             state.step = 'max_layover';
 
-            const stepNumber = state.routeData.is_flexible ?
-                (state.routeData.has_return ? '14/12' : '12/12') :
-                (state.routeData.has_return ? '12/12' : '11/12');
+            const data = state.routeData;
+            let currentStep, totalSteps;
+
+            if (data.is_flexible) {
+                currentStep = data.has_return ? 14 : 12;
+                totalSteps = data.has_return ? 14 : 12;
+            } else {
+                currentStep = data.has_return ? 12 : 11;
+                totalSteps = data.has_return ? 12 : 11;
+            }
 
             const keyboard = {
                 reply_markup: {
@@ -1485,7 +1529,7 @@ class RouteHandlers {
             this.bot.sendMessage(
                 chatId,
                 `✅ Пересадок: ${maxStops === 99 ? 'Любое количество' : maxStops}\n\n` +
-                `📍 Шаг ${stepNumber}: Максимальное время одной пересадки\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Максимальное время одной пересадки\n\n` +
                 `Выберите или введите количество часов:`,
                 keyboard
             );
@@ -1502,6 +1546,7 @@ class RouteHandlers {
         }
 
         const hours = parseInt(text.replace(/\D/g, ''));
+
         if (isNaN(hours) || hours <= 0 || hours > 48) {
             this.bot.sendMessage(chatId, '❌ Введите число от 1 до 48:');
             return true;
@@ -1514,12 +1559,19 @@ class RouteHandlers {
         return true;
     }
 
-    _showThresholdInput(chatId) {
-        const stepNumber = '12/12'; // Последний шаг
+    _showThresholdInput(chatId, state) {
+        const data = state.routeData;
+        let totalSteps;
+
+        if (data.is_flexible) {
+            totalSteps = data.has_return ? 12 : 10;
+        } else {
+            totalSteps = data.has_return ? 12 : 11;
+        }
 
         this.bot.sendMessage(
             chatId,
-            `📍 Шаг ${stepNumber}: Пороговая цена\n\n` +
+            `📍 Шаг ${totalSteps}/${totalSteps}: Пороговая цена\n\n` +
             `💰 Введите максимальную цену в рублях, при которой вы хотите получать уведомления.\n\n` +
             `Например: 50000`,
             { reply_markup: { remove_keyboard: true } }
@@ -1528,6 +1580,7 @@ class RouteHandlers {
 
     async _handleThresholdStep(chatId, text, state) {
         const price = parseFloat(text);
+
         if (isNaN(price) || price <= 0) {
             this.bot.sendMessage(chatId, '❌ Введите корректную цену (число больше 0):');
             return true;
@@ -1539,7 +1592,6 @@ class RouteHandlers {
 
         // Показываем сводку для подтверждения
         await this._showConfirmation(chatId, state);
-
         return true;
     }
 
@@ -1629,6 +1681,7 @@ class RouteHandlers {
             );
 
             delete this.userStates[chatId];
+
         } catch (error) {
             console.error('Ошибка создания маршрута:', error);
             this.bot.sendMessage(
@@ -1689,7 +1742,6 @@ class RouteHandlers {
                 newPauseStatus ? '⏸️ Маршрут поставлен на паузу. Проверка цен остановлена.' : '▶️ Маршрут возобновлен. Проверка цен продолжится.',
                 this.getMainMenuKeyboard(chatId)
             );
-
             delete this.userStates[chatId];
             return true;
         }
@@ -1815,7 +1867,6 @@ class RouteHandlers {
             await this.bot.sendMessage(chatId, '📊 Генерирую график цен...', keyboard);
 
             let chartBuffer;
-
             if (route.is_flexible) {
                 chartBuffer = await this.chartGenerator.generateFlexibleRoutePriceChart(route, chatId);
             } else {
@@ -1835,7 +1886,6 @@ class RouteHandlers {
             });
 
             return true;
-
         } catch (error) {
             console.error('Ошибка генерации графика:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка генерации графика: ' + error.message);
