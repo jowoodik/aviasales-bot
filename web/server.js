@@ -14,7 +14,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Сессии для админки
+// 🔥 ИСПРАВЛЕННЫЕ настройки сессий
 app.use(session({
   secret: process.env.SESSION_SECRET || 'aviasales-bot-secret-2026',
   resave: false,
@@ -22,7 +22,7 @@ app.use(session({
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 часа
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production'
+    secure: process.env.NODE_ENV === 'production' ? false : false // Для HTTP оставляем false
   }
 }));
 
@@ -81,26 +81,21 @@ async function getUserStats(chatId) {
     db.serialize(() => {
       const stats = {};
 
-      // Количество маршрутов
       db.get('SELECT COUNT(*) as count FROM unified_routes WHERE chat_id = ?', [chatId], (err, row) => {
         stats.totalRoutes = row ? row.count : 0;
       });
 
-      // Активные маршруты
       db.get('SELECT COUNT(*) as count FROM unified_routes WHERE chat_id = ? AND is_paused = 0', [chatId], (err, row) => {
         stats.activeRoutes = row ? row.count : 0;
       });
 
-      // Всего результатов
       db.get(`
-        SELECT COUNT(*) as count 
-        FROM route_results rr 
-        JOIN unified_routes ur ON rr.route_id = ur.id 
+        SELECT COUNT(*) as count
+        FROM route_results rr
+          JOIN unified_routes ur ON rr.route_id = ur.id
         WHERE ur.chat_id = ?
       `, [chatId], (err, row) => {
         stats.totalResults = row ? row.count : 0;
-
-        // Завершаем через небольшую задержку
         setTimeout(() => resolve(stats), 50);
       });
     });
@@ -113,52 +108,44 @@ async function getAdminStats() {
     const stats = {};
 
     db.serialize(() => {
-      // Пользователи
       db.get('SELECT COUNT(DISTINCT chat_id) as count FROM user_settings', (err, row) => {
         stats.totalUsers = row ? row.count : 0;
       });
 
-      // Маршруты
       db.get('SELECT COUNT(*) as count FROM unified_routes', (err, row) => {
         stats.totalRoutes = row ? row.count : 0;
       });
 
-      // Активные маршруты
       db.get('SELECT COUNT(*) as count FROM unified_routes WHERE is_paused = 0', (err, row) => {
         stats.activeRoutes = row ? row.count : 0;
       });
 
-      // Проверки за 24 часа
       db.get(`
-        SELECT COUNT(*) as count 
-        FROM route_check_stats 
+        SELECT COUNT(*) as count
+        FROM route_check_stats
         WHERE check_timestamp >= datetime('now', '-1 day')
       `, (err, row) => {
         stats.checksLast24h = row ? row.count : 0;
       });
 
-      // Успешные проверки
       db.get(`
-        SELECT SUM(successful_checks) as total 
-        FROM route_check_stats 
+        SELECT SUM(successful_checks) as total
+        FROM route_check_stats
         WHERE check_timestamp >= datetime('now', '-1 day')
       `, (err, row) => {
         stats.successfulChecks = row ? (row.total || 0) : 0;
       });
 
-      // Неудачные проверки
       db.get(`
-        SELECT SUM(failed_checks) as total 
-        FROM route_check_stats 
+        SELECT SUM(failed_checks) as total
+        FROM route_check_stats
         WHERE check_timestamp >= datetime('now', '-1 day')
       `, (err, row) => {
         stats.failedChecks = row ? (row.total || 0) : 0;
       });
 
-      // Размер БД
       db.get("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()", (err, row) => {
         stats.dbSize = row ? row.size : 0;
-
         setTimeout(() => resolve(stats), 100);
       });
     });
@@ -177,15 +164,23 @@ app.get('/admin/login', (req, res) => {
   res.render('admin-login', { error: null });
 });
 
-// Обработка логина
+// 🔥 ИСПРАВЛЕННАЯ обработка логина с явным сохранением сессии
 app.post('/admin/login', (req, res) => {
   const { password } = req.body;
 
   if (password === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
     req.session.loginTime = new Date();
-    console.log('🔐 Админ вошел в систему');
-    res.redirect('/admin');
+
+    // ✅ ВАЖНО: Явно сохраняем сессию перед редиректом
+    req.session.save((err) => {
+      if (err) {
+        console.error('❌ Ошибка сохранения сессии:', err);
+        return res.render('admin-login', { error: 'Ошибка авторизации' });
+      }
+      console.log('🔐 Админ вошел в систему');
+      res.redirect('/admin');
+    });
   } else {
     console.log('❌ Неверная попытка входа в админку');
     res.render('admin-login', { error: 'Неверный пароль' });
@@ -215,12 +210,12 @@ app.get('/admin/api/users', requireAdmin, async (req, res) => {
   try {
     const users = await new Promise((resolve, reject) => {
       db.all(`
-        SELECT 
+        SELECT
           us.*,
           COUNT(DISTINCT ur.id) as total_routes,
           MAX(ur.last_check) as last_activity
         FROM user_settings us
-        LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
+               LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
         GROUP BY us.chat_id
         ORDER BY last_activity DESC NULLS LAST
       `, (err, rows) => {
@@ -239,12 +234,12 @@ app.get('/admin/api/routes', requireAdmin, async (req, res) => {
   try {
     const routes = await new Promise((resolve, reject) => {
       db.all(`
-        SELECT 
+        SELECT
           u.*,
           (SELECT COUNT(*) FROM route_results WHERE route_id = u.id) as check_count
         FROM unified_routes u
         ORDER BY u.created_at DESC
-        LIMIT 100
+          LIMIT 100
       `, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
@@ -261,14 +256,14 @@ app.get('/admin/api/check-stats', requireAdmin, async (req, res) => {
   try {
     const stats = await new Promise((resolve, reject) => {
       db.all(`
-        SELECT 
+        SELECT
           cs.*,
           r.origin || ' → ' || r.destination as route_name,
           r.chat_id
         FROM route_check_stats cs
-        JOIN unified_routes r ON cs.route_id = r.id
+               JOIN unified_routes r ON cs.route_id = r.id
         ORDER BY cs.check_timestamp DESC
-        LIMIT 50
+          LIMIT 50
       `, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
@@ -285,15 +280,15 @@ app.get('/admin/api/failed-checks', requireAdmin, async (req, res) => {
   try {
     const failed = await new Promise((resolve, reject) => {
       db.all(`
-        SELECT 
+        SELECT
           ccr.*,
           r.origin || ' → ' || r.destination as route_name,
           r.chat_id
         FROM combination_check_results ccr
-        JOIN unified_routes r ON ccr.route_id = r.id
+               JOIN unified_routes r ON ccr.route_id = r.id
         WHERE ccr.status IN ('error', 'not_found')
         ORDER BY ccr.check_timestamp DESC
-        LIMIT 100
+          LIMIT 100
       `, (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
@@ -527,49 +522,31 @@ app.patch('/api/flexible-routes/:id/threshold', requireAuth, async (req, res) =>
 app.get('/api/routes/:id/analytics', requireAuth, async (req, res) => {
   try {
     const routeId = parseInt(req.params.id);
-    console.log(`[Analytics] Запрос аналитики для маршрута ${routeId}, пользователь ${req.chatId}`);
-
     const route = await UnifiedRoute.findById(routeId);
+
     if (!route) {
-      console.log(`[Analytics] Маршрут ${routeId} не найден`);
       return res.status(404).json({ error: 'Маршрут не найден' });
     }
-
     if (route.chat_id !== req.chatId) {
-      console.log(`[Analytics] Доступ запрещен: маршрут принадлежит ${route.chat_id}, запрос от ${req.chatId}`);
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
 
-    // Получаем данные ИЗ price_analytics
-    const priceHistory = await new Promise((resolve, reject) => {
+    const priceHistory = await new Promise((resolve) => {
       db.all(
           `SELECT price, found_at, airline
-         FROM price_analytics
-         WHERE route_id = ? AND chat_id = ? AND route_type = 'regular'
-         ORDER BY found_at ASC`,
+           FROM price_analytics
+           WHERE route_id = ? AND chat_id = ? AND route_type = 'regular'
+           ORDER BY found_at ASC`,
           [routeId, req.chatId],
-          (err, rows) => {
-            if (err) {
-              console.log('[Analytics] Ошибка price_analytics:', err.message);
-              resolve([]);
-            } else {
-              console.log(`[Analytics] Найдено ${rows ? rows.length : 0} записей в price_analytics`);
-              resolve(rows || []);
-            }
-          }
+          (err, rows) => resolve(rows || [])
       );
     });
 
-    // Группируем по датам для графика
     const groupedByDate = {};
     priceHistory.forEach(item => {
       const date = item.found_at.split(' ')[0];
       if (!groupedByDate[date]) {
-        groupedByDate[date] = {
-          min_price: item.price,
-          max_price: item.price,
-          prices: [item.price]
-        };
+        groupedByDate[date] = { min_price: item.price, max_price: item.price, prices: [item.price] };
       } else {
         groupedByDate[date].prices.push(item.price);
         groupedByDate[date].min_price = Math.min(groupedByDate[date].min_price, item.price);
@@ -585,43 +562,21 @@ app.get('/api/routes/:id/analytics', requireAuth, async (req, res) => {
       check_count: groupedByDate[date].prices.length
     })).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Heatmap
-    const heatmap = await new Promise((resolve, reject) => {
+    const heatmap = await new Promise((resolve) => {
       db.all(
-          `SELECT
-          day_of_week,
-          hour_of_day,
-          AVG(price) as avg_price,
-          COUNT(*) as count
-        FROM price_analytics
-        WHERE route_id = ?
-        AND chat_id = ?
-        AND route_type = 'regular'
-        AND day_of_week IS NOT NULL
-        AND hour_of_day IS NOT NULL
-        GROUP BY day_of_week, hour_of_day
-        HAVING count >= 1
-        ORDER BY day_of_week, hour_of_day`,
+          `SELECT day_of_week, hour_of_day, AVG(price) as avg_price, COUNT(*) as count
+           FROM price_analytics
+           WHERE route_id = ? AND chat_id = ? AND route_type = 'regular'
+             AND day_of_week IS NOT NULL AND hour_of_day IS NOT NULL
+           GROUP BY day_of_week, hour_of_day HAVING count >= 1
+           ORDER BY day_of_week, hour_of_day`,
           [routeId, req.chatId],
-          (err, rows) => {
-            if (err) {
-              console.log('[Analytics] Ошибка heatmap:', err.message);
-              resolve([]);
-            } else {
-              console.log(`[Analytics] Heatmap: найдено ${rows ? rows.length : 0} точек`);
-              resolve(rows || []);
-            }
-          }
+          (err, rows) => resolve(rows || [])
       );
     });
 
-    console.log(`[Analytics] Отправка: priceHistory=${priceHistoryGrouped.length}, heatmap=${heatmap.length}`);
-    res.json({
-      priceHistory: priceHistoryGrouped,
-      heatmap: heatmap
-    });
+    res.json({ priceHistory: priceHistoryGrouped, heatmap: heatmap });
   } catch (error) {
-    console.error('[Analytics] Ошибка:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -630,49 +585,30 @@ app.get('/api/routes/:id/analytics', requireAuth, async (req, res) => {
 app.get('/api/flexible-routes/:id/analytics', requireAuth, async (req, res) => {
   try {
     const routeId = parseInt(req.params.id);
-    console.log(`[FlexAnalytics] Запрос аналитики для гибкого маршрута ${routeId}`);
-
     const route = await UnifiedRoute.findById(routeId);
+
     if (!route) {
-      console.log(`[FlexAnalytics] Маршрут ${routeId} не найден`);
       return res.status(404).json({ error: 'Маршрут не найден' });
     }
-
     if (route.chat_id !== req.chatId) {
-      console.log(`[FlexAnalytics] Доступ запрещен: маршрут принадлежит ${route.chat_id}, запрос от ${req.chatId}`);
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
 
-    // Получаем данные ИЗ price_analytics
-    const priceHistory = await new Promise((resolve, reject) => {
+    const priceHistory = await new Promise((resolve) => {
       db.all(
-          `SELECT price, found_at, airline
-         FROM price_analytics
-         WHERE route_id = ? AND chat_id = ? AND route_type = 'flexible'
-         ORDER BY found_at ASC`,
+          `SELECT price, found_at, airline FROM price_analytics
+           WHERE route_id = ? AND chat_id = ? AND route_type = 'flexible'
+           ORDER BY found_at ASC`,
           [routeId, req.chatId],
-          (err, rows) => {
-            if (err) {
-              console.log('[FlexAnalytics] Ошибка price_analytics:', err.message);
-              resolve([]);
-            } else {
-              console.log(`[FlexAnalytics] Найдено ${rows ? rows.length : 0} записей`);
-              resolve(rows || []);
-            }
-          }
+          (err, rows) => resolve(rows || [])
       );
     });
 
-    // Группируем по датам
     const groupedByDate = {};
     priceHistory.forEach(item => {
       const date = item.found_at.split(' ')[0];
       if (!groupedByDate[date]) {
-        groupedByDate[date] = {
-          min_price: item.price,
-          max_price: item.price,
-          prices: [item.price]
-        };
+        groupedByDate[date] = { min_price: item.price, max_price: item.price, prices: [item.price] };
       } else {
         groupedByDate[date].prices.push(item.price);
         groupedByDate[date].min_price = Math.min(groupedByDate[date].min_price, item.price);
@@ -688,55 +624,32 @@ app.get('/api/flexible-routes/:id/analytics', requireAuth, async (req, res) => {
       check_count: groupedByDate[date].prices.length
     })).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Heatmap для гибких маршрутов
-    const heatmap = await new Promise((resolve, reject) => {
+    const heatmap = await new Promise((resolve) => {
       db.all(
-          `SELECT
-          day_of_week,
-          hour_of_day,
-          AVG(price) as avg_price,
-          COUNT(*) as count
-        FROM price_analytics
-        WHERE route_id = ?
-        AND chat_id = ?
-        AND route_type = 'flexible'
-        AND day_of_week IS NOT NULL
-        AND hour_of_day IS NOT NULL
-        GROUP BY day_of_week, hour_of_day
-        HAVING count >= 1
-        ORDER BY day_of_week, hour_of_day`,
+          `SELECT day_of_week, hour_of_day, AVG(price) as avg_price, COUNT(*) as count
+           FROM price_analytics
+           WHERE route_id = ? AND chat_id = ? AND route_type = 'flexible'
+             AND day_of_week IS NOT NULL AND hour_of_day IS NOT NULL
+           GROUP BY day_of_week, hour_of_day HAVING count >= 1
+           ORDER BY day_of_week, hour_of_day`,
           [routeId, req.chatId],
-          (err, rows) => {
-            if (err) {
-              console.log('[FlexAnalytics] Ошибка heatmap:', err.message);
-              resolve([]);
-            } else {
-              console.log(`[FlexAnalytics] Heatmap: найдено ${rows ? rows.length : 0} точек`);
-              resolve(rows || []);
-            }
-          }
+          (err, rows) => resolve(rows || [])
       );
     });
 
-    console.log(`[FlexAnalytics] Отправка: priceHistory=${priceHistoryGrouped.length}, heatmap=${heatmap.length}`);
-    res.json({
-      priceHistory: priceHistoryGrouped,
-      heatmap: heatmap
-    });
+    res.json({ priceHistory: priceHistoryGrouped, heatmap: heatmap });
   } catch (error) {
-    console.error('[FlexAnalytics] Ошибка:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// API: получить лучшие билеты (топ-10 для обычного маршрута)
+// API: получить лучшие билеты
 app.get('/api/routes/:id/tickets', requireAuth, async (req, res) => {
   try {
     const route = await UnifiedRoute.findById(req.params.id);
     if (!route || route.chat_id !== req.chatId) {
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
-
     const results = await RouteResult.getTopResults(req.params.id, 10);
     res.json(results || []);
   } catch (error) {
@@ -744,14 +657,12 @@ app.get('/api/routes/:id/tickets', requireAuth, async (req, res) => {
   }
 });
 
-// API: получить лучшие билеты (топ-10 для гибкого маршрута)
 app.get('/api/flexible-routes/:id/tickets', requireAuth, async (req, res) => {
   try {
     const route = await UnifiedRoute.findById(req.params.id);
     if (!route || route.chat_id !== req.chatId) {
       return res.status(403).json({ error: 'Доступ запрещен' });
     }
-
     const results = await RouteResult.getTopResults(req.params.id, 10);
     res.json(results || []);
   } catch (error) {
