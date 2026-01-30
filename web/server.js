@@ -108,7 +108,7 @@ async function getAdminStats() {
     const stats = {};
 
     db.serialize(() => {
-      db.get('SELECT COUNT(DISTINCT chat_id) as count FROM user_settings', (err, row) => {
+      db.get('SELECT COUNT(DISTINCT chat_id) as count FROM unified_routes', (err, row) => {
         stats.totalUsers = row ? row.count : 0;
       });
 
