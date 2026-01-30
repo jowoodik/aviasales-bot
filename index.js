@@ -272,6 +272,8 @@ function handleHelp(chatId) {
   const helpText = `
 ℹ️ СПРАВКА
 
+📌 Ваш chat id: ${chatId}
+
 📋 Мои маршруты - просмотр и управление вашими маршрутами
 
 ⚙️ Настройки:
