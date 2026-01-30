@@ -311,10 +311,13 @@ async function handleCheckNow(chatId) {
     bot.sendMessage(chatId, '🔍 Запускаю проверку всех маршрутов...\n⏳ Это может занять несколько минут.');
 
     const UnifiedMonitor = require('./services/UnifiedMonitor');
+    const NotificationService = require('./services/NotificationService');
     const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
+    const notificationService = new NotificationService(bot);
 
     await monitor.checkAllRoutes();
-    await monitor.sendReport(chatId);
+    const stats = await notificationService.getUserRoutesStats(chatId);
+    await notificationService.sendCheckReport(chatId, stats);
 
     bot.sendMessage(chatId, '✅ Проверка завершена!', routeHandlers.getMainMenuKeyboard(chatId));
   } catch (error) {

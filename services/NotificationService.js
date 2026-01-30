@@ -8,7 +8,7 @@ class NotificationService {
     this.bot = bot;
   }
 
-  async canSendNotification(chatId) {
+  async _canSendNotification(chatId) {
     return new Promise((resolve) => {
       const db = require('../config/database');
       db.get(
@@ -49,22 +49,20 @@ class NotificationService {
     });
   }
 
-  // 🔥 ДОБАВЛЯЕМ МЕТОД recordNotification
   async recordNotification(chatId) {
     return new Promise((resolve) => {
       db.run(
-        'INSERT OR REPLACE INTO notification_cooldown (chat_id, last_notification) VALUES (?, ?)',
-        [chatId, Date.now()],
-        (err) => {
-          if (err) console.error('Ошибка записи cooldown:', err);
-          resolve();
-        }
+          'INSERT OR REPLACE INTO notification_cooldown (chat_id, last_notification) VALUES (?, ?)',
+          [chatId, Date.now()],
+          (err) => {
+            if (err) console.error('Ошибка записи cooldown:', err);
+            resolve();
+          }
       );
     });
   }
 
-  // 🔥 ДОБАВЛЯЕМ МЕТОД pluralizeDays
-  pluralizeDays(days) {
+  _pluralizeDays(days) {
     if (days % 10 === 1 && days % 100 !== 11) {
       return 'день';
     } else if ([2, 3, 4].includes(days % 10) && ![12, 13, 14].includes(days % 100)) {
@@ -75,12 +73,22 @@ class NotificationService {
   }
 
   /**
-   * Отправка отчета о проверке (будет использоваться в scheduler.js)
+   * Форматирование даты в читаемый вид
+   */
+  _formatDate(dateStr) {
+    if (!dateStr) return 'не указана';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  }
+
+  /**
+   * 🔥 ОБНОВЛЕННАЯ ФУНКЦИЯ: Отправка отчета о проверке
+   * Теперь включает детальную статистику по комбинациям
    */
   async sendCheckReport(chatId, stats) {
     try {
       // Проверяем тихие часы
-      const canSend = await this.canSendNotification(chatId);
+      const canSend = await this._canSendNotification(chatId);
       if (!canSend) {
         console.log(`⏸ Пропускаем отчет для ${chatId} (тихие часы)`);
         return;
@@ -92,153 +100,270 @@ class NotificationService {
       if (!stats || stats.length === 0) {
         report += 'Нет активных маршрутов для проверки.\n';
       } else {
-        let totalChecked = 0;
-        let foundCheaper = 0;
+        // Обрабатываем каждый маршрут
+        for (const stat of stats) {
+          report += `✈️ *${stat.origin} → ${stat.destination}*\n`;
 
-        stats.forEach(stat => {
-          totalChecked++;
-          if (stat.foundCheaper) foundCheaper++;
+          // 🔥 НОВОЕ: Статистика комбинаций для гибких маршрутов
+          if (stat.isFlexible && stat.totalCombinations > 0) {
+            report += `📋 Проверено: ${stat.successfulChecks}/${stat.totalCombinations} комбинаций\n`;
 
-          report += `✈️ ${stat.origin} → ${stat.destination}\n`;
-          report += `💰 Лучшая цена: ${stat.bestPrice ? stat.bestPrice.toLocaleString('ru-RU') + ' ₽' : 'не найдена'}\n`;
-          if (stat.foundCheaper) {
-            report += `🔥 Найдена цена ниже порога!\n`;
+            if (stat.failedChecks > 0) {
+              report += `⚠️ Не найдено: ${stat.failedChecks}/${stat.totalCombinations}\n`;
+
+              // 🔥 НОВОЕ: Показываем примеры неудачных комбинаций
+              if (stat.failedCombinations && stat.failedCombinations.length > 0) {
+                report += `\n_Примеры комбинаций без билетов:_\n`;
+                const maxShow = Math.min(3, stat.failedCombinations.length);
+
+                for (let i = 0; i < maxShow; i++) {
+                  const failed = stat.failedCombinations[i];
+                  const depDate = this._formatDate(failed.departure_date);
+                  const retDate = this._formatDate(failed.return_date);
+
+                  if (failed.return_date) {
+                    report += `  • ${depDate} — ${retDate}`;
+                    if (failed.days_in_country) {
+                      report += ` (${failed.days_in_country} ${this._pluralizeDays(failed.days_in_country)})`;
+                    }
+                  } else {
+                    report += `  • ${depDate} (в одну сторону)`;
+                  }
+
+                  // Показываем причину, если это ошибка
+                  if (failed.status === 'error' && failed.error_reason) {
+                    report += ` - _${failed.error_reason}_`;
+                  }
+
+                  report += `\n`;
+                }
+
+                if (stat.failedCombinations.length > maxShow) {
+                  report += `  _...и еще ${stat.failedCombinations.length - maxShow}_\n`;
+                }
+                report += `\n`;
+              }
+            }
           }
-          report += `---\n`;
-        });
 
-        report += `\n📈 Итого:\n`;
-        report += `• Проверено маршрутов: ${totalChecked}\n`;
-        report += `• Найдено выгодных предложений: ${foundCheaper}\n`;
+          // Лучшая найденная цена
+          if (stat.bestPrice) {
+            report += `💰 Лучшая цена: ${stat.bestPrice.toLocaleString('ru-RU')} ₽\n`;
+
+            // 🔥 ИСПРАВЛЕННАЯ ЛОГИКА: Проверка порога
+            if (stat.thresholdPrice && stat.foundCheaper) {
+              const savings = stat.thresholdPrice - stat.bestPrice;
+              report += `🔥 *Цена ниже порога!* (экономия ${savings.toLocaleString('ru-RU')} ₽)\n`;
+            } else if (stat.thresholdPrice) {
+              const diff = stat.bestPrice - stat.thresholdPrice;
+              report += `📊 До порога: ${diff.toLocaleString('ru-RU')} ₽\n`;
+            }
+          } else {
+            report += `❌ Цены не найдены\n`;
+          }
+
+          report += `\n`;
+        }
+
+        // 🔥 ОБНОВЛЕННАЯ ОБЩАЯ СТАТИСТИКА
+        const totalRoutes = stats.length;
+        const routesWithPrice = stats.filter(s => s.bestPrice).length;
+        const routesWithCheaperPrice = stats.filter(s => s.foundCheaper).length;
+        const totalCombinations = stats.reduce((sum, s) => sum + (s.totalCombinations || 0), 0);
+        const totalSuccessful = stats.reduce((sum, s) => sum + (s.successfulChecks || 0), 0);
+        const totalFailed = stats.reduce((sum, s) => sum + (s.failedChecks || 0), 0);
+
+        report += `📈 *ИТОГО:*\n`;
+        report += `• Маршрутов проверено: ${totalRoutes}\n`;
+        report += `• Найдены цены: ${routesWithPrice}/${totalRoutes}\n`;
+
+        if (routesWithCheaperPrice > 0) {
+          report += `• 🔥 Цены ниже порога: ${routesWithCheaperPrice}\n`;
+        }
+
+        if (totalCombinations > 0) {
+          report += `• Комбинаций проверено: ${totalSuccessful}/${totalCombinations}\n`;
+          if (totalFailed > 0) {
+            report += `• Комбинаций без результата: ${totalFailed}/${totalCombinations}\n`;
+          }
+        }
       }
 
       await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
       await this.recordNotification(chatId);
 
+      console.log(`✅ Отчет отправлен пользователю ${chatId}`);
     } catch (error) {
       console.error('Ошибка отправки отчета:', error);
     }
   }
 
-  async sendRegularAlert(route, ticket, type) {
-    const passengersText = Formatters.formatPassengers(route.adults, route.children);
-    const baggageText = route.baggage ? '✅ С багажом' : '❌ Без багажа';
-    const totalPrice = ticket.estimated_total;
-
-    let header = '';
-    if (type === 'drop') {
-      header = '🔥 ЦЕНА УПАЛА!';
-    } else if (type === 'new_min') {
-      header = '⭐ НОВЫЙ МИНИМУМ!';
-    }
-
-    const message = `
-${header}
-
-📍 Маршрут: ${route.origin} → ${route.destination}
-💰 Общая стоимость: ${Formatters.formatPrice(totalPrice, route.currency)}
-(базовая: ${Formatters.formatPrice(ticket.base_price, route.currency)} за 1 взр.)
-
-✈️ Авиакомпания: ${ticket.airline}
-👥 Пассажиры: ${passengersText}
-🧳 Багаж: ${baggageText}
-🔄 Пересадок: ${ticket.transfers || 0}
-
-📅 Вылет: ${DateUtils.formatDateDisplay(route.departure_date)}
-🔙 Возврат: ${DateUtils.formatDateDisplay(route.return_date)}
-
-${type === 'drop' ? `💵 Ваш порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n📉 Экономия: ${Formatters.formatPrice(route.threshold_price - totalPrice, route.currency)}\n\n` : ''}🔗 Забронировать: ${ticket.search_link}
-
-⚠️ Примечание: Указана примерная стоимость. Точную цену смотрите на сайте.
-`;
-
-    await this.bot.sendMessage(route.chat_id, message);
-  }
-
-  async sendFlexibleAlert(route, results, reason, isAccurate = false, screenshot = null) {
-    const best = results[0];
-
-    let emoji = reason === 'drop' ? '🔥' : '📉';
-    let title = reason === 'drop' ? 'ЦЕНА УПАЛА!' : 'Новый минимум';
-
-    let message = `${emoji} <b>${title}</b>\n\n`;
-    message += `📍 ${route.origin} → ${route.destination}\n`;
-    message += `💰 <b>${best.total_price.toLocaleString('ru-RU')} ₽</b>\n`;
-
-    if (isAccurate) {
-      message += `✅ <i>Проверено через браузер</i>\n`;
-    }
-
-    message += `📅 ${DateUtils.formatDateDisplay(best.departure_date)} → ${DateUtils.formatDateDisplay(best.return_date)}\n`;
-    message += `🛫 В стране: ${best.days_in_country} ${this.pluralizeDays(best.days_in_country)}\n`;
-
-    if (results.length > 1) {
-      message += `\n<b>Другие варианты:</b>\n`;
-      for (let i = 1; i < Math.min(results.length, 3); i++) {
-        const r = results[i];
-        message += `• ${r.total_price.toLocaleString('ru-RU')} ₽ (${DateUtils.formatDateDisplay(r.departure_date)})\n`;
-      }
-    }
-
-    const keyboard = {
-      inline_keyboard: [[
-        { text: '🔗 Купить билет', url: best.search_link }
-      ]]
-    };
-
+  /**
+   * 🔥 НОВАЯ ФУНКЦИЯ: Отправка алерта о найденной цене ниже порога
+   */
+  async sendPriceAlert(chatId, route, ticket, combination) {
     try {
-      // Если есть скриншот - отправляем его с подписью
-      if (screenshot && fs.existsSync(screenshot)) {
-        await this.bot.sendPhoto(route.chat_id, screenshot, {
-          contentType: 'image/png',
-          caption: message,
-          parse_mode: 'HTML',
-          reply_markup: keyboard,
-        });
-      } else {
-        // Иначе просто текст
-        await this.bot.sendMessage(route.chat_id, message, {
-          parse_mode: 'HTML',
-          reply_markup: keyboard
-        });
+      const canSend = await this._canSendNotification(chatId);
+      if (!canSend) {
+        console.log(`⏸ Пропускаем алерт для ${chatId} (тихие часы)`);
+        return;
       }
 
-      await this.recordNotification(route.chat_id);
+      let message = `🔥 *ЦЕНА НИЖЕ ПОРОГА!*\n\n`;
+      message += `📍 ${route.origin} → ${route.destination}\n`;
+      message += `💰 Цена: *${ticket.price.toLocaleString('ru-RU')} ${ticket.currency}*\n`;
+      message += `📊 Ваш порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽\n`;
+
+      const savings = route.threshold_price - ticket.price;
+      if (savings > 0) {
+        message += `💵 Экономия: ${savings.toLocaleString('ru-RU')} ₽\n\n`;
+      }
+
+      // Даты
+      message += `📅 Вылет: ${this._formatDate(combination.departure_date)}\n`;
+      if (combination.return_date) {
+        message += `🔙 Возврат: ${this._formatDate(combination.return_date)}\n`;
+        if (combination.days_in_country) {
+          message += `🛫 В стране: ${combination.days_in_country} ${this._pluralizeDays(combination.days_in_country)}\n`;
+        }
+      }
+
+      // Параметры маршрута
+      if (route.airline) {
+        message += `✈️ Авиакомпания: ${route.airline}\n`;
+      }
+      if (route.baggage) {
+        message += `🧳 С багажом\n`;
+      }
+
+      const keyboard = {
+        inline_keyboard: [[
+          { text: '🔗 Купить билет', url: ticket.link }
+        ]]
+      };
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+      await this.recordNotification(chatId);
+
+      console.log(`🔥 Алерт о низкой цене отправлен пользователю ${chatId}`);
     } catch (error) {
-      console.error('Ошибка отправки уведомления:', error.message);
+      console.error('Ошибка отправки алерта:', error);
     }
   }
 
-  async sendDailyReport(chatId, routesData, flexibleData) {
-    if ((!routesData || routesData.length === 0) && (!flexibleData || flexibleData.length === 0)) {
-      this.bot.sendMessage(chatId, '📊 Нет данных за сегодня');
-      return;
-    }
+  /**
+   * 🔥 ОБНОВЛЕННАЯ ФУНКЦИЯ: Получение статистики по маршрутам пользователя
+   * Теперь включает детальную информацию о комбинациях и причинах ошибок
+   */
+  async getUserRoutesStats(chatId) {
+    return new Promise((resolve, reject) => {
+      db.all(`
+      SELECT
+        r.id,
+        r.origin,
+        r.destination,
+        r.threshold_price as thresholdPrice,
+        r.is_flexible as isFlexible,
+        MIN(rr.total_price) as bestPrice,
+        COUNT(DISTINCT rr.id) as checksCount,
+        -- Статистика последней проверки
+        (SELECT total_combinations
+         FROM route_check_stats
+         WHERE route_id = r.id
+         ORDER BY check_timestamp DESC
+          LIMIT 1) as totalCombinations,
+        (SELECT successful_checks 
+         FROM route_check_stats 
+         WHERE route_id = r.id 
+         ORDER BY check_timestamp DESC 
+         LIMIT 1) as successfulChecks,
+        (SELECT failed_checks 
+         FROM route_check_stats 
+         WHERE route_id = r.id 
+         ORDER BY check_timestamp DESC 
+         LIMIT 1) as failedChecks,
+        (SELECT check_timestamp 
+         FROM route_check_stats 
+         WHERE route_id = r.id 
+         ORDER BY check_timestamp DESC 
+         LIMIT 1) as lastCheckTime
+      FROM unified_routes r
+        LEFT JOIN route_results rr ON r.id = rr.route_id
+      WHERE r.chat_id = ? AND r.is_paused = 0
+      GROUP BY r.id
+      ORDER BY r.id
+    `, [chatId], async (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
 
-    let report = '📊 ОТЧЕТ ЗА СУТКИ\n';
-    report += `📅 ${new Date().toLocaleDateString('ru-RU')}\n\n`;
+        // Обрабатываем результаты и добавляем информацию о неудачных комбинациях
+        const stats = [];
 
-    if (routesData && routesData.length > 0) {
-      report += '✈️ ОБЫЧНЫЕ МАРШРУТЫ:\n\n';
-      routesData.forEach((row, index) => {
-        const passengersText = row.children > 0 ? `${row.adults}+${row.children}` : `${row.adults}`;
-        report += `${index + 1}. ${row.origin}→${row.destination}\n`;
-        report += `   👥${passengersText} ${row.baggage ? '🧳' : ''}\n`;
-        report += `   💰 ${row.min_price.toLocaleString('ru-RU')} - ${row.max_price.toLocaleString('ru-RU')} ₽\n`;
-        report += `   📊 Проверок: ${row.checks}\n\n`;
+        for (const row of rows) {
+          const stat = {
+            routeId: row.id,
+            origin: row.origin,
+            destination: row.destination,
+            isFlexible: row.isFlexible === 1,
+            bestPrice: row.bestPrice,
+            thresholdPrice: row.thresholdPrice,
+            foundCheaper: row.bestPrice && row.thresholdPrice && row.bestPrice <= row.thresholdPrice,
+            totalCombinations: row.totalCombinations || 0,
+            successfulChecks: row.successfulChecks || 0,
+            failedChecks: row.failedChecks || 0,
+            lastCheckTime: row.lastCheckTime
+          };
+
+          // 🔥 НОВОЕ: Получаем информацию о неудачных комбинациях
+          if (stat.failedChecks > 0) {
+            stat.failedCombinations = await this._getFailedCombinations(row.id, 5);
+          }
+
+          stats.push(stat);
+        }
+
+        resolve(stats);
       });
-    }
+    });
+  }
 
-    if (flexibleData && flexibleData.length > 0) {
-      report += '🔍 ГИБКИЙ ПОИСК:\n\n';
-      flexibleData.forEach((row, index) => {
-        report += `${index + 1}. ${row.origin}→${row.destination}\n`;
-        report += `   💰 Лучшая цена: ${row.best_price.toLocaleString('ru-RU')} ₽\n`;
-        report += `   📅 ${DateUtils.formatDateDisplay(row.departure_date)}-${DateUtils.formatDateDisplay(row.return_date)}\n\n`;
+  /**
+   * 🔥 НОВАЯ ФУНКЦИЯ: Получение неудачных комбинаций для маршрута
+   */
+  async _getFailedCombinations(routeId, limit = 5) {
+    return new Promise((resolve, reject) => {
+      db.all(`
+      SELECT 
+        departure_date,
+        return_date,
+        days_in_country,
+        status,
+        error_reason
+      FROM combination_check_results
+      WHERE route_id = ? 
+        AND status IN ('not_found', 'error')
+        AND check_timestamp = (
+          SELECT MAX(check_timestamp) 
+          FROM combination_check_results 
+          WHERE route_id = ?
+        )
+      ORDER BY departure_date
+      LIMIT ?
+    `, [routeId, routeId, limit], (err, rows) => {
+        if (err) {
+          console.error('Ошибка получения неудачных комбинаций:', err);
+          resolve([]);
+        } else {
+          resolve(rows || []);
+        }
       });
-    }
-
-    this.bot.sendMessage(chatId, report);
+    });
   }
 }
 

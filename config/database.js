@@ -16,21 +16,21 @@ db.serialize(() => {
       chat_id INTEGER NOT NULL,
       origin TEXT NOT NULL,
       destination TEXT NOT NULL,
-      
+
       -- Тип маршрута
       is_flexible INTEGER DEFAULT 0,
       has_return INTEGER DEFAULT 1,
-      
+
       -- Для фиксированных маршрутов
       departure_date TEXT,
       return_date TEXT,
-      
+
       -- Для гибких маршрутов
       departure_start TEXT,
       departure_end TEXT,
       min_days INTEGER,
       max_days INTEGER,
-      
+
       -- Общие параметры
       adults INTEGER DEFAULT 1,
       children INTEGER DEFAULT 0,
@@ -40,7 +40,7 @@ db.serialize(() => {
       max_layover_hours INTEGER,
       threshold_price REAL NOT NULL,
       currency TEXT DEFAULT 'RUB',
-      
+
       -- Служебные
       is_paused INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -55,17 +55,49 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS route_results (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       route_id INTEGER NOT NULL,
-      
       departure_date TEXT NOT NULL,
       return_date TEXT,
       days_in_country INTEGER,
-      
       total_price REAL NOT NULL,
       airline TEXT NOT NULL,
       search_link TEXT NOT NULL,
       screenshot_path TEXT,
-      
       found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
+    )
+  `);
+
+  // ============================================
+  // 🔥 НОВАЯ ТАБЛИЦА: СТАТИСТИКА ПРОВЕРОК
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS route_check_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      route_id INTEGER NOT NULL,
+      check_timestamp DATETIME DEFAULT (datetime('now')),
+      total_combinations INTEGER NOT NULL,
+      successful_checks INTEGER NOT NULL,
+      failed_checks INTEGER NOT NULL,
+      FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
+    )
+  `);
+
+  // ============================================
+  // 🔥 НОВАЯ ТАБЛИЦА: ДЕТАЛЬНЫЕ РЕЗУЛЬТАТЫ КОМБИНАЦИЙ
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS combination_check_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      route_id INTEGER NOT NULL,
+      check_timestamp DATETIME DEFAULT (datetime('now')),
+      departure_date TEXT NOT NULL,
+      return_date TEXT,
+      days_in_country INTEGER,
+      status TEXT NOT NULL, -- 'success', 'not_found', 'error'
+      price REAL,
+      currency TEXT DEFAULT 'RUB',
+      error_reason TEXT, -- причина ошибки если status='error'
+      search_url TEXT,
       FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
     )
   `);
@@ -91,20 +123,6 @@ db.serialize(() => {
       season TEXT,
       chat_id INTEGER,
       route_id INTEGER
-    )
-  `);
-
-  // ============================================
-  // ИСТОРИЯ ЦЕН (обновлена для unified_routes)
-  // ============================================
-  db.run(`
-    CREATE TABLE IF NOT EXISTS price_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      route_id INTEGER NOT NULL,
-      price REAL NOT NULL,
-      airline TEXT,
-      checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
     )
   `);
 
@@ -159,65 +177,68 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_time ON price_analytics(hour_of_day, day_of_week)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_analytics_chat ON price_analytics(chat_id)`);
 
-// ============================================
-// ТАБЛИЦА АЭРОПОРТОВ (обновленная структура)
-// ============================================
+  // 🔥 НОВЫЕ ИНДЕКСЫ ДЛЯ СТАТИСТИКИ ПРОВЕРОК
+  db.run(`CREATE INDEX IF NOT EXISTS idx_route_check_stats_route_timestamp ON route_check_stats(route_id, check_timestamp DESC)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_combination_check_route_timestamp ON combination_check_results(route_id, check_timestamp DESC)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_combination_check_status ON combination_check_results(route_id, status)`);
+
+  // ============================================
+  // ТАБЛИЦА АЭРОПОРТОВ (обновленная структура)
+  // ============================================
   db.run(`
     CREATE TABLE IF NOT EXISTS airports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    iata_code TEXT NOT NULL UNIQUE,
-    icao_code TEXT,
-    
-    -- Названия аэропортов
-    airport_name TEXT NOT NULL,
-    airport_name_en TEXT,
-    airport_name_lower TEXT,
-    
-    -- Города
-    city_code TEXT,
-    city_name TEXT NOT NULL,
-    city_name_en TEXT,
-    city_name_lower TEXT,
-    
-    -- Страны
-    country_code TEXT NOT NULL,
-    country_name TEXT NOT NULL,
-    country_name_lower TEXT,
-    
-    -- Географические данные
-    latitude REAL,
-    longitude REAL,
-    timezone TEXT,
-    altitude INTEGER,
-    
-    -- Классификация
-    airport_type TEXT,
-    is_major INTEGER DEFAULT 0,
-    is_popular INTEGER DEFAULT 0,
-    is_international INTEGER DEFAULT 0,
-    display_order INTEGER DEFAULT 0,
-    region TEXT,
-    
-    -- Служебные
-    source TEXT,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      iata_code TEXT NOT NULL UNIQUE,
+      icao_code TEXT,
+
+      -- Названия аэропортов
+      airport_name TEXT NOT NULL,
+      airport_name_en TEXT,
+      airport_name_lower TEXT,
+
+      -- Города
+      city_code TEXT,
+      city_name TEXT NOT NULL,
+      city_name_en TEXT,
+      city_name_lower TEXT,
+
+      -- Страны
+      country_code TEXT NOT NULL,
+      country_name TEXT NOT NULL,
+      country_name_lower TEXT,
+
+      -- Географические данные
+      latitude REAL,
+      longitude REAL,
+      timezone TEXT,
+      altitude INTEGER,
+
+      -- Классификация
+      airport_type TEXT,
+      is_major INTEGER DEFAULT 0,
+      is_popular INTEGER DEFAULT 0,
+      is_international INTEGER DEFAULT 0,
+      display_order INTEGER DEFAULT 0,
+      region TEXT,
+
+      -- Служебные
+      source TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-`);
+  `);
 
   // ============================================
   // ОПТИМИЗИРОВАННЫЕ ИНДЕКСЫ ДЛЯ ПОИСКА
   // ============================================
-
-  // 1. Основные индексы для поиска по отдельным полям
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_iata_code ON airports(iata_code)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_city_name_lower ON airports(city_name_lower)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_airport_name_lower ON airports(airport_name_lower)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_name_lower ON airports(country_name_lower)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_popular ON airports(is_popular)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_international ON airports(is_international)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_code ON airports(country_code)`),
-    db.run(`CREATE INDEX IF NOT EXISTS idx_airports_region ON airports(region)`),
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_iata_code ON airports(iata_code)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_city_name_lower ON airports(city_name_lower)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_airport_name_lower ON airports(airport_name_lower)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_name_lower ON airports(country_name_lower)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_popular ON airports(is_popular)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_is_international ON airports(is_international)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_country_code ON airports(country_code)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_airports_region ON airports(region)`);
 
   // ============================================
   // МИГРАЦИЯ ДАННЫХ ИЗ СТАРЫХ ТАБЛИЦ
@@ -228,13 +249,13 @@ db.serialize(() => {
     if (row) {
       console.log('🔄 Миграция: копирую routes → unified_routes...');
       db.run(`
-        INSERT INTO unified_routes 
-        (chat_id, origin, destination, is_flexible, has_return, 
-         departure_date, return_date, adults, children, airline, baggage, 
-         max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
-        SELECT 
-          chat_id, origin, destination, 0, 1, 
-          departure_date, return_date, adults, children, airline, baggage, 
+        INSERT INTO unified_routes
+          (chat_id, origin, destination, is_flexible, has_return,
+           departure_date, return_date, adults, children, airline, baggage,
+           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
+        SELECT
+          chat_id, origin, destination, 0, 1,
+          departure_date, return_date, adults, children, airline, baggage,
           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check
         FROM routes
       `, (err) => {
@@ -242,7 +263,6 @@ db.serialize(() => {
           console.error('❌ Ошибка миграции routes:', err.message);
         } else {
           console.log('✅ Миграция routes завершена');
-
           // Удаляем старую таблицу
           db.run(`DROP TABLE routes`, (err) => {
             if (err) {
@@ -261,15 +281,15 @@ db.serialize(() => {
     if (row) {
       console.log('🔄 Миграция: копирую flexible_routes → unified_routes...');
       db.run(`
-        INSERT INTO unified_routes 
-        (chat_id, origin, destination, is_flexible, has_return, 
-         departure_start, departure_end, min_days, max_days,
-         adults, children, airline, baggage, 
-         max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
-        SELECT 
-          chat_id, origin, destination, 1, 1, 
+        INSERT INTO unified_routes
+          (chat_id, origin, destination, is_flexible, has_return,
+           departure_start, departure_end, min_days, max_days,
+           adults, children, airline, baggage,
+           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
+        SELECT
+          chat_id, origin, destination, 1, 1,
           departure_start, departure_end, min_days, max_days,
-          adults, children, airline, baggage, 
+          adults, children, airline, baggage,
           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check
         FROM flexible_routes
       `, (err) => {
@@ -277,7 +297,6 @@ db.serialize(() => {
           console.error('❌ Ошибка миграции flexible_routes:', err.message);
         } else {
           console.log('✅ Миграция flexible_routes завершена');
-
           // Удаляем старую таблицу
           db.run(`DROP TABLE flexible_routes`, (err) => {
             if (err) {
@@ -296,10 +315,10 @@ db.serialize(() => {
     if (row) {
       console.log('🔄 Миграция: копирую best_prices → route_results...');
       db.run(`
-        INSERT INTO route_results 
-        (route_id, departure_date, return_date, total_price, airline, search_link, found_at)
-        SELECT 
-          route_id, 
+        INSERT INTO route_results
+          (route_id, departure_date, return_date, total_price, airline, search_link, found_at)
+        SELECT
+          route_id,
           (SELECT departure_date FROM routes WHERE id = route_id),
           (SELECT return_date FROM routes WHERE id = route_id),
           price, airline, search_link, found_at
@@ -309,7 +328,6 @@ db.serialize(() => {
           console.error('❌ Ошибка миграции best_prices:', err.message);
         } else {
           console.log('✅ Миграция best_prices завершена');
-
           // Удаляем старую таблицу
           db.run(`DROP TABLE best_prices`, (err) => {
             if (err) {
@@ -328,10 +346,10 @@ db.serialize(() => {
     if (row) {
       console.log('🔄 Миграция: копирую flexible_results → route_results...');
       db.run(`
-        INSERT INTO route_results 
-        (route_id, departure_date, return_date, days_in_country, total_price, airline, search_link, screenshot_path, found_at)
-        SELECT 
-          route_id, departure_date, return_date, days_in_country, 
+        INSERT INTO route_results
+          (route_id, departure_date, return_date, days_in_country, total_price, airline, search_link, screenshot_path, found_at)
+        SELECT
+          route_id, departure_date, return_date, days_in_country,
           total_price, airline, search_link, screenshot_path, found_at
         FROM flexible_results
       `, (err) => {
@@ -339,7 +357,6 @@ db.serialize(() => {
           console.error('❌ Ошибка миграции flexible_results:', err.message);
         } else {
           console.log('✅ Миграция flexible_results завершена');
-
           // Удаляем старую таблицу
           db.run(`DROP TABLE flexible_results`, (err) => {
             if (err) {
@@ -372,6 +389,7 @@ db.serialize(() => {
   });
 
   console.log('✅ База данных инициализирована и мигрирована');
+  console.log('🔥 Новые таблицы для статистики проверок готовы');
 });
 
 module.exports = db;

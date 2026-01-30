@@ -23,14 +23,12 @@ cron.schedule('0 * * * *', async () => {
     const usersWithNotifications = await getUsersWithNotificationOn();
 
     // Проверяем все маршруты
-    const checkResults = await monitor.checkAllRoutes();
+    await monitor.checkAllRoutes();
 
     // Отправляем отчеты пользователям с включенными уведомлениями
     for (const user of usersWithNotifications) {
       try {
-        // Здесь нужно получить статистику по маршрутам пользователя
-        // Предполагаем, что checkResults содержит информацию о всех проверенных маршрутах
-        const userRoutes = await getUserRoutesStats(user.chat_id);
+        const userRoutes = await notificationService.getUserRoutesStats(user.chat_id);
         await notificationService.sendCheckReport(user.chat_id, userRoutes);
       } catch (error) {
         console.error(`Ошибка отправки отчета пользователю ${user.chat_id}:`, error);
@@ -53,35 +51,6 @@ function getUsersWithNotificationOn() {
           else resolve(rows || []);
         }
     );
-  });
-}
-
-// Функция для получения статистики по маршрутам пользователя
-function getUserRoutesStats(chatId) {
-  return new Promise((resolve, reject) => {
-    db.all(`
-      SELECT 
-        r.origin,
-        r.destination,
-        MIN(rr.total_price) as bestPrice,
-        COUNT(rr.id) as checksCount
-      FROM unified_routes r
-      LEFT JOIN route_results rr ON r.id = rr.route_id
-      WHERE r.chat_id = ? AND r.is_paused = 0
-      GROUP BY r.id
-    `, [chatId], (err, rows) => {
-      if (err) reject(err);
-      else {
-        const stats = rows.map(row => ({
-          origin: row.origin,
-          destination: row.destination,
-          bestPrice: row.bestPrice,
-          checksCount: row.checksCount || 0,
-          foundCheaper: false // Эта информация должна приходить из UnifiedMonitor
-        }));
-        resolve(stats);
-      }
-    });
   });
 }
 
