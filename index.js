@@ -3,6 +3,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const db = require('./config/database');
 const RouteHandlers = require('./handlers/routeHandlers');
 const SettingsHandlers = require('./handlers/settingsHandlers');
+const SubscriptionHandlers = require('./handlers/subscriptionHandlers'); // Добавляем
+const SubscriptionService = require('./services/SubscriptionService'); // Добавляем
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: true });
@@ -13,6 +15,32 @@ const userStates = {};
 // Инициализация обработчиков
 const routeHandlers = new RouteHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
+const subscriptionHandlers = new SubscriptionHandlers(bot, userStates); // Добавляем
+
+// Обновленное главное меню с кнопкой подписки
+const getMainMenuKeyboard = (chatId) => {
+  const keyboard = [
+    ['📋 Мои маршруты'],
+    ['⚙️ Настройки', '📊 Моя подписка'],
+    ['ℹ️ Помощь']
+  ];
+
+  // Админу добавляем кнопку проверки
+  if (chatId === 341508411) {
+    keyboard.push(['✅ Проверить сейчас']);
+  }
+
+  return {
+    reply_markup: {
+      keyboard,
+      resize_keyboard: true,
+      persistent: true
+    }
+  };
+};
+
+// Обновляем метод в routeHandlers для использования нового меню
+RouteHandlers.prototype.getMainMenuKeyboard = getMainMenuKeyboard;
 
 /**
  * КОМАНДА /start
@@ -42,13 +70,18 @@ bot.onText(/\/start/, async (msg) => {
         'Я помогу отслеживать цены на билеты и сообщу, когда найду выгодные предложения.\n\n' +
         '⚠️ Важно! Для корректного отображения времени уведомлений настройте вашу таймзону.\n\n' +
         '🌍 По умолчанию установлена таймзона: Asia/Yekaterinburg (UTC+5)\n\n' +
+        '📊 Вам доступна бесплатная подписка со следующими возможностями:\n' +
+        '• 3 фиксированных маршрута\n' +
+        '• 1 гибкий маршрут\n' +
+        '• До 20 комбинаций в гибком маршруте\n' +
+        '• Проверка каждые 4 часа\n\n' +
         'Хотите настроить таймзону сейчас?',
         keyboard
     );
 
     userStates[chatId] = { step: 'welcome_timezone' };
 
-    // Создаем настройки пользователя
+    // Создаем настройки пользователя и инициализируем подписку
     await initializeUserSettings(chatId);
 
   } else {
@@ -57,7 +90,7 @@ bot.onText(/\/start/, async (msg) => {
         chatId,
         'С возвращением! 👋\n\n' +
         'Используйте меню ниже для управления маршрутами.',
-        routeHandlers.getMainMenuKeyboard(chatId)
+        getMainMenuKeyboard(chatId)
     );
   }
 });
@@ -85,7 +118,7 @@ bot.on('message', async (msg) => {
         bot.sendMessage(
             chatId,
             'Отлично! Вы всегда можете изменить таймзону в разделе Настройки.\n\nНачнем работу! 🚀',
-            routeHandlers.getMainMenuKeyboard(chatId)
+            getMainMenuKeyboard(chatId)
         );
         delete userStates[chatId];
         return;
@@ -105,6 +138,11 @@ bot.on('message', async (msg) => {
       return;
     }
 
+    if (text === '📊 Моя подписка') {
+      await subscriptionHandlers.handleSubscriptionInfo(chatId);
+      return;
+    }
+
     if (text === 'ℹ️ Помощь') {
       handleHelp(chatId);
       return;
@@ -119,7 +157,7 @@ bot.on('message', async (msg) => {
       bot.sendMessage(
           chatId,
           'Главное меню',
-          routeHandlers.getMainMenuKeyboard(chatId)
+          getMainMenuKeyboard(chatId)
       );
       delete userStates[chatId];
       return;
@@ -218,7 +256,7 @@ bot.on('message', async (msg) => {
         bot.sendMessage(
             chatId,
             'Главное меню',
-            routeHandlers.getMainMenuKeyboard(chatId)
+            getMainMenuKeyboard(chatId)
         );
         delete userStates[chatId];
         return;
@@ -230,7 +268,7 @@ bot.on('message', async (msg) => {
         bot.sendMessage(
             chatId,
             '❌ Создание маршрута отменено.\n\nВы в главном меню.',
-            routeHandlers.getMainMenuKeyboard(chatId)
+            getMainMenuKeyboard(chatId)
         );
         return;
       }
@@ -239,7 +277,7 @@ bot.on('message', async (msg) => {
       bot.sendMessage(
           chatId,
           'Главное меню',
-          routeHandlers.getMainMenuKeyboard(chatId)
+          getMainMenuKeyboard(chatId)
       );
       delete userStates[chatId];
       return;
@@ -251,17 +289,100 @@ bot.on('message', async (msg) => {
     bot.sendMessage(
         chatId,
         '❓ Неизвестная команда. Используйте меню ниже.',
-        routeHandlers.getMainMenuKeyboard(chatId)
+        getMainMenuKeyboard(chatId)
     );
 
   } catch (error) {
     console.error('Ошибка обработки сообщения:', error);
     bot.sendMessage(
         chatId,
-        '❌ Произошла ошибка. Попробуйте еще раз.',
-        routeHandlers.getMainMenuKeyboard(chatId)
+        '❌ Произшел ошибка. Попробуйте еще раз.',
+        getMainMenuKeyboard(chatId)
     );
     delete userStates[chatId];
+  }
+});
+
+/**
+ * ОБРАБОТКА КОМАНД (со слешем)
+ */
+bot.onText(/\/help/, (msg) => {
+  const chatId = msg.chat.id;
+  handleHelp(chatId);
+});
+
+bot.onText(/\/subscription/, (msg) => {
+  const chatId = msg.chat.id;
+  subscriptionHandlers.handleSubscriptionInfo(chatId);
+});
+
+bot.onText(/\/upgrade/, (msg) => {
+  const chatId = msg.chat.id;
+  subscriptionHandlers.handleUpgrade(chatId);
+});
+
+bot.onText(/\/admin_check/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === 341508411) {
+    handleCheckNow(chatId);
+  }
+});
+
+/**
+ * ОБРАБОТКА CALLBACK-ЗАПРОСОВ (для оплаты подписки)
+ */
+bot.on('callback_query', async (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data;
+  const messageId = callbackQuery.message.message_id;
+
+  try {
+    if (data === 'payment_plus') {
+      // Здесь будет реальная интеграция с платежной системой
+      // Пока что имитируем успешную оплату для тестирования
+
+      await bot.answerCallbackQuery(callbackQuery.id, {
+        text: '🔗 Переход к оплате...'
+      });
+
+      // В реальном приложении здесь был бы редирект на платежную систему
+      // Для теста просто активируем подписку
+
+      // Обновляем подписку пользователя
+      await SubscriptionService.updateSubscription(chatId, 'plus');
+
+      // Удаляем старое сообщение с кнопкой оплаты
+      await bot.deleteMessage(chatId, messageId);
+
+      // Отправляем подтверждение
+      await bot.sendMessage(
+          chatId,
+          '🎉 Поздравляем! Подписка Plus активирована на 1 месяц!\n\n' +
+          'Теперь вы можете:\n' +
+          '• Создать до 5 фиксированных маршрутов\n' +
+          '• Создать до 3 гибких маршрутов\n' +
+          '• Проверять до 50 комбинаций в гибком маршруте\n' +
+          '• Получать проверки каждые 2 часа\n\n' +
+          'Спасибо за доверие! 😊'
+      );
+
+      // Показываем обновленную информацию о подписке
+      await subscriptionHandlers.handleSubscriptionInfo(chatId);
+    }
+
+    else if (data.startsWith('subscription_info_')) {
+      const action = data.replace('subscription_info_', '');
+      if (action === 'back') {
+        await bot.deleteMessage(chatId, messageId);
+        await subscriptionHandlers.handleSubscriptionInfo(chatId);
+      }
+    }
+
+  } catch (error) {
+    console.error('Ошибка обработки callback:', error);
+    await bot.answerCallbackQuery(callbackQuery.id, {
+      text: '❌ Ошибка при обработке запроса'
+    });
   }
 });
 
@@ -276,9 +397,12 @@ function handleHelp(chatId) {
 
 📋 Мои маршруты - просмотр и управление вашими маршрутами
 
+📊 Моя подписка - информация о текущей подписке и возможностях
+
 ⚙️ Настройки:
   🌙 Тихие часы - время, когда бот не отправляет уведомления
   🌍 Таймзона - для корректного отображения времени
+  🔔 Уведомления о проверках - получать отчеты после каждой проверки
 
 ✈️ Создание маршрута:
   • Выберите откуда и куда летите
@@ -288,21 +412,32 @@ function handleHelp(chatId) {
   • Установите пороговую цену для уведомлений
 
 🔔 Уведомления:
-  Бот проверяет цены автоматически каждый час и отправляет уведомления, когда находит билеты дешевле вашего порога.
+  Бот автоматически проверяет цены и отправляет уведомления, когда находит билеты дешевле вашего порога.
 
 📊 Аналитика:
   • График цен - динамика изменения цен
   • Heatmap - лучшее время для покупки билетов
 
-⚠️ Лимиты (бесплатно):
-  • 1 гибкий маршрут (диапазон дат)
-  • 3 фиксированных маршрута (конкретные даты)
-  • Максимум 20 комбинаций для гибкого поиска
+💎 ПОДПИСКИ:
 
-💎 В будущем будет доступна платная подписка для расширенных возможностей.
+1. Бесплатная (по умолчанию):
+   • 3 фиксированных маршрута
+   • 1 гибкий маршрут
+   • До 20 комбинаций в гибком маршруте
+   • Проверка каждые 4 часа
+
+2. Plus (199 ₽/мес):
+   • 5 фиксированных маршрутов
+   • 3 гибких маршрута
+   • До 50 комбинаций в гибком маршруте
+   • Проверка каждые 2 часа
+   • Приоритетная поддержка
+
+📞 Поддержка:
+  Если у вас есть вопросы, обращайтесь: @jowoodik
 `;
 
-  bot.sendMessage(chatId, helpText, routeHandlers.getMainMenuKeyboard(chatId));
+  bot.sendMessage(chatId, helpText, getMainMenuKeyboard(chatId));
 }
 
 /**
@@ -321,7 +456,7 @@ async function handleCheckNow(chatId) {
     const stats = await notificationService.getUserRoutesStats(chatId);
     await notificationService.sendCheckReport(chatId, stats);
 
-    bot.sendMessage(chatId, '✅ Проверка завершена!', routeHandlers.getMainMenuKeyboard(chatId));
+    bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard(chatId));
   } catch (error) {
     console.error('Ошибка проверки:', error);
     bot.sendMessage(chatId, '❌ Ошибка при проверке: ' + error.message);
@@ -340,14 +475,33 @@ function checkIfFirstTime(chatId) {
   });
 }
 
-function initializeUserSettings(chatId) {
-  return new Promise((resolve, reject) => {
+async function initializeUserSettings(chatId) {
+  return new Promise(async (resolve, reject) => {
+    // Создаем запись в user_settings
     db.run(
         'INSERT OR IGNORE INTO user_settings (chat_id, timezone) VALUES (?, ?)',
         [chatId, 'Asia/Yekaterinburg'],
-        (err) => {
-          if (err) reject(err);
-          else resolve();
+        async (err) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          try {
+            // Определяем тип подписки (admin для админа, free для остальных)
+            const subscriptionType = chatId === 341508411 ? 'admin' : 'free';
+
+            // Инициализируем подписку пользователя
+            await SubscriptionService.initializeUserSubscription(chatId, subscriptionType);
+
+            // Логируем для отладки
+            console.log(`✅ Пользователь ${chatId} инициализирован с подпиской ${subscriptionType}`);
+
+            resolve();
+          } catch (subscriptionError) {
+            console.error('Ошибка инициализации подписки:', subscriptionError);
+            reject(subscriptionError);
+          }
         }
     );
   });

@@ -241,134 +241,55 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_airports_region ON airports(region)`);
 
   // ============================================
-  // МИГРАЦИЯ ДАННЫХ ИЗ СТАРЫХ ТАБЛИЦ
+  // ТАБЛИЦА ТИПОВ ПОДПИСОК
   // ============================================
+  db.run(`
+  CREATE TABLE IF NOT EXISTS subscription_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    max_fixed_routes INTEGER NOT NULL,
+    max_flexible_routes INTEGER NOT NULL,
+    max_combinations INTEGER NOT NULL,
+    check_interval_hours INTEGER NOT NULL,
+    price_per_month REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
-  // Проверяем наличие старой таблицы routes
-  db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name='routes'`, (err, row) => {
-    if (row) {
-      console.log('🔄 Миграция: копирую routes → unified_routes...');
-      db.run(`
-        INSERT INTO unified_routes
-          (chat_id, origin, destination, is_flexible, has_return,
-           departure_date, return_date, adults, children, airline, baggage,
-           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
-        SELECT
-          chat_id, origin, destination, 0, 1,
-          departure_date, return_date, adults, children, airline, baggage,
-          max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check
-        FROM routes
-      `, (err) => {
-        if (err) {
-          console.error('❌ Ошибка миграции routes:', err.message);
-        } else {
-          console.log('✅ Миграция routes завершена');
-          // Удаляем старую таблицу
-          db.run(`DROP TABLE routes`, (err) => {
-            if (err) {
-              console.error('❌ Ошибка удаления routes:', err.message);
-            } else {
-              console.log('🗑️ Старая таблица routes удалена');
-            }
-          });
-        }
-      });
-    }
-  });
+  // ============================================
+  // ТАБЛИЦА ПОДПИСОК ПОЛЬЗОВАТЕЛЕЙ
+  // ============================================
+  db.run(`
+  CREATE TABLE IF NOT EXISTS user_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL UNIQUE,
+    subscription_type TEXT NOT NULL DEFAULT 'free',
+    valid_from DATETIME DEFAULT CURRENT_TIMESTAMP,
+    valid_to DATETIME,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (chat_id) REFERENCES user_settings(chat_id)
+  )
+`);
 
-  // Проверяем наличие старой таблицы flexible_routes
-  db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name='flexible_routes'`, (err, row) => {
-    if (row) {
-      console.log('🔄 Миграция: копирую flexible_routes → unified_routes...');
-      db.run(`
-        INSERT INTO unified_routes
-          (chat_id, origin, destination, is_flexible, has_return,
-           departure_start, departure_end, min_days, max_days,
-           adults, children, airline, baggage,
-           max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check)
-        SELECT
-          chat_id, origin, destination, 1, 1,
-          departure_start, departure_end, min_days, max_days,
-          adults, children, airline, baggage,
-          max_stops, max_layover_hours, threshold_price, currency, is_paused, created_at, last_check
-        FROM flexible_routes
-      `, (err) => {
-        if (err) {
-          console.error('❌ Ошибка миграции flexible_routes:', err.message);
-        } else {
-          console.log('✅ Миграция flexible_routes завершена');
-          // Удаляем старую таблицу
-          db.run(`DROP TABLE flexible_routes`, (err) => {
-            if (err) {
-              console.error('❌ Ошибка удаления flexible_routes:', err.message);
-            } else {
-              console.log('🗑️ Старая таблица flexible_routes удалена');
-            }
-          });
-        }
-      });
-    }
-  });
+  // ============================================
+  // ВСТАВКА БАЗОВЫХ ТИПОВ ПОДПИСОК
+  // ============================================
+  db.run(`
+  INSERT OR IGNORE INTO subscription_types 
+    (name, display_name, max_fixed_routes, max_flexible_routes, max_combinations, check_interval_hours, price_per_month)
+  VALUES 
+    ('free', 'Бесплатная', 3, 1, 20, 4, 0),
+    ('plus', 'Plus', 5, 3, 50, 2, 199),
+    ('admin', 'Admin', 999, 999, 999, 1, 0)
+`);
 
-  // Проверяем наличие старой таблицы best_prices
-  db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name='best_prices'`, (err, row) => {
-    if (row) {
-      console.log('🔄 Миграция: копирую best_prices → route_results...');
-      db.run(`
-        INSERT INTO route_results
-          (route_id, departure_date, return_date, total_price, airline, search_link, found_at)
-        SELECT
-          route_id,
-          (SELECT departure_date FROM routes WHERE id = route_id),
-          (SELECT return_date FROM routes WHERE id = route_id),
-          price, airline, search_link, found_at
-        FROM best_prices
-      `, (err) => {
-        if (err) {
-          console.error('❌ Ошибка миграции best_prices:', err.message);
-        } else {
-          console.log('✅ Миграция best_prices завершена');
-          // Удаляем старую таблицу
-          db.run(`DROP TABLE best_prices`, (err) => {
-            if (err) {
-              console.error('❌ Ошибка удаления best_prices:', err.message);
-            } else {
-              console.log('🗑️ Старая таблица best_prices удалена');
-            }
-          });
-        }
-      });
-    }
-  });
-
-  // Проверяем наличие старой таблицы flexible_results
-  db.get(`SELECT name FROM sqlite_master WHERE type='table' AND name='flexible_results'`, (err, row) => {
-    if (row) {
-      console.log('🔄 Миграция: копирую flexible_results → route_results...');
-      db.run(`
-        INSERT INTO route_results
-          (route_id, departure_date, return_date, days_in_country, total_price, airline, search_link, screenshot_path, found_at)
-        SELECT
-          route_id, departure_date, return_date, days_in_country,
-          total_price, airline, search_link, screenshot_path, found_at
-        FROM flexible_results
-      `, (err) => {
-        if (err) {
-          console.error('❌ Ошибка миграции flexible_results:', err.message);
-        } else {
-          console.log('✅ Миграция flexible_results завершена');
-          // Удаляем старую таблицу
-          db.run(`DROP TABLE flexible_results`, (err) => {
-            if (err) {
-              console.error('❌ Ошибка удаления flexible_results:', err.message);
-            } else {
-              console.log('🗑️ Старая таблица flexible_results удалена');
-            }
-          });
-        }
-      });
-    }
-  });
+  // ИНДЕКСЫ
+  db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_chat_id ON user_subscriptions(chat_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_valid_to ON user_subscriptions(valid_to)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_type ON user_subscriptions(subscription_type)`);
 
   // Добавляем timezone в user_settings (если её нет)
   db.run(`ALTER TABLE user_settings ADD COLUMN timezone TEXT DEFAULT 'Asia/Yekaterinburg'`, (err) => {

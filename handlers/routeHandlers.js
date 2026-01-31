@@ -5,6 +5,7 @@ const Formatters = require('../utils/formatters');
 const ChartGenerator = require("../services/ChartGenerator");
 const AirportService = require('../services/AirportService');
 const AirportFormatter = require('../utils/airportFormatter');
+const SubscriptionService = require('../services/SubscriptionService');
 
 class RouteHandlers {
     constructor(bot, userStates) {
@@ -17,7 +18,8 @@ class RouteHandlers {
     getMainMenuKeyboard(chatId) {
         const keyboard = [
             ['📋 Мои маршруты'],
-            ['⚙️ Настройки', 'ℹ️ Помощь']
+            ['⚙️ Настройки', '📊 Моя подписка'],
+            ['ℹ️ Помощь']
         ];
 
         // Админу добавляем кнопку проверки
@@ -38,30 +40,12 @@ class RouteHandlers {
      * ВАЛИДАЦИЯ ЛИМИТОВ МАРШРУТОВ
      */
     async validateRouteLimit(chatId, isFlexible) {
-        // Админу можно всё
-        if (chatId === 341508411) {
-            return { allowed: true };
-        }
+        const limits = await SubscriptionService.checkUserLimits(chatId, isFlexible, combinationsCount);
 
-        const routes = await UnifiedRoute.findByChatId(chatId);
-        const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
-        const fixedCount = routes.filter(r => r.is_flexible === 0).length;
-
-        if (isFlexible && flexibleCount >= 1) {
+        if (!limits.allowed) {
             return {
                 allowed: false,
-                message: '⚠️ У вас уже есть 1 гибкий маршрут.\n\n' +
-                    '📌 Бесплатно доступен только 1 гибкий маршрут.\n' +
-                    '💎 В будущем будет доступна платная подписка для большего количества маршрутов.'
-            };
-        }
-
-        if (!isFlexible && fixedCount >= 3) {
-            return {
-                allowed: false,
-                message: '⚠️ У вас уже есть 3 фиксированных маршрута.\n\n' +
-                    '📌 Бесплатно доступно максимум 3 фиксированных маршрута.\n' +
-                    '💎 В будущем будет доступна платная подписка для большего количества маршрутов.'
+                message: limits.message
             };
         }
 
@@ -1136,12 +1120,13 @@ class RouteHandlers {
 
             const combCount = UnifiedRoute.countCombinations(tempRoute);
 
-            if (combCount > 20 && chatId !== 341508411) {
+            const subscription = await SubscriptionService.getUserSubscription(chatId);
+            if (combCount > subscription.max_combinations) {
                 this.bot.sendMessage(
                     chatId,
                     `⚠️ Получится ${combCount} ${this._pluralize(combCount, 'дата', 'даты', 'дат')} для проверки.\n\n` +
-                    `📌 Бесплатно доступно максимум 20 комбинаций.\n` +
-                    `💎 В будущем будет доступна платная подписка.\n\n` +
+                    `📊 Ваша подписка "${subscription.display_name}" позволяет максимум ${subscription.max_combinations} комбинаций.\n` +
+                    `💎 Хотите больше? Оформите подписку Plus (до 50 комбинаций)!\n\n` +
                     `Пожалуйста, сократите диапазон дат.`,
                     this.getMainMenuKeyboard(chatId)
                 );
@@ -1213,12 +1198,13 @@ class RouteHandlers {
 
         const combCount = UnifiedRoute.countCombinations(tempRoute);
 
-        if (combCount > 20 && chatId !== 341508411) {
+        const subscription = await SubscriptionService.getUserSubscription(chatId);
+        if (combCount > subscription.max_combinations) {
             this.bot.sendMessage(
                 chatId,
                 `⚠️ Получится ${combCount} ${this._pluralize(combCount, 'комбинация', 'комбинации', 'комбинаций')} для проверки.\n\n` +
-                `📌 Бесплатно доступно максимум 20 комбинаций.\n` +
-                `💎 В будущем будет доступна платная подписка.\n\n` +
+                `📊 Ваша подписка "${subscription.display_name}" позволяет максимум ${subscription.max_combinations} комбинаций.\n` +
+                `💎 Хотите больше? Оформите подписку Plus (до 50 комбинаций)!\n\n` +
                 `Пожалуйста, сократите диапазон дат или количество дней пребывания.`,
                 this.getMainMenuKeyboard(chatId)
             );
