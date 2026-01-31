@@ -75,7 +75,7 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
     // Проверяем каждый маршрут пользователя
     for (const route of userRoutes) {
       try {
-        const results = await monitor.checkRoute(route);
+        const results = await monitor.checkSingleRoute(route);
         totalChecked++;
 
         // Проверяем, есть ли цены ниже порога
