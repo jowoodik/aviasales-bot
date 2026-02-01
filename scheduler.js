@@ -60,6 +60,7 @@ async function checkRoutesBySubscription(subscriptionType) {
 async function checkUserRoutes(chatId, monitor, notificationService, subscriptionType) {
   try {
     // Получаем активные маршруты пользователя
+    const userRoutes = await getUserActiveRoutes(chatId);
 
     if (userRoutes.length === 0) {
       console.log(`Пользователь ${chatId}: нет активных маршрутов`);
