@@ -386,14 +386,11 @@ bot.on('callback_query', async (callbackQuery) => {
   }
 });
 
-/**
- * ПОМОЩЬ
- */
 function handleHelp(chatId) {
   const helpText = `
 ℹ️ СПРАВКА
 
-📌 Ваш chat id: ${chatId}
+📌 Ваш chat id: \`${chatId}\`
 
 📋 Мои маршруты - просмотр и управление вашими маршрутами
 
@@ -437,8 +434,12 @@ function handleHelp(chatId) {
   Если у вас есть вопросы, обращайтесь: @jowoodik
 `;
 
-  bot.sendMessage(chatId, helpText, getMainMenuKeyboard(chatId));
+  bot.sendMessage(chatId, helpText, {
+    ...getMainMenuKeyboard(chatId),
+    parse_mode: 'Markdown'
+  });
 }
+
 
 /**
  * ПРОВЕРКА СЕЙЧАС (только для админа)
