@@ -1,7 +1,5 @@
 const db = require('../config/database');
-const DateUtils = require('../utils/dateUtils');
-const Formatters = require('../utils/formatters');
-const fs = require('fs');
+const RouteResult = require('../models/RouteResult');
 
 class NotificationService {
   constructor(bot) {
@@ -94,8 +92,10 @@ class NotificationService {
         return;
       }
 
-      let report = `📊 *ОТЧЕТ О ПРОВЕРКЕ*\n\n`;
-      report += `🕐 ${new Date().toLocaleString('ru-RU')}\n\n`;
+      const timezone = await this._getUserTimezone(chatId);
+      const now = new Date();
+
+      let report = `📊 *ОТЧЕТ О ПРОВЕРКЕ*\n\n🕐 ${this._formatDateTimeForUser(now, timezone)} (${timezone})\n\n`;
 
       if (!stats || stats.length === 0) {
         report += 'Нет активных маршрутов для проверки.\n';
@@ -103,6 +103,51 @@ class NotificationService {
         // Обрабатываем каждый маршрут
         for (const stat of stats) {
           report += `✈️ *${stat.origin} → ${stat.destination}*\n`;
+
+          if (stat.lastCheckTime) {
+            const checkTime = new Date(stat.lastCheckTime);
+            report += `🕐 Проверено: ${this._formatDateTimeForUser(checkTime, timezone)}\n`;
+          } else {
+            report += `🕐 Не проверялось\n`;
+          }
+
+          // Лучшая найденная цена
+          if (stat.bestPrice) {
+            report += `💰 Лучшая цена: ${stat.bestPrice.toLocaleString('ru-RU')} ₽\n`;
+
+            // 🔥 ИСПРАВЛЕННАЯ ЛОГИКА: Проверка порога
+            if (stat.thresholdPrice && stat.foundCheaper) {
+              const savings = stat.thresholdPrice - stat.bestPrice;
+              report += `🔥 *Цена ниже порога!* (экономия ${savings.toLocaleString('ru-RU')} ₽)\n`;
+            } else if (stat.thresholdPrice) {
+              const diff = stat.bestPrice - stat.thresholdPrice;
+              report += `📊 До порога: ${diff.toLocaleString('ru-RU')} ₽\n`;
+            }
+          } else {
+            report += `❌ Цены не найдены\n`;
+          }
+
+          // 👉 Новый блок: кнопка для покупки самого дешёвого билета по маршруту
+          try {
+            const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
+            const bestResult = bestResults[0];
+
+            if (bestResult && bestResult.search_link) {
+              const inlineKeyboard = {
+                inline_keyboard: [[
+                  { text: '🔗 Купить самый дешевый билет', url: bestResult.search_link }
+                ]]
+              };
+
+              await this.bot.sendMessage(
+                  chatId,
+                  `🔍 Лучшее предложение для *${stat.origin} → ${stat.destination}*`,
+                  { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
+              );
+            }
+          } catch (e) {
+            console.error('Ошибка получения лучшего результата для маршрута', stat.routeId, e);
+          }
 
           // 🔥 НОВОЕ: Статистика комбинаций для гибких маршрутов
           if (stat.isFlexible && stat.totalCombinations > 0) {
@@ -144,22 +189,6 @@ class NotificationService {
                 report += `\n`;
               }
             }
-          }
-
-          // Лучшая найденная цена
-          if (stat.bestPrice) {
-            report += `💰 Лучшая цена: ${stat.bestPrice.toLocaleString('ru-RU')} ₽\n`;
-
-            // 🔥 ИСПРАВЛЕННАЯ ЛОГИКА: Проверка порога
-            if (stat.thresholdPrice && stat.foundCheaper) {
-              const savings = stat.thresholdPrice - stat.bestPrice;
-              report += `🔥 *Цена ниже порога!* (экономия ${savings.toLocaleString('ru-RU')} ₽)\n`;
-            } else if (stat.thresholdPrice) {
-              const diff = stat.bestPrice - stat.thresholdPrice;
-              report += `📊 До порога: ${diff.toLocaleString('ru-RU')} ₽\n`;
-            }
-          } else {
-            report += `❌ Цены не найдены\n`;
           }
 
           report += `\n`;
@@ -364,6 +393,31 @@ class NotificationService {
         }
       });
     });
+  }
+
+  async _getUserTimezone(chatId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+          'SELECT timezone FROM user_settings WHERE chat_id = ?',
+          [chatId],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve(row?.timezone || 'Asia/Yekaterinburg');
+          }
+      );
+    });
+  }
+
+  _formatDateTimeForUser(date, timezone) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone: timezone,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(date);
   }
 }
 
