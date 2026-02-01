@@ -463,7 +463,7 @@ class RouteHandlers {
         const destinationCity = state.routeData.destination_city || state.routeData.destination;
 
         // Получаем подписку пользователя для отображения правильных лимитов
-        const subscription = await UserSubscription.getUserSubscription(chatId);
+        const subscription = await SubscriptionService.getUserSubscription(chatId);
 
         // Формируем описание для диапазона дат в зависимости от тарифа
         let flexibleDescription = '';
@@ -967,7 +967,7 @@ class RouteHandlers {
 
         if (state.routeData.is_flexible) {
             // Получаем подписку пользователя для формирования правильного сообщения
-            const subscription = await UserSubscription.getUserSubscription(chatId);
+            const subscription = await SubscriptionService.getUserSubscription(chatId);
 
             // Формируем предупреждение о лимите комбинаций в зависимости от тарифа
             let limitWarning = '';
