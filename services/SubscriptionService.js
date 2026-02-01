@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const Formatters = require("../utils/formatters");
 
 class SubscriptionService {
     /**
@@ -60,37 +61,40 @@ class SubscriptionService {
             message: ''
         };
 
+        // Формируем призыв к действию в зависимости от текущей подписки
+        let upgradeMessage = '';
+        if (subscription.name === 'free') {
+            upgradeMessage = `💎 Хотите больше? Оформите подписку Plus!`;
+        } else if (subscription.name === 'plus') {
+            upgradeMessage = `💎 Новые модели подписки в разработке, а сейчас можете написать @jowoodik для обсуждения индивидуальных условий`;
+        } else if (subscription.name === 'admin') {
+            upgradeMessage = `⚡ У вас безлимитный тариф, но произошла ошибка при проверке лимитов`;
+        }
+
         // Проверка лимитов по типу маршрута
         if (isFlexible && flexibleCount >= subscription.max_flexible_routes) {
             limits.allowed = false;
             limits.message = `⚠️ Лимит гибких маршрутов исчерпан.\n\n` +
                 `📊 Ваша подписка "${subscription.display_name}" позволяет:\n` +
-                `• ${subscription.max_flexible_routes} гибкий маршрут\n` +
-                `• ${subscription.max_fixed_routes} фиксированных маршрутов\n` +
-                `• До ${subscription.max_combinations} комбинаций\n\n` +
-                `💎 Хотите больше? Оформите подписку Plus!`;
+                `• ${subscription.max_flexible_routes} ${Formatters._pluralize(subscription.max_flexible_routes, 'гибкий маршрут', 'гибких маршрута', 'гибких маршрутов')}\n` +
+                `• ${subscription.max_fixed_routes} ${Formatters._pluralize(subscription.max_fixed_routes, 'фиксированный маршрут', 'фиксированных маршрута', 'фиксированных маршрутов')}\n` +
+                `• До ${subscription.max_combinations} ${Formatters._pluralize(subscription.max_combinations, 'комбинации', 'комбинаций', 'комбинаций')}\n\n` +
+                upgradeMessage;
         }
 
         if (!isFlexible && fixedCount >= subscription.max_fixed_routes) {
             limits.allowed = false;
             limits.message = `⚠️ Лимит фиксированных маршрутов исчерпан.\n\n` +
                 `📊 Ваша подписка "${subscription.display_name}" позволяет:\n` +
-                `• ${subscription.max_flexible_routes} гибкий маршрут\n` +
-                `• ${subscription.max_fixed_routes} фиксированных маршрутов\n` +
-                `• До ${subscription.max_combinations} комбинаций\n\n` +
-                `💎 Хотите больше? Оформите подписку Plus!`;
-        }
-
-        // Проверка лимитов комбинаций для гибких маршрутов
-        if (isFlexible && combinationsCount > subscription.max_combinations) {
-            limits.allowed = false;
-            limits.message = `⚠️ Превышен лимит комбинаций.\n\n` +
-                `📊 Будет ${combinationsCount} комбинаций, но ваша подписка "${subscription.display_name}" позволяет максимум ${subscription.max_combinations}.\n\n` +
-                `💎 Хотите больше? Оформите подписку Plus (до 50 комбинаций)!`;
+                `• ${subscription.max_flexible_routes} ${Formatters._pluralize(subscription.max_flexible_routes, 'гибкий маршрут', 'гибких маршрута', 'гибких маршрутов')}\n` +
+                `• ${subscription.max_fixed_routes} ${Formatters._pluralize(subscription.max_fixed_routes, 'фиксированный маршрут', 'фиксированных маршрута', 'фиксированных маршрутов')}\n` +
+                `• До ${subscription.max_combinations} ${Formatters._pluralize(subscription.max_combinations, 'комбинации', 'комбинаций', 'комбинаций')}\n\n` +
+                upgradeMessage;
         }
 
         return limits;
     }
+
 
     /**
      * Получить статистику подписки
