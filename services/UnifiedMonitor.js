@@ -82,7 +82,7 @@ class UnifiedMonitor {
 
         console.log(`✅ Получен ответ от Aviasales`);
 
-        // 🔥 НОВАЯ ЛОГИКА: Анализируем результаты и сохраняем детальную статистику
+        // 🔥 АНАЛИЗИРУЕМ РЕЗУЛЬТАТЫ
         const results = [];
         let successfulChecks = 0;
         let failedChecks = 0;
@@ -91,7 +91,10 @@ class UnifiedMonitor {
         for (let i = 0; i < response.results.length; i++) {
             const priceResult = response.results[i];
             const combination = combinations[i];
-            const searchUrl = urls[i];
+
+            // 🔥 ИЗМЕНЕНО: используем enhancedSearchLink вместо простого URL
+            const searchLink = priceResult?.enhancedSearchLink || urls[i];
+            console.log(searchLink);
 
             let status, errorReason = null;
 
@@ -100,14 +103,14 @@ class UnifiedMonitor {
                 status = 'success';
                 successfulChecks++;
 
-                // Сохраняем результат в route_results
+                // 🔥 ИЗМЕНЕНО: сохраняем enhancedSearchLink в search_link
                 await RouteResult.save(route.id, {
                     departure_date: combination.departure_date,
                     return_date: combination.return_date,
                     days_in_country: combination.days_in_country || null,
                     total_price: priceResult.price,
                     airline: route.airline || 'ANY',
-                    search_link: searchUrl,
+                    search_link: searchLink, // 🔥 ИСПОЛЬЗУЕМ РАСШИРЕННУЮ ССЫЛКУ
                     screenshot_path: null
                 });
 
@@ -116,9 +119,10 @@ class UnifiedMonitor {
                     combination: combination
                 });
 
-                // 🔥 ИСПРАВЛЕННАЯ ЛОГИКА: Проверка порога цены
+                // 🔥 Проверка порога цены
                 if (route.threshold_price && priceResult.price <= route.threshold_price) {
                     console.log(`🔥 Найдена цена ниже порога: ${priceResult.price} ₽ (порог: ${route.threshold_price} ₽)`);
+
                     await this.notificationService.sendPriceAlert(
                         route.chat_id,
                         route,
@@ -126,7 +130,7 @@ class UnifiedMonitor {
                             price: priceResult.price,
                             currency: priceResult.currency || 'RUB',
                             airline: route.airline || 'ANY',
-                            link: searchUrl
+                            link: searchLink // 🔥 ОТПРАВЛЯЕМ РАСШИРЕННУЮ ССЫЛКУ
                         },
                         combination
                     );
@@ -147,7 +151,7 @@ class UnifiedMonitor {
                 failedChecks++;
             }
 
-            // 🔥 НОВОЕ: Сохраняем детальную информацию о проверке комбинации
+            // Сохраняем детальную информацию о проверке комбинации
             combinationResults.push({
                 route_id: route.id,
                 check_timestamp: checkTimestamp,
@@ -158,11 +162,11 @@ class UnifiedMonitor {
                 price: priceResult?.price || null,
                 currency: priceResult?.currency || 'RUB',
                 error_reason: errorReason,
-                search_url: searchUrl
+                search_url: searchLink // 🔥 СОХРАНЯЕМ РАСШИРЕННУЮ ССЫЛКУ
             });
         }
 
-        // 🔥 НОВОЕ: Сохраняем общую статистику проверки
+        // Сохраняем общую статистику проверки
         await this.saveCheckStats(route.id, {
             check_timestamp: checkTimestamp,
             total_combinations: combinations.length,
@@ -170,7 +174,7 @@ class UnifiedMonitor {
             failed_checks: failedChecks
         });
 
-        // 🔥 НОВОЕ: Сохраняем детальные результаты всех комбинаций
+        // Сохраняем детальные результаты всех комбинаций
         await this.saveCombinationResults(combinationResults);
 
         // Обновляем время последней проверки
@@ -185,7 +189,7 @@ class UnifiedMonitor {
     }
 
     /**
-     * 🔥 НОВЫЙ МЕТОД: Сохранение общей статистики проверки
+     * Сохранение общей статистики проверки
      */
     async saveCheckStats(routeId, stats) {
         return new Promise((resolve, reject) => {
@@ -212,7 +216,7 @@ class UnifiedMonitor {
     }
 
     /**
-     * 🔥 НОВЫЙ МЕТОД: Сохранение детальных результатов комбинаций
+     * Сохранение детальных результатов комбинаций
      */
     async saveCombinationResults(combinationResults) {
         return new Promise((resolve, reject) => {
@@ -240,11 +244,11 @@ class UnifiedMonitor {
             });
 
             db.run(`
-        INSERT INTO combination_check_results 
-        (route_id, check_timestamp, departure_date, return_date, days_in_country, 
-         status, price, currency, error_reason, search_url)
-        VALUES ${placeholders}
-      `, values, (err) => {
+                INSERT INTO combination_check_results
+                (route_id, check_timestamp, departure_date, return_date, days_in_country,
+                 status, price, currency, error_reason, search_url)
+                VALUES ${placeholders}
+            `, values, (err) => {
                 if (err) {
                     console.error('❌ Ошибка сохранения результатов комбинаций:', err);
                     reject(err);
@@ -257,29 +261,29 @@ class UnifiedMonitor {
     }
 
     /**
-     * 🔥 НОВЫЙ МЕТОД: Получение неудачных проверок для маршрута
+     * Получение неудачных проверок для маршрута
      */
     async getFailedCombinations(routeId, limit = 10) {
         return new Promise((resolve, reject) => {
             db.all(`
-        SELECT 
-          departure_date,
-          return_date,
-          days_in_country,
-          status,
-          error_reason,
-          check_timestamp
-        FROM combination_check_results
-        WHERE route_id = ? 
-          AND status IN ('not_found', 'error')
-          AND check_timestamp = (
-            SELECT MAX(check_timestamp) 
-            FROM combination_check_results 
-            WHERE route_id = ?
-          )
-        ORDER BY departure_date
-        LIMIT ?
-      `, [routeId, routeId, limit], (err, rows) => {
+                SELECT
+                    departure_date,
+                    return_date,
+                    days_in_country,
+                    status,
+                    error_reason,
+                    check_timestamp
+                FROM combination_check_results
+                WHERE route_id = ?
+                  AND status IN ('not_found', 'error')
+                  AND check_timestamp = (
+                    SELECT MAX(check_timestamp)
+                    FROM combination_check_results
+                    WHERE route_id = ?
+                )
+                ORDER BY departure_date
+                    LIMIT ?
+            `, [routeId, routeId, limit], (err, rows) => {
                 if (err) reject(err);
                 else resolve(rows || []);
             });
@@ -295,14 +299,14 @@ class UnifiedMonitor {
             const ekbDate = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Yekaterinburg' }));
 
             db.run(`
-        INSERT INTO price_analytics
-        (route_type, origin, destination, price, airline, found_at,
-         hour_of_day, day_of_week, day_of_month, month, year,
-         is_weekend, season, chat_id, route_id)
-        VALUES (?, ?, ?, ?, ?, datetime('now'),
-         ?, ?, ?, ?, ?,
-         ?, ?, ?, ?)
-      `, [
+                INSERT INTO price_analytics
+                (route_type, origin, destination, price, airline, found_at,
+                 hour_of_day, day_of_week, day_of_month, month, year,
+                 is_weekend, season, chat_id, route_id)
+                VALUES (?, ?, ?, ?, ?, datetime('now'),
+                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?)
+            `, [
                 route.is_flexible ? 'flexible' : 'regular',
                 route.origin,
                 route.destination,
@@ -344,6 +348,7 @@ class UnifiedMonitor {
     async checkRoute(routeId) {
         try {
             const route = await UnifiedRoute.findById(routeId);
+
             if (!route) {
                 throw new Error('Маршрут не найден');
             }
@@ -365,11 +370,13 @@ class UnifiedMonitor {
 
             for (const route of routes) {
                 const bestPrice = await RouteResult.getBestPrice(route.id);
+
                 report += `✈️ ${route.origin} → ${route.destination}\n`;
 
                 if (bestPrice) {
                     report += `💰 Лучшая цена: ${bestPrice.toLocaleString('ru-RU')} ₽\n`;
                     report += `📊 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽\n`;
+
                     if (bestPrice <= route.threshold_price) {
                         report += `🔥 Найдена цена ниже порога!\n`;
                     }

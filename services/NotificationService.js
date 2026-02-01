@@ -6,6 +6,10 @@ class NotificationService {
     this.bot = bot;
   }
 
+  /**
+   * 🔥 ИСПРАВЛЕНО: Проверка тихих часов с учетом timezone пользователя
+   * Теперь время берется в timezone клиента, а не UTC с сервера
+   */
   async _canSendNotification(chatId) {
     return new Promise((resolve) => {
       const db = require('../config/database');
@@ -18,24 +22,37 @@ class NotificationService {
               return;
             }
 
-            const now = new Date();
-            const currentHour = now.getHours();
-
             // Если тихие часы отключены (null значения)
             if (settings.quiet_hours_start === null || settings.quiet_hours_end === null) {
               resolve(true);
               return;
             }
 
+            // 🔥 ИСПРАВЛЕНО: Получаем текущий час в timezone пользователя
+            const timezone = settings.timezone || 'Asia/Yekaterinburg';
+            const now = new Date();
+
+            // Конвертируем UTC время в локальное время пользователя
+            const userLocalTime = new Intl.DateTimeFormat('en-US', {
+              timeZone: timezone,
+              hour: 'numeric',
+              hour12: false
+            }).format(now);
+
+            const currentHour = parseInt(userLocalTime);
+
+            // Проверяем, находится ли текущее время в тихих часах
             if (settings.quiet_hours_start > settings.quiet_hours_end) {
               // Например, 23 до 7 (через полночь)
               if (currentHour >= settings.quiet_hours_start || currentHour < settings.quiet_hours_end) {
+                console.log(`⏸ Тихие часы для ${chatId}: текущий час ${currentHour} в диапазоне ${settings.quiet_hours_start}-${settings.quiet_hours_end} (${timezone})`);
                 resolve(false);
                 return;
               }
             } else {
-              // Например, 23 до 7 (обычный диапазон)
+              // Например, 1 до 6 (обычный диапазон в пределах одних суток)
               if (currentHour >= settings.quiet_hours_start && currentHour < settings.quiet_hours_end) {
+                console.log(`⏸ Тихие часы для ${chatId}: текущий час ${currentHour} в диапазоне ${settings.quiet_hours_start}-${settings.quiet_hours_end} (${timezone})`);
                 resolve(false);
                 return;
               }
