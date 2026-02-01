@@ -952,18 +952,32 @@ class RouteHandlers {
         state.routeData.has_return = hasReturn;
 
         if (state.routeData.is_flexible) {
+            // Получаем подписку пользователя для формирования правильного сообщения
+            const subscription = await UserSubscription.getUserSubscription(chatId);
+
+            // Формируем предупреждение о лимите комбинаций в зависимости от тарифа
+            let limitWarning = '';
+            if (hasReturn) {
+                if (subscription.name === 'free') {
+                    limitWarning = `⚠️ Помните: максимум ${subscription.max_combinations} комбинаций для бесплатного тарифа!\n\n`;
+                } else if (subscription.name === 'plus') {
+                    limitWarning = `💎 Ваш тариф Plus: до ${subscription.max_combinations} комбинаций доступно!\n\n`;
+                }
+                // Для admin тарифа не показываем предупреждение, т.к. безлимит
+            }
+
             // Гибкий поиск
             state.step = 'departure_start';
             this.bot.sendMessage(
                 chatId,
                 `✅ ${hasReturn ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
                 `📍 Шаг 5/${hasReturn ? '12' : '10'}: Начало диапазона вылета\n\n` +
-                `${hasReturn ? '⚠️ Помните: максимум 20 комбинаций для бесплатного использования!\n\n' : ''}` +
+                `${limitWarning}` +
                 `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
                 { reply_markup: { remove_keyboard: true } }
             );
         } else {
-            // Фиксированный поиск
+            // Фиксированный поиск - без предупреждений о лимитах
             state.step = 'departure_date';
             this.bot.sendMessage(
                 chatId,
@@ -976,6 +990,7 @@ class RouteHandlers {
 
         return true;
     }
+
 
     async _handleDepartureDateStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
