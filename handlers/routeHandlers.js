@@ -40,7 +40,7 @@ class RouteHandlers {
      * ВАЛИДАЦИЯ ЛИМИТОВ МАРШРУТОВ
      */
     async validateRouteLimit(chatId, isFlexible) {
-        const limits = await SubscriptionService.checkUserLimits(chatId, isFlexible, combinationsCount);
+        const limits = await SubscriptionService.checkUserLimits(chatId, isFlexible);
 
         if (!limits.allowed) {
             return {
