@@ -441,6 +441,10 @@ class RouteHandlers {
                     return await this._handleThresholdStep(chatId, text, state);
                 case 'confirm':
                     return await this._handleConfirmStep(chatId, text, state);
+                case 'departure_start_retry':
+                    return await this._handleDepartureStartRetryStep(chatId, text, state);
+                case 'combination_limit_exceeded':
+                    return await this._handleCombinationLimitExceededStep(chatId, text, state);
             }
         } catch (error) {
             console.error('Ошибка обработки шага:', error);
@@ -1100,7 +1104,6 @@ class RouteHandlers {
 
     async _handleDepartureEndStep(chatId, text, state) {
         const date = DateUtils.convertDateFormat(text);
-
         if (!date) {
             this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД-ММ-ГГГГ, например: 10-03-2026');
             return true;
@@ -1108,7 +1111,6 @@ class RouteHandlers {
 
         const endDate = new Date(date);
         const startDate = new Date(state.routeData.departure_start);
-
         if (endDate <= startDate) {
             this.bot.sendMessage(chatId, '❌ Конец диапазона должен быть позже начала. Введите корректную дату:');
             return true;
@@ -1118,7 +1120,6 @@ class RouteHandlers {
 
         if (state.routeData.has_return) {
             state.step = 'min_days';
-
             const keyboard = {
                 reply_markup: {
                     keyboard: [
@@ -1146,20 +1147,33 @@ class RouteHandlers {
                 departure_start: state.routeData.departure_start,
                 departure_end: state.routeData.departure_end
             };
-
             const combCount = UnifiedRoute.countCombinations(tempRoute);
-
             const subscription = await SubscriptionService.getUserSubscription(chatId);
+
             if (combCount > subscription.max_combinations) {
+                // Вместо удаления состояния - даем возможность исправить
+                const keyboard = {
+                    reply_markup: {
+                        keyboard: [
+                            ['📅 Изменить диапазон дат'],
+                            ['🏠 Главное меню']
+                        ],
+                        resize_keyboard: true,
+                        one_time_keyboard: true
+                    }
+                };
+
                 this.bot.sendMessage(
                     chatId,
                     `⚠️ Получится ${combCount} ${this._pluralize(combCount, 'дата', 'даты', 'дат')} для проверки.\n\n` +
                     `📊 Ваша подписка "${subscription.display_name}" позволяет максимум ${subscription.max_combinations} комбинаций.\n` +
                     `💎 Хотите больше? Оформите подписку Plus (до 50 комбинаций)!\n\n` +
                     `Пожалуйста, сократите диапазон дат.`,
-                    this.getMainMenuKeyboard(chatId)
+                    keyboard
                 );
-                delete this.userStates[chatId];
+
+                // Возвращаем пользователя на шаг изменения начала диапазона
+                state.step = 'departure_start_retry';
                 return true;
             }
 
@@ -1205,9 +1219,75 @@ class RouteHandlers {
         return true;
     }
 
+    // Обработка повтора ввода начала диапазона (для маршрутов без обратного билета)
+    async _handleDepartureStartRetryStep(chatId, text, state) {
+        if (text === '🏠 Главное меню') {
+            delete this.userStates[chatId];
+            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+            return true;
+        }
+
+        if (text === '📅 Изменить диапазон дат') {
+            state.step = 'departure_start';
+            this.bot.sendMessage(
+                chatId,
+                `📍 Начало диапазона вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
+                { reply_markup: { remove_keyboard: true } }
+            );
+            return true;
+        }
+
+        return false;
+    }
+
+// Обработка превышения лимита комбинаций (для маршрутов с обратным билетом)
+    async _handleCombinationLimitExceededStep(chatId, text, state) {
+        if (text === '🏠 Главное меню') {
+            delete this.userStates[chatId];
+            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+            return true;
+        }
+
+        if (text === '📅 Изменить диапазон дат') {
+            state.step = 'departure_start';
+            this.bot.sendMessage(
+                chatId,
+                `📍 Начало диапазона вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
+                { reply_markup: { remove_keyboard: true } }
+            );
+            return true;
+        }
+
+        if (text === '🗓️ Изменить дни в стране') {
+            state.step = 'min_days';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['2', '3', '5'],
+                        ['7', '10', '14'],
+                        ['21', '28', '30']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `📍 Минимальное количество дней в стране\n\n` +
+                `Выберите или введите число:`,
+                keyboard
+            );
+            return true;
+        }
+
+        return false;
+    }
+
     async _handleMaxDaysStep(chatId, text, state) {
         const maxDays = parseInt(text);
-
         if (isNaN(maxDays) || maxDays < state.routeData.min_days || maxDays > 365) {
             this.bot.sendMessage(chatId, `❌ Введите число от ${state.routeData.min_days} до 365:`);
             return true;
@@ -1224,20 +1304,34 @@ class RouteHandlers {
             min_days: state.routeData.min_days,
             max_days: maxDays
         };
-
         const combCount = UnifiedRoute.countCombinations(tempRoute);
-
         const subscription = await SubscriptionService.getUserSubscription(chatId);
+
         if (combCount > subscription.max_combinations) {
+            // Вместо удаления состояния - даем возможность исправить
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['📅 Изменить диапазон дат'],
+                        ['🗓️ Изменить дни в стране'],
+                        ['🏠 Главное меню']
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
             this.bot.sendMessage(
                 chatId,
                 `⚠️ Получится ${combCount} ${this._pluralize(combCount, 'комбинация', 'комбинации', 'комбинаций')} для проверки.\n\n` +
                 `📊 Ваша подписка "${subscription.display_name}" позволяет максимум ${subscription.max_combinations} комбинаций.\n` +
                 `💎 Хотите больше? Оформите подписку Plus (до 50 комбинаций)!\n\n` +
                 `Пожалуйста, сократите диапазон дат или количество дней пребывания.`,
-                this.getMainMenuKeyboard(chatId)
+                keyboard
             );
-            delete this.userStates[chatId];
+
+            // Устанавливаем специальный шаг для обработки выбора
+            state.step = 'combination_limit_exceeded';
             return true;
         }
 
@@ -1251,7 +1345,6 @@ class RouteHandlers {
 
         state.step = 'airline';
         this._showAirlineKeyboard(chatId, state);
-
         return true;
     }
 
