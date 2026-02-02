@@ -10,7 +10,6 @@ class AdvancedAirportImporter {
         this.dbPath = path.join(__dirname, '../data/bot.db');
         this.db = new sqlite3.Database(this.dbPath);
 
-        // Кэши для данных
         this.citiesCache = new Map(); // city_code -> city_data
         this.countriesCache = new Map(); // country_code -> country_data
     }
