@@ -17,7 +17,6 @@ class AdvancedAirportImporter {
 
     async run() {
         console.log('🚀 Запуск продвинутого импорта аэропортов...\n');
-
         try {
             // 1. Загружаем справочники
             console.log('📚 Загружаю справочники...');
@@ -37,23 +36,17 @@ class AdvancedAirportImporter {
             console.log('\n💾 Сохраняю в базу данных...');
             await this.saveToDatabase(processedAirports);
 
-            // 5. 🔥 НОВОЕ: Добавляем города как отдельные записи
-            console.log('\n🏙️ Добавляю города...');
-            await this.addCitiesToDatabase(processedAirports);
+            // 5. 🔥 НОВОЕ: Добавляем ВСЕ города из справочника
+            console.log('\n🏙️ Добавляю города из справочника...');
+            await this.addAllCitiesToDatabase();
 
             // 6. Проверяем результат
             await this.verifyResults();
 
             console.log('\n🎉 Импорт успешно завершен!');
-
         } catch (error) {
             console.error('\n💥 Ошибка импорта:', error.message);
             console.error(error.stack);
-
-            // Пробуем импорт из резервных данных
-            console.log('\n🔄 Пробую резервный импорт...');
-            await this.importFromBackup();
-
         } finally {
             this.db.close();
         }
@@ -79,7 +72,8 @@ class AdvancedAirportImporter {
                         name_en: city.name_translations?.en || city.name,
                         country_code: city.country_code,
                         timezone: city.time_zone,
-                        coordinates: city.coordinates
+                        coordinates: city.coordinates,
+                        has_flightable_airport: city.has_flightable_airport || false
                     });
                 }
             }
@@ -104,7 +98,6 @@ class AdvancedAirportImporter {
             }
 
             console.log(`✅ Загружено ${this.countriesCache.size} стран`);
-
         } catch (error) {
             console.warn('⚠️ Не удалось загрузить справочники:', error.message);
             console.warn('🔄 Использую локальные справочники...');
@@ -128,7 +121,7 @@ class AdvancedAirportImporter {
             'OVB': { name: 'Новосибирск', name_en: 'Novosibirsk', country_code: 'RU' },
             'GOJ': { name: 'Нижний Новгород', name_en: 'Nizhny Novgorod', country_code: 'RU' },
             'KRR': { name: 'Краснодар', name_en: 'Krasnodar', country_code: 'RU' },
-
+            'KJA': { name: 'Красноярск', name_en: 'Krasnoyarsk', country_code: 'RU' },
             // Международные
             'IST': { name: 'Стамбул', name_en: 'Istanbul', country_code: 'TR' },
             'SAW': { name: 'Стамбул', name_en: 'Istanbul', country_code: 'TR' },
@@ -188,9 +181,7 @@ class AdvancedAirportImporter {
                 'https://api.travelpayouts.com/data/ru/airports.json',
                 { timeout: 20000 }
             );
-
             return response.data;
-
         } catch (error) {
             console.error('❌ Ошибка загрузки аэропортов:', error.message);
             throw error;
@@ -210,7 +201,7 @@ class AdvancedAirportImporter {
             'SVO', 'DME', 'VKO', 'LED', 'SVX', 'KZN', 'AER', 'ROV', 'OVB', 'UFA',
             'GOJ', 'KRR', 'MRV', 'AAQ', 'KEJ', 'RTW', 'STW', 'SCW', 'PKC', 'MCX',
             'CEK', 'MJZ', 'NNM', 'NOZ', 'NJC', 'NYM', 'NUX', 'NYA', 'OMS', 'PEE',
-
+            'KJA', 'KCY', // Красноярск
             // Международные (топ 40)
             'IST', 'SAW', 'ESB', 'ADB', 'AYT', 'DLM', 'BJV', 'GZP', 'DXB', 'AUH',
             'SHJ', 'DWC', 'RKT', 'BKK', 'DMK', 'HKT', 'CNX', 'SIN', 'KUL', 'CGK',
@@ -335,7 +326,6 @@ class AdvancedAirportImporter {
         if (airport.city_code) {
             const cityCode = airport.city_code.toUpperCase();
             const city = this.citiesCache.get(cityCode);
-
             if (city) {
                 return {
                     name: city.name,
@@ -388,7 +378,8 @@ class AdvancedAirportImporter {
             'ROV': { name: 'Ростов-на-Дону', name_en: 'Rostov-on-Don', country_code: 'RU' },
             'OVB': { name: 'Новосибирск', name_en: 'Novosibirsk', country_code: 'RU' },
             'UFA': { name: 'Уфа', name_en: 'Ufa', country_code: 'RU' },
-
+            'KJA': { name: 'Красноярск', name_en: 'Krasnoyarsk', country_code: 'RU' },
+            'KCY': { name: 'Красноярск', name_en: 'Krasnoyarsk', country_code: 'RU' },
             // Международные
             'IST': { name: 'Стамбул', name_en: 'Istanbul', country_code: 'TR' },
             'DXB': { name: 'Дубай', name_en: 'Dubai', country_code: 'AE' },
@@ -397,7 +388,6 @@ class AdvancedAirportImporter {
             'HKG': { name: 'Гонконг', name_en: 'Hong Kong', country_code: 'CN' },
             'DEL': { name: 'Дели', name_en: 'Delhi', country_code: 'IN' },
         };
-
         return airportToCityMap[iataCode];
     }
 
@@ -432,7 +422,6 @@ class AdvancedAirportImporter {
         if (airport.country_code) {
             const countryCode = airport.country_code.toUpperCase();
             const country = this.countriesCache.get(countryCode);
-
             if (country) {
                 return {
                     code: countryCode,
@@ -445,7 +434,6 @@ class AdvancedAirportImporter {
         if (cityData.country_code) {
             const countryCode = cityData.country_code.toUpperCase();
             const country = this.countriesCache.get(countryCode);
-
             if (country) {
                 return {
                     code: countryCode,
@@ -477,7 +465,6 @@ class AdvancedAirportImporter {
             'JP': 'Япония', 'CA': 'Канада', 'AU': 'Австралия', 'BR': 'Бразилия',
             'MX': 'Мексика'
         };
-
         return countryMap[countryCode] || countryCode;
     }
 
@@ -489,13 +476,12 @@ class AdvancedAirportImporter {
             // Россия
             'SVO': 1, 'DME': 2, 'VKO': 3, 'LED': 4, 'SVX': 5,
             'KZN': 6, 'AER': 7, 'ROV': 8, 'OVB': 9, 'UFA': 10,
-
+            'KJA': 11, 'KCY': 12,
             // Международные
             'IST': 1, 'SAW': 2, 'DXB': 3, 'AUH': 4, 'BKK': 5,
             'DMK': 6, 'SIN': 7, 'HKG': 8, 'DEL': 9, 'BOM': 10,
             'JFK': 11, 'LAX': 12, 'CDG': 13, 'LHR': 14, 'FRA': 15
         };
-
         return orderMap[iataCode] || 99;
     }
 
@@ -551,67 +537,100 @@ class AdvancedAirportImporter {
     }
 
     /**
-     * 🔥 НОВАЯ ФУНКЦИЯ: Добавление городов как отдельных записей
+     * 🔥 НОВАЯ ФУНКЦИЯ: Добавление ВСЕХ городов из справочника
      */
-    async addCitiesToDatabase(airports) {
-        // Группируем аэропорты по городам
-        const citiesMap = new Map();
+    async addAllCitiesToDatabase() {
+        console.log(`📊 Всего городов в справочнике: ${this.citiesCache.size}`);
 
-        for (const airport of airports) {
-            if (!airport.city_code) continue;
+        // Популярные города России
+        const popularRussianCities = new Set([
+            'MOW', 'LED', 'SVX', 'KZN', 'AER', 'ROV', 'OVB', 'UFA', 'GOJ', 'KRR',
+            'KJA', 'SCW', 'STW', 'RTW', 'MRV', 'VOG', 'ASF', 'PEE', 'OMS', 'KEJ'
+        ]);
 
-            const cityKey = airport.city_code;
+        // Популярные международные города
+        const popularInternationalCities = new Set([
+            'IST', 'DXB', 'AUH', 'BKK', 'SIN', 'HKG', 'DEL', 'BOM',
+            'JFK', 'LAX', 'LHR', 'CDG', 'FRA', 'AMS', 'FCO', 'MAD',
+            'BCN', 'ATH', 'LCA', 'HER', 'SSH', 'AYT', 'DLM', 'BJV'
+        ]);
 
-            if (!citiesMap.has(cityKey)) {
-                citiesMap.set(cityKey, {
-                    city_code: airport.city_code,
-                    city_name: airport.city_name,
-                    city_name_en: airport.city_name_en,
-                    country_code: airport.country_code,
-                    country_name: airport.country_name,
-                    timezone: airport.timezone,
-                    region: airport.region,
-                    is_international: airport.is_international,
-                    airports_count: 1,
-                    // Для популярности берем максимальную популярность среди аэропортов
-                    is_popular: airport.is_popular,
-                    display_order: airport.display_order
-                });
-            } else {
-                const city = citiesMap.get(cityKey);
-                city.airports_count++;
-                // Обновляем популярность если текущий аэропорт популярнее
-                if (airport.is_popular > city.is_popular) {
-                    city.is_popular = airport.is_popular;
-                    city.display_order = airport.display_order;
-                }
-            }
-        }
-
-        console.log(`📊 Найдено ${citiesMap.size} уникальных городов`);
-
-        // Вставляем города в базу
         let inserted = 0;
+        let skipped = 0;
 
         await this.runQuery('BEGIN TRANSACTION');
 
-        for (const [cityCode, cityData] of citiesMap.entries()) {
-            // Только для городов с несколькими аэропортами
-            if (cityData.airports_count > 1) {
-                try {
-                    await this.insertCity(cityData);
-                    inserted++;
-                } catch (error) {
-                    if (!error.message.includes('UNIQUE constraint failed')) {
-                        console.warn(`⚠️ Ошибка вставки города ${cityCode}: ${error.message}`);
-                    }
+        for (const [cityCode, cityData] of this.citiesCache.entries()) {
+            // Пропускаем города без возможности полетов
+            if (!cityData.has_flightable_airport) {
+                skipped++;
+                continue;
+            }
+
+            try {
+                // Определяем страну
+                const countryData = this.countriesCache.get(cityData.country_code) || {
+                    name: this.getCountryNameByCode(cityData.country_code)
+                };
+
+                // Определяем параметры
+                const isRussia = cityData.country_code === 'RU';
+                const isPopular = popularRussianCities.has(cityCode) || popularInternationalCities.has(cityCode);
+                const region = isRussia ? 'russia' : 'international';
+                const displayOrder = this.getCityDisplayOrder(cityCode, isRussia);
+
+                await this.insertCity({
+                    city_code: cityCode,
+                    city_name: cityData.name,
+                    city_name_en: cityData.name_en,
+                    country_code: cityData.country_code,
+                    country_name: countryData.name,
+                    timezone: cityData.timezone || 'UTC',
+                    latitude: cityData.coordinates?.lat || null,
+                    longitude: cityData.coordinates?.lon || null,
+                    is_popular: isPopular ? 1 : 0,
+                    is_international: isRussia ? 0 : 1,
+                    display_order: displayOrder,
+                    region: region
+                });
+
+                inserted++;
+
+                if (inserted % 100 === 0) {
+                    console.log(`  📊 Добавлено городов: ${inserted}...`);
+                }
+
+            } catch (error) {
+                if (!error.message.includes('UNIQUE constraint failed')) {
+                    console.warn(`⚠️ Ошибка вставки города ${cityCode}: ${error.message}`);
                 }
             }
         }
 
         await this.runQuery('COMMIT');
 
-        console.log(`✅ Добавлено ${inserted} городов с несколькими аэропортами`);
+        console.log(`✅ Добавлено ${inserted} городов`);
+        console.log(`⏭️ Пропущено ${skipped} городов без аэропортов`);
+    }
+
+    /**
+     * Порядок отображения для городов
+     */
+    getCityDisplayOrder(cityCode, isRussia) {
+        if (isRussia) {
+            const russianOrder = {
+                'MOW': 1, 'LED': 2, 'SVX': 3, 'KZN': 4, 'AER': 5,
+                'ROV': 6, 'OVB': 7, 'UFA': 8, 'GOJ': 9, 'KRR': 10,
+                'KJA': 11
+            };
+            return russianOrder[cityCode] || 50;
+        } else {
+            const intOrder = {
+                'IST': 1, 'DXB': 2, 'AUH': 3, 'BKK': 4, 'SIN': 5,
+                'HKG': 6, 'DEL': 7, 'BOM': 8, 'LHR': 9, 'CDG': 10
+            };
+            return intOrder[cityCode] || 50;
+        }
     }
 
     /**
@@ -624,9 +643,10 @@ class AdvancedAirportImporter {
                     iata_code, airport_name, airport_name_lower, airport_name_en,
                     city_code, city_name, city_name_lower, city_name_en,
                     country_code, country_name, country_name_lower,
-                    timezone, airport_type, is_major, is_popular, is_international,
+                    latitude, longitude, timezone,
+                    airport_type, is_major, is_popular, is_international,
                     display_order, region, source, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             const displayName = `${city.city_name} (любой аэропорт)`;
@@ -644,6 +664,8 @@ class AdvancedAirportImporter {
                 city.country_code,
                 city.country_name,
                 city.country_name.toLowerCase(),
+                city.latitude,
+                city.longitude,
                 city.timezone,
                 'city', // 🔥 Тип = city
                 1,
@@ -695,15 +717,15 @@ class AdvancedAirportImporter {
     async insertAirport(airport) {
         return new Promise((resolve, reject) => {
             const sql = `
-        INSERT INTO airports (
-          iata_code, icao_code, airport_name, airport_name_lower, airport_name_en,
-          city_code, city_name, city_name_lower, city_name_en,
-          country_code, country_name, country_name_lower,
-          latitude, longitude, timezone, altitude,
-          airport_type, is_major, is_popular, is_international,
-          display_order, region, source, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `;
+                INSERT INTO airports (
+                    iata_code, icao_code, airport_name, airport_name_lower, airport_name_en,
+                    city_code, city_name, city_name_lower, city_name_en,
+                    country_code, country_name, country_name_lower,
+                    latitude, longitude, timezone, altitude,
+                    airport_type, is_major, is_popular, is_international,
+                    display_order, region, source, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
 
             this.db.run(sql, [
                 airport.iata_code,
@@ -717,7 +739,7 @@ class AdvancedAirportImporter {
                 airport.city_name_en,
                 airport.country_code,
                 airport.country_name,
-                airport.country_name.toLowerCase(), // 🔥 ИСПРАВЛЕНО
+                airport.country_name.toLowerCase(),
                 airport.latitude,
                 airport.longitude,
                 airport.timezone,
@@ -746,19 +768,20 @@ class AdvancedAirportImporter {
         try {
             // Общая статистика
             const stats = await this.runQueryGet(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN region = 'russia' THEN 1 ELSE 0 END) as russia,
-          SUM(CASE WHEN region = 'international' THEN 1 ELSE 0 END) as international,
-          SUM(is_popular) as popular,
-          SUM(CASE WHEN airport_type = 'city' THEN 1 ELSE 0 END) as cities,
-          SUM(CASE WHEN city_name = 'Неизвестно' THEN 1 ELSE 0 END) as unknown_city
-        FROM airports
-      `);
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN region = 'russia' THEN 1 ELSE 0 END) as russia,
+                    SUM(CASE WHEN region = 'international' THEN 1 ELSE 0 END) as international,
+                    SUM(is_popular) as popular,
+                    SUM(CASE WHEN airport_type = 'city' THEN 1 ELSE 0 END) as cities,
+                    SUM(CASE WHEN airport_type = 'airport' THEN 1 ELSE 0 END) as airports,
+                    SUM(CASE WHEN city_name = 'Неизвестно' THEN 1 ELSE 0 END) as unknown_city
+                FROM airports
+            `);
 
             console.log(`📊 Статистика базы:`);
             console.log(`  Всего записей: ${stats.total}`);
-            console.log(`  Аэропортов: ${stats.total - stats.cities}`);
+            console.log(`  Аэропортов: ${stats.airports}`);
             console.log(`  Городов: ${stats.cities}`);
             console.log(`  Российских: ${stats.russia}`);
             console.log(`  Международных: ${stats.international}`);
@@ -768,29 +791,39 @@ class AdvancedAirportImporter {
             // Примеры городов
             console.log('\n🏙️ Примеры городов:');
             const cityExamples = await this.runQueryAll(`
-        SELECT iata_code, airport_name, city_name, country_name
-        FROM airports
-        WHERE airport_type = 'city'
-        ORDER BY is_popular DESC, city_name
-        LIMIT 10
-      `);
+                SELECT iata_code, airport_name, city_name, country_name
+                FROM airports
+                WHERE airport_type = 'city'
+                ORDER BY is_popular DESC, city_name
+                LIMIT 10
+            `);
 
             cityExamples.forEach(city => {
                 console.log(`  ${city.iata_code} - ${city.airport_name}`);
                 console.log(`    Город: ${city.city_name}, Страна: ${city.country_name}`);
             });
 
+            // Проверяем Красноярск
+            console.log('\n🔍 Проверка Красноярска:');
+            const krasnoyarsk = await this.runQueryAll(`
+                SELECT iata_code, airport_name, airport_type, city_name
+                FROM airports
+                WHERE city_name LIKE '%расноярск%' OR iata_code IN ('KJA', 'KCY')
+                ORDER BY airport_type, iata_code
+            `);
+
+            if (krasnoyarsk.length > 0) {
+                console.log(`  ✅ Найдено ${krasnoyarsk.length} записей:`);
+                krasnoyarsk.forEach(item => {
+                    console.log(`    ${item.iata_code} [${item.airport_type}] - ${item.airport_name}`);
+                });
+            } else {
+                console.log('  ❌ Красноярск не найден!');
+            }
+
         } catch (error) {
             console.error('  ⚠️ Ошибка проверки:', error.message);
         }
-    }
-
-    /**
-     * Резервный импорт
-     */
-    async importFromBackup() {
-        console.log('\n🔄 Запускаю резервный импорт...');
-        console.log('✅ Резервный импорт завершен (заглушка)');
     }
 
     // Вспомогательные методы для работы с БД

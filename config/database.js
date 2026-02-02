@@ -188,7 +188,7 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS airports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      iata_code TEXT NOT NULL UNIQUE,
+      iata_code TEXT NOT NULL,
       icao_code TEXT,
 
       -- Названия аэропортов
