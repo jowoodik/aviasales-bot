@@ -444,6 +444,266 @@ app.post('/admin/api/cleanup', requireAdmin, async (req, res) => {
 });
 
 // ============================================
+// BROADCASTS API
+// ============================================
+
+// API: Получить все сообщения для рассылки
+app.get('/admin/api/broadcasts', requireAdmin, async (req, res) => {
+  try {
+    const broadcasts = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT 
+          bm.*,
+          COUNT(DISTINCT bl.chat_id) as sent_count,
+          (
+            SELECT COUNT(DISTINCT chat_id) 
+            FROM user_settings 
+            WHERE (bm.target_users = 'all' OR chat_id IN (
+              SELECT value FROM json_each(
+                CASE 
+                  WHEN bm.target_users = 'all' THEN '[]'
+                  ELSE bm.target_users 
+                END
+              )
+            ))
+          ) as total_users
+        FROM broadcast_messages bm
+        LEFT JOIN broadcast_log bl ON bm.id = bl.broadcast_id
+        GROUP BY bm.id
+        ORDER BY bm.created_at DESC
+      `, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(broadcasts);
+  } catch (error) {
+    console.error('Ошибка загрузки рассылок:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Получить конкретное сообщение
+app.get('/admin/api/broadcasts/:id', requireAdmin, async (req, res) => {
+  try {
+    const broadcastId = parseInt(req.params.id);
+
+    const broadcast = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM broadcast_messages WHERE id = ?', [broadcastId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!broadcast) {
+      return res.status(404).json({ error: 'Сообщение не найдено' });
+    }
+
+    // Получаем статистику отправки
+    const sentUsers = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT bl.chat_id, bl.sent_at, us.timezone
+        FROM broadcast_log bl
+        LEFT JOIN user_settings us ON bl.chat_id = us.chat_id
+        WHERE bl.broadcast_id = ?
+        ORDER BY bl.sent_at DESC
+      `, [broadcastId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json({
+      ...broadcast,
+      sent_users: sentUsers
+    });
+  } catch (error) {
+    console.error('Ошибка получения рассылки:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Создать новое сообщение для рассылки
+app.post('/admin/api/broadcasts', requireAdmin, async (req, res) => {
+  try {
+    const { message_text, target_users, scheduled_time } = req.body;
+
+    if (!message_text || !message_text.trim()) {
+      return res.status(400).json({ error: 'Текст сообщения обязателен' });
+    }
+
+    if (!scheduled_time || !/^\d{2}:\d{2}$/.test(scheduled_time)) {
+      return res.status(400).json({ error: 'Неверный формат времени (требуется HH:MM)' });
+    }
+
+    // Валидация target_users
+    let targetUsersStr;
+    if (target_users === 'all' || target_users === '[]' || !target_users) {
+      targetUsersStr = 'all';
+    } else {
+      // Проверяем что это валидный JSON массив
+      try {
+        const parsed = JSON.parse(target_users);
+        if (!Array.isArray(parsed)) {
+          return res.status(400).json({ error: 'target_users должен быть массивом' });
+        }
+        targetUsersStr = target_users;
+      } catch (e) {
+        return res.status(400).json({ error: 'Неверный формат target_users' });
+      }
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      db.run(
+          `INSERT INTO broadcast_messages (message_text, target_users, scheduled_time)
+         VALUES (?, ?, ?)`,
+          [message_text.trim(), targetUsersStr, scheduled_time],
+          function(err) {
+            if (err) reject(err);
+            else resolve({ id: this.lastID });
+          }
+      );
+    });
+
+    console.log(`[ADMIN] Создана рассылка #${result.id} на время ${scheduled_time}`);
+    res.json({ success: true, id: result.id });
+  } catch (error) {
+    console.error('Ошибка создания рассылки:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Обновить сообщение для рассылки
+app.put('/admin/api/broadcasts/:id', requireAdmin, async (req, res) => {
+  try {
+    const broadcastId = parseInt(req.params.id);
+    const { message_text, target_users, scheduled_time } = req.body;
+
+    // Проверяем что сообщение еще не отправлено
+    const broadcast = await new Promise((resolve, reject) => {
+      db.get('SELECT is_sent FROM broadcast_messages WHERE id = ?', [broadcastId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!broadcast) {
+      return res.status(404).json({ error: 'Сообщение не найдено' });
+    }
+
+    if (broadcast.is_sent) {
+      return res.status(400).json({ error: 'Нельзя редактировать отправленное сообщение' });
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (message_text !== undefined) {
+      updates.push('message_text = ?');
+      params.push(message_text.trim());
+    }
+
+    if (target_users !== undefined) {
+      let targetUsersStr;
+      if (target_users === 'all') {
+        targetUsersStr = 'all';
+      } else {
+        try {
+          const parsed = JSON.parse(target_users);
+          if (!Array.isArray(parsed)) {
+            return res.status(400).json({ error: 'target_users должен быть массивом' });
+          }
+          targetUsersStr = target_users;
+        } catch (e) {
+          return res.status(400).json({ error: 'Неверный формат target_users' });
+        }
+      }
+      updates.push('target_users = ?');
+      params.push(targetUsersStr);
+    }
+
+    if (scheduled_time !== undefined) {
+      if (!/^\d{2}:\d{2}$/.test(scheduled_time)) {
+        return res.status(400).json({ error: 'Неверный формат времени (требуется HH:MM)' });
+      }
+      updates.push('scheduled_time = ?');
+      params.push(scheduled_time);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'Нет данных для обновления' });
+    }
+
+    params.push(broadcastId);
+
+    await new Promise((resolve, reject) => {
+      db.run(
+          `UPDATE broadcast_messages SET ${updates.join(', ')} WHERE id = ?`,
+          params,
+          function(err) {
+            if (err) reject(err);
+            else resolve();
+          }
+      );
+    });
+
+    console.log(`[ADMIN] Обновлена рассылка #${broadcastId}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка обновления рассылки:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Удалить сообщение для рассылки
+app.delete('/admin/api/broadcasts/:id', requireAdmin, async (req, res) => {
+  try {
+    const broadcastId = parseInt(req.params.id);
+
+    await new Promise((resolve, reject) => {
+      db.run('DELETE FROM broadcast_messages WHERE id = ?', [broadcastId], function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    console.log(`[ADMIN] Удалена рассылка #${broadcastId}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка удаления рассылки:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Получить список пользователей для выбора
+app.get('/admin/api/broadcast-users', requireAdmin, async (req, res) => {
+  try {
+    const users = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT 
+          us.chat_id,
+          us.timezone,
+          us.created_at,
+          COUNT(DISTINCT ur.id) as routes_count
+        FROM user_settings us
+        LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
+        GROUP BY us.chat_id, us.timezone, us.created_at
+        ORDER BY us.created_at DESC
+      `, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('Ошибка загрузки пользователей:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // ПОЛЬЗОВАТЕЛЬСКИЕ РОУТЫ
 // ============================================
 

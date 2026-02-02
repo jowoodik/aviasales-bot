@@ -1,7 +1,7 @@
 {
   "name": "aviasales-telegram-bot",
   "version": "2.0.0",
-  "description": "Telegram bot for monitoring flight prices on Aviasales",
+  "description": "Telegram bot for monitoring flight prices",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -19,7 +19,6 @@
   "keywords": [
     "telegram",
     "bot",
-    "aviasales",
     "flight",
     "price",
     "monitor",

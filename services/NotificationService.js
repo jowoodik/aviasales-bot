@@ -385,6 +385,82 @@ class NotificationService {
   }
 
   /**
+   * 🔥 НОВАЯ ФУНКЦИЯ: Отправка broadcast сообщения с rate limiting
+   * Telegram API limit: 30 messages/second, используем 25 для безопасности
+   *
+   * @param {Array} chatIds - Массив chat_id для отправки
+   * @param {String} messageText - Текст сообщения
+   * @param {Number} broadcastId - ID рассылки
+   * @param {Number} batchSize - Количество сообщений в секунду (по умолчанию 25)
+   */
+  async sendBroadcastMessages(chatIds, messageText, broadcastId, batchSize = 25) {
+    const BroadcastService = require('./BroadcastService');
+
+    console.log(`📢 Начало отправки рассылки #${broadcastId} для ${chatIds.length} пользователей`);
+
+    let sent = 0;
+    let failed = 0;
+
+    // Разбиваем на батчи по batchSize
+    for (let i = 0; i < chatIds.length; i += batchSize) {
+      const batch = chatIds.slice(i, i + batchSize);
+      const startTime = Date.now();
+
+      // Отправляем батч параллельно
+      const promises = batch.map(async (chatId) => {
+        try {
+          await this.bot.sendMessage(chatId, messageText, {
+            parse_mode: 'Markdown',
+            disable_web_page_preview: false
+          });
+
+          // Логируем успешную отправку
+          await BroadcastService.logBroadcastSent(broadcastId, chatId);
+          sent++;
+
+          return { success: true, chatId };
+        } catch (error) {
+          console.error(`❌ Ошибка отправки broadcast пользователю ${chatId}:`, error.message);
+          failed++;
+
+          // Если пользователь заблокировал бота, все равно помечаем как отправленное
+          if (
+              error.response &&
+              (error.response.body.error_code === 403 ||
+                  error.response.body.error_code === 400)
+          ) {
+            await BroadcastService.logBroadcastSent(broadcastId, chatId);
+          }
+
+          return { success: false, chatId, error: error.message };
+        }
+      });
+
+      await Promise.all(promises);
+
+      // Вычисляем время до конца секунды
+      const elapsed = Date.now() - startTime;
+      const delay = Math.max(0, 1000 - elapsed);
+
+      // Если не последний батч, ждем до конца секунды
+      if (i + batchSize < chatIds.length && delay > 0) {
+        console.log(`⏳ Отправлено ${sent + failed}/${chatIds.length}, пауза ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    console.log(
+        `✅ Рассылка #${broadcastId} завершена: успешно ${sent}, ошибок ${failed}`
+    );
+
+    // Проверяем, завершена ли рассылка полностью
+    await BroadcastService.checkAndMarkComplete(broadcastId);
+
+    return { sent, failed };
+  }
+
+
+  /**
    * 🔥 НОВАЯ ФУНКЦИЯ: Получение неудачных комбинаций для маршрута
    */
   async _getFailedCombinations(routeId, limit = 5) {

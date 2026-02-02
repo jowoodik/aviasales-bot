@@ -44,6 +44,12 @@ const MENU_ITEMS = [
         route: '#failed-checks'
     },
     {
+        id: 'broadcasts',
+        label: 'Планировщик рассылок',
+        icon: 'bi-chat',
+        route: '#broadcasts'
+    },
+    {
         id: 'database',
         label: 'База данных',
         icon: 'bi-database',

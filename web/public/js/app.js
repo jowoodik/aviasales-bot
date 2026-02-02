@@ -14,6 +14,7 @@ import SubscriptionsPage from './pages/subscriptions.js';
 import CheckStatsPage from './pages/checkStats.js';
 import AnalyticsPage from './pages/analytics.js';
 import FailedChecksPage from './pages/failedChecks.js';
+import BroadcastsPage from './pages/broadcasts.js';
 import DatabasePage from './pages/database.js';
 
 class App {
@@ -54,6 +55,7 @@ class App {
             checkStats: new CheckStatsPage(),
             analytics: new AnalyticsPage(),
             failedChecks: new FailedChecksPage(),
+            broadcasts: new BroadcastsPage(),
             database: new DatabasePage()
         };
     }

@@ -176,6 +176,33 @@ class APIClient {
     }
 
     // ============================================
+    // BROADCASTS API
+    // ============================================
+    async getBroadcasts() {
+        return this.get(CONFIG.API.BROADCASTS);
+    }
+
+    async getBroadcastById(id) {
+        return this.get(CONFIG.API.BROADCAST_DETAIL(id));
+    }
+
+    async createBroadcast(data) {
+        return this.post(CONFIG.API.BROADCASTS, data);
+    }
+
+    async updateBroadcast(id, data) {
+        return this.put(CONFIG.API.BROADCAST_DETAIL(id), data);
+    }
+
+    async deleteBroadcast(id) {
+        return this.delete(CONFIG.API.BROADCAST_DETAIL(id));
+    }
+
+    async getBroadcastUsers() {
+        return this.get(CONFIG.API.BROADCAST_USERS);
+    }
+
+    // ============================================
     // STATISTICS API
     // ============================================
 

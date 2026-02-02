@@ -21,6 +21,11 @@ export const CONFIG = {
         SUBSCRIPTIONS: '/subscriptions',
         SUBSCRIPTION_DETAIL: (id) => `/subscriptions/${id}`,
 
+        // Broadcasts
+        BROADCASTS: '/broadcasts',
+        BROADCAST_DETAIL: (id) => `/broadcasts/${id}`,
+        BROADCAST_USERS: '/broadcast-users',
+
         // Statistics
         CHECK_STATS: '/check-stats',
         FAILED_CHECKS: '/failed-checks',
@@ -57,6 +62,7 @@ export const CONFIG = {
             ],
             actions: ['view', 'edit', 'delete']
         },
+
         ROUTES: {
             columns: [
                 { key: 'id', label: 'ID', sortable: true },
@@ -70,6 +76,7 @@ export const CONFIG = {
             ],
             actions: ['view', 'edit', 'pause', 'delete']
         },
+
         CHECK_STATS: {
             columns: [
                 { key: 'routename', label: 'Маршрут', sortable: false },
@@ -80,6 +87,7 @@ export const CONFIG = {
             ],
             actions: ['view']
         },
+
         FAILED_CHECKS: {
             columns: [
                 { key: 'routename', label: 'Маршрут', sortable: false },
@@ -89,6 +97,31 @@ export const CONFIG = {
                 { key: 'check_timestamp', label: 'Время', sortable: true, type: 'datetime' }
             ],
             actions: ['view', 'delete']
+        },
+
+        // 🔥 ОБНОВЛЕННАЯ КОНФИГУРАЦИЯ ДЛЯ BROADCASTS
+        BROADCASTS: {
+            columns: [
+                { key: 'id', label: 'ID', sortable: true, width: '60px' },
+                { key: 'message_text', label: 'Текст сообщения', sortable: false, type: 'text-preview' },
+                { key: 'target_users', label: 'Получатели', sortable: false, type: 'broadcast-recipients' },
+                { key: 'scheduled_time', label: 'Время отправки', sortable: true, type: 'time' },
+                { key: 'is_sent', label: 'Статус', sortable: true, type: 'status' },
+                { key: 'created_at', label: 'Создано', sortable: true, type: 'datetime' }
+            ],
+            actions: ['view', 'edit', 'delete']
+        },
+
+        SUBSCRIPTIONS: {
+            columns: [
+                { key: 'chat_id', label: 'Chat ID', sortable: true, type: 'code' },
+                { key: 'subscription_type', label: 'Тип', sortable: true, type: 'subscription-type' },
+                { key: 'is_active', label: 'Статус', sortable: true, type: 'subscription-status' },
+                { key: 'valid_from', label: 'Начало', sortable: true, type: 'datetime' },
+                { key: 'valid_to', label: 'Окончание', sortable: true, type: 'datetime' },
+                { key: 'created_at', label: 'Создана', sortable: true, type: 'datetime' }
+            ],
+            actions: ['view', 'edit', 'delete']
         }
     },
 
@@ -103,6 +136,13 @@ export const CONFIG = {
         FREE: 'free',
         PLUS: 'plus',
         ADMIN: 'admin'
+    },
+
+    // Broadcast status
+    BROADCAST_STATUS: {
+        PENDING: { label: 'В очереди', class: 'warning' },
+        SENT: { label: 'Отправлено', class: 'success' },
+        SENDING: { label: 'Отправка...', class: 'info' }
     },
 
     // Status badges

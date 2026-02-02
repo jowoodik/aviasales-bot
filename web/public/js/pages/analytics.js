@@ -465,7 +465,7 @@ class AnalyticsPage {
               <td>${user.route_count}</td>
               <td>${user.active_count}</td>
               <td>${user.flexible_count}</td>
-              <td><span class="badge badge-${user.subscription_type === 'free' ? 'secondary' : 'success'}">${user.subscription_type}</span></td>
+              <td>${user.subscription_type}</td>
               <td>${new Date(user.first_route_date).toLocaleDateString('ru-RU')}</td>
             </tr>
           `).join('')}

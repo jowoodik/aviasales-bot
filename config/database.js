@@ -291,6 +291,43 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_valid_to ON user_subscriptions(valid_to)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_type ON user_subscriptions(subscription_type)`);
 
+  // ============================================
+// МАССОВАЯ РАССЫЛКА
+// ============================================
+
+// Таблица сообщений для рассылки
+  db.run(`
+  CREATE TABLE IF NOT EXISTS broadcast_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_text TEXT NOT NULL,
+    target_users TEXT NOT NULL, -- 'all' или JSON массив chat_id
+    scheduled_time TEXT NOT NULL, -- время в формате HH:MM (локальное время пользователя)
+    is_sent INTEGER DEFAULT 0, -- 0 = в процессе, 1 = отправлено всем
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME
+  )
+`);
+
+// Таблица логов отправленных сообщений
+  db.run(`
+  CREATE TABLE IF NOT EXISTS broadcast_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcast_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (broadcast_id) REFERENCES broadcast_messages(id) ON DELETE CASCADE,
+    UNIQUE(broadcast_id, chat_id)
+  )
+`);
+
+// Индексы для broadcast
+  db.run(`CREATE INDEX IF NOT EXISTS idx_broadcast_messages_is_sent ON broadcast_messages(is_sent)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_broadcast_log_broadcast_id ON broadcast_log(broadcast_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_broadcast_log_chat_id ON broadcast_log(chat_id)`);
+
+  console.log('✅ Таблицы для массовой рассылки готовы');
+
+
   // Добавляем timezone в user_settings (если её нет)
   db.run(`ALTER TABLE user_settings ADD COLUMN timezone TEXT DEFAULT 'Asia/Yekaterinburg'`, (err) => {
     if (err && !err.message.includes('duplicate column')) {

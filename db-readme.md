@@ -1,12 +1,8 @@
-Вот полная документация по структуре базы данных и связям между таблицами:
-
-***
-
 # 📊 ДОКУМЕНТАЦИЯ: СТРУКТУРА БАЗЫ ДАННЫХ
 
 ## 🗂️ Обзор таблиц
 
-База данных содержит **10 основных таблиц**:
+База данных содержит **12 основных таблиц**:
 
 1. **user_settings** - настройки пользователей
 2. **unified_routes** - маршруты (фиксированные и гибкие)
@@ -18,6 +14,8 @@
 8. **user_subscriptions** - подписки пользователей
 9. **subscription_types** - типы подписок
 10. **notification_cooldown** - таймауты уведомлений
+11. **📢 broadcasts** - массовые рассылки (новое)
+12. **📢 broadcast_log** - логи отправки рассылок (новое)
 
 ***
 
@@ -29,21 +27,21 @@
 │  (chat_id - PK)     │
 └──────────┬──────────┘
            │ 1
-           │
-           │ N
-┌──────────┴──────────┐
-│  unified_routes     │◄────────────────────┐
-│  (id - PK)          │                     │
-│  (chat_id - FK)     │                     │
-└──────────┬──────────┘                     │
-           │ 1                              │
-           ├──────────┬─────────┬───────────┤
-           │ N        │ N       │ N         │ N
-┌──────────┴─────┐ ┌──┴─────┐ ┌─┴────────┐ ┌┴──────────────────┐
-│ route_results  │ │route_  │ │combination│ │ price_analytics   │
-│ (route_id-FK)  │ │check_  │ │_check_    │ │ (route_id - FK)   │
-│                │ │stats   │ │results    │ │ (chat_id - FK)    │
-└────────────────┘ │(FK)    │ │(FK)       │ └───────────────────┘
+           ├───────────────────────────┬───────────────┐
+           │ N                         │ N             │ N
+┌──────────┴──────────┐     ┌──────────┴──────────┐  ┌┴───────────────┐
+│  unified_routes     │     │ broadcast_log        │  │ user_          │
+│  (id - PK)          │◄────│  (chat_id - FK)      │  │ subscriptions  │
+│  (chat_id - FK)     │     └──────────┬───────────┘  └────────────────┘
+└──────────┬──────────┘                │ N
+           │ 1                         │ N
+           ├──────────┬─────────┬──────┴──┬────────────┐
+           │ N        │ N       │ N       │            │ N
+┌──────────┴─────┐ ┌──┴─────┐ ┌─┴────────┐ ┌──────────┴──────────┐ ┌┴──────────────────┐
+│ route_results  │ │route_  │ │combination│ │   broadcasts        │ │ price_analytics   │
+│ (route_id-FK)  │ │check_  │ │_check_    │ │   (id - PK)         │ │ (route_id - FK)   │
+│                │ │stats   │ │results    │ └─────────────────────┘ │ (chat_id - FK)    │
+└────────────────┘ │(FK)    │ │(FK)       │                         └───────────────────┘
                    └────────┘ └───────────┘
 
 ┌─────────────────────┐         ┌─────────────────────┐
@@ -87,6 +85,7 @@ CREATE TABLE user_settings (
 - `1:1` с `user_subscriptions` (один пользователь → одна подписка)
 - `1:1` с `user_stats` (один пользователь → одна статистика)
 - `1:N` с `price_analytics` (один пользователь → много аналитики)
+- `1:N` с `broadcast_log` (один пользователь → много логов рассылок) 📢
 
 ***
 
@@ -98,25 +97,25 @@ CREATE TABLE user_settings (
 CREATE TABLE unified_routes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,              -- FK → user_settings
-    
+
     -- Основные параметры
     origin TEXT NOT NULL,                  -- Код аэропорта вылета (IATA)
     destination TEXT NOT NULL,             -- Код аэропорта прилета (IATA)
-    
+
     -- Тип маршрута
     is_flexible INTEGER DEFAULT 0,         -- 0 = фиксированный, 1 = гибкий
     has_return INTEGER DEFAULT 1,          -- 0 = в одну сторону, 1 = туда-обратно
-    
+
     -- ДЛЯ ФИКСИРОВАННЫХ МАРШРУТОВ
     departure_date TEXT,                   -- Дата вылета (YYYY-MM-DD)
     return_date TEXT,                      -- Дата возврата (YYYY-MM-DD)
-    
+
     -- ДЛЯ ГИБКИХ МАРШРУТОВ
     departure_start TEXT,                  -- Начало диапазона вылета
     departure_end TEXT,                    -- Конец диапазона вылета
     min_days INTEGER,                      -- Минимум дней в поездке
     max_days INTEGER,                      -- Максимум дней в поездке
-    
+
     -- Параметры поиска
     adults INTEGER DEFAULT 1,              -- Количество взрослых
     children INTEGER DEFAULT 0,            -- Количество детей
@@ -124,16 +123,16 @@ CREATE TABLE unified_routes (
     baggage INTEGER DEFAULT 0,             -- 0 = только ручная кладь, 1 = 20кг
     max_stops INTEGER,                     -- Максимум пересадок (99 = любое)
     max_layover_hours INTEGER,             -- Максимум время пересадки (часы)
-    
+
     -- Уведомления
     threshold_price REAL NOT NULL,         -- Пороговая цена для уведомлений
     currency TEXT DEFAULT 'RUB',           -- Валюта
-    
+
     -- Служебные поля
     is_paused INTEGER DEFAULT 0,           -- 0 = активен, 1 = на паузе
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_check DATETIME,                   -- Время последней проверки
-    
+
     FOREIGN KEY (chat_id) REFERENCES user_settings(chat_id)
 );
 ```
@@ -160,18 +159,18 @@ CREATE INDEX idx_unified_routes_chat_id ON unified_routes(chat_id);
 CREATE TABLE route_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     route_id INTEGER NOT NULL,             -- FK → unified_routes
-    
+
     departure_date TEXT NOT NULL,          -- Дата вылета найденного билета
     return_date TEXT,                      -- Дата возврата (если есть)
     days_in_country INTEGER,               -- Количество дней в поездке
-    
+
     total_price REAL NOT NULL,             -- Общая цена билета
     airline TEXT NOT NULL,                 -- Авиакомпания
     search_link TEXT NOT NULL,             -- Ссылка на поиск Aviasales
     screenshot_path TEXT,                  -- Путь к скриншоту (если есть)
-    
+
     found_at DATETIME DEFAULT CURRENT_TIMESTAMP, -- Когда найден
-    
+
     FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
 );
 ```
@@ -185,15 +184,6 @@ CREATE INDEX idx_route_results_route_id ON route_results(route_id);
 CREATE INDEX idx_route_results_price ON route_results(route_id, total_price);
 ```
 
-**Пример запроса:**
-```sql
--- Получить лучшие билеты для маршрута
-SELECT * FROM route_results
-WHERE route_id = ?
-ORDER BY total_price ASC
-LIMIT 10;
-```
-
 ***
 
 ### 4️⃣ **route_check_stats** (Статистика проверок)
@@ -205,11 +195,11 @@ CREATE TABLE route_check_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     route_id INTEGER NOT NULL,             -- FK → unified_routes
     check_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     total_combinations INTEGER NOT NULL,   -- Всего проверено комбинаций
     successful_checks INTEGER NOT NULL,    -- Успешных проверок (найдены цены)
     failed_checks INTEGER NOT NULL,        -- Неудачных проверок (ошибки/не найдено)
-    
+
     FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
 );
 ```
@@ -223,19 +213,6 @@ CREATE INDEX idx_route_check_stats_route_timestamp
 ON route_check_stats(route_id, check_timestamp DESC);
 ```
 
-**Пример запроса:**
-```sql
--- Статистика проверок за последние 24 часа
-SELECT 
-    cs.*,
-    (r.origin || ' → ' || r.destination) as route_name,
-    r.chat_id
-FROM route_check_stats cs
-JOIN unified_routes r ON cs.route_id = r.id
-WHERE cs.check_timestamp >= datetime('now', '-1 day')
-ORDER BY cs.check_timestamp DESC;
-```
-
 ***
 
 ### 5️⃣ **combination_check_results** (Детальные результаты проверок)
@@ -247,17 +224,17 @@ CREATE TABLE combination_check_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     route_id INTEGER NOT NULL,             -- FK → unified_routes
     check_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     departure_date TEXT NOT NULL,          -- Проверенная дата вылета
     return_date TEXT,                      -- Проверенная дата возврата
     days_in_country INTEGER,               -- Дней в поездке
-    
+
     status TEXT NOT NULL,                  -- 'success', 'not_found', 'error'
     price REAL,                            -- Найденная цена (если success)
     currency TEXT DEFAULT 'RUB',
     error_reason TEXT,                     -- Причина ошибки (если error)
     search_url TEXT,                       -- URL запроса
-    
+
     FOREIGN KEY (route_id) REFERENCES unified_routes(id) ON DELETE CASCADE
 );
 ```
@@ -274,20 +251,6 @@ CREATE INDEX idx_combination_check_status
 ON combination_check_results(route_id, status);
 ```
 
-**Пример запроса:**
-```sql
--- Все неудачные проверки
-SELECT 
-    ccr.*,
-    (r.origin || ' → ' || r.destination) as route_name,
-    r.chat_id
-FROM combination_check_results ccr
-JOIN unified_routes r ON ccr.route_id = r.id
-WHERE ccr.status IN ('error', 'not_found')
-ORDER BY ccr.check_timestamp DESC
-LIMIT 100;
-```
-
 ***
 
 ### 6️⃣ **price_analytics** (Аналитика цен)
@@ -297,18 +260,18 @@ LIMIT 100;
 ```sql
 CREATE TABLE price_analytics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    
+
     -- Привязка
     route_type TEXT NOT NULL,              -- 'regular' или 'flexible'
     origin TEXT NOT NULL,
     destination TEXT NOT NULL,
     route_id INTEGER,                      -- FK → unified_routes (может быть NULL)
     chat_id INTEGER,                       -- FK → user_settings (может быть NULL)
-    
+
     -- Цена
     price REAL NOT NULL,
     airline TEXT,
-    
+
     -- Время
     found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     hour_of_day INTEGER,                   -- Час дня (0-23)
@@ -334,18 +297,6 @@ CREATE INDEX idx_price_analytics_time ON price_analytics(hour_of_day, day_of_wee
 CREATE INDEX idx_price_analytics_chat ON price_analytics(chat_id);
 ```
 
-**Пример запроса:**
-```sql
--- История цен для графика
-SELECT 
-    price, 
-    found_at, 
-    airline
-FROM price_analytics
-WHERE route_id = ? AND chat_id = ?
-ORDER BY found_at ASC;
-```
-
 ***
 
 ### 7️⃣ **user_subscriptions** (Подписки пользователей)
@@ -357,12 +308,12 @@ CREATE TABLE user_subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL UNIQUE,       -- FK → user_settings
     subscription_type TEXT NOT NULL DEFAULT 'free', -- FK → subscription_types
-    
+
     valid_from DATETIME DEFAULT CURRENT_TIMESTAMP,
     valid_to DATETIME,                     -- NULL для бесплатной подписки
     is_active INTEGER DEFAULT 1,           -- 0 = неактивна, 1 = активна
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    
+
     FOREIGN KEY (chat_id) REFERENCES user_settings(chat_id)
 );
 ```
@@ -389,19 +340,21 @@ CREATE TABLE subscription_types (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,             -- 'free', 'plus', 'admin'
     display_name TEXT NOT NULL,            -- Отображаемое название
-    
+
     max_fixed_routes INTEGER NOT NULL,     -- Макс. фиксированных маршрутов
     max_flexible_routes INTEGER NOT NULL,  -- Макс. гибких маршрутов
     max_combinations INTEGER NOT NULL,     -- Макс. комбинаций для проверки
     check_interval_hours INTEGER NOT NULL, -- Интервал проверок (часы)
-    
+
     price_per_month REAL DEFAULT 0,        -- Цена в месяц
     is_active INTEGER DEFAULT 1,           -- Активна ли подписка
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Базовые типы
-INSERT INTO subscription_types VALUES
+INSERT INTO subscription_types 
+(name, display_name, max_fixed_routes, max_flexible_routes, max_combinations, check_interval_hours, price_per_month)
+VALUES
 ('free', 'Бесплатная', 3, 1, 20, 4, 0),
 ('plus', 'Plus', 5, 3, 50, 2, 199),
 ('admin', 'Admin', 999, 999, 999, 1, 0);
@@ -439,6 +392,126 @@ CREATE TABLE notification_cooldown (
     chat_id INTEGER PRIMARY KEY,
     last_notification INTEGER NOT NULL     -- Unix timestamp
 );
+```
+
+***
+
+### 1️⃣1️⃣ **📢 broadcasts** (Массовые рассылки) - НОВОЕ
+
+**Назначение:** Хранит информацию о массовых рассылках
+
+```sql
+CREATE TABLE broadcasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_text TEXT NOT NULL,            -- Текст сообщения (Markdown)
+    target_users TEXT NOT NULL DEFAULT 'all', -- 'all' или JSON массив chat_id
+    scheduled_time TEXT NOT NULL,          -- Время отправки (HH:MM)
+
+    -- Статус
+    is_sent INTEGER DEFAULT 0,             -- 0 = в очереди, 1 = отправлено
+    total_users INTEGER DEFAULT 0,         -- Всего пользователей для отправки
+    sent_count INTEGER DEFAULT 0,          -- Уже отправлено
+
+    -- Временные метки
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME                       -- Когда завершена отправка
+);
+```
+
+**Связи:**
+- `1:N` с `broadcast_log` (одна рассылка → много логов отправки)
+
+**Индексы:**
+```sql
+CREATE INDEX idx_broadcasts_is_sent ON broadcasts(is_sent);
+CREATE INDEX idx_broadcasts_scheduled ON broadcasts(scheduled_time);
+CREATE INDEX idx_broadcasts_created ON broadcasts(created_at DESC);
+```
+
+**Пример запроса:**
+```sql
+-- Получить активные рассылки (не отправленные)
+SELECT * FROM broadcasts
+WHERE is_sent = 0
+ORDER BY created_at DESC;
+
+-- Статистика рассылок
+SELECT 
+    id,
+    message_text,
+    total_users,
+    sent_count,
+    ROUND(sent_count * 100.0 / total_users, 2) as progress,
+    is_sent,
+    created_at,
+    sent_at
+FROM broadcasts
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+***
+
+### 1️⃣2️⃣ **📢 broadcast_log** (Логи отправки рассылок) - НОВОЕ
+
+**Назначение:** Логирует каждую отправку сообщения в рамках рассылки
+
+```sql
+CREATE TABLE broadcast_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    broadcast_id INTEGER NOT NULL,         -- FK → broadcasts
+    chat_id INTEGER NOT NULL,              -- FK → user_settings
+
+    -- Статус отправки
+    status TEXT NOT NULL,                  -- 'success', 'error', 'skipped'
+    error_message TEXT,                    -- Текст ошибки (если есть)
+
+    -- Временная метка
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (broadcast_id) REFERENCES broadcasts(id) ON DELETE CASCADE,
+    FOREIGN KEY (chat_id) REFERENCES user_settings(chat_id) ON DELETE CASCADE
+);
+```
+
+**Связи:**
+- `N:1` с `broadcasts` (много логов → одна рассылка)
+- `N:1` с `user_settings` (много логов → один пользователь)
+
+**Индексы:**
+```sql
+CREATE INDEX idx_broadcast_log_broadcast_id ON broadcast_log(broadcast_id);
+CREATE INDEX idx_broadcast_log_chat_id ON broadcast_log(chat_id);
+CREATE INDEX idx_broadcast_log_status ON broadcast_log(status);
+CREATE INDEX idx_broadcast_log_sent_at ON broadcast_log(sent_at DESC);
+```
+
+**Пример запроса:**
+```sql
+-- История отправок для рассылки
+SELECT 
+    bl.id,
+    bl.chat_id,
+    us.timezone,
+    bl.status,
+    bl.error_message,
+    bl.sent_at
+FROM broadcast_log bl
+LEFT JOIN user_settings us ON bl.chat_id = us.chat_id
+WHERE bl.broadcast_id = ?
+ORDER BY bl.sent_at ASC;
+
+-- Ошибки при отправке
+SELECT 
+    bl.*,
+    b.message_text,
+    us.timezone
+FROM broadcast_log bl
+JOIN broadcasts b ON bl.broadcast_id = b.id
+LEFT JOIN user_settings us ON bl.chat_id = us.chat_id
+WHERE bl.status = 'error'
+ORDER BY bl.sent_at DESC
+LIMIT 100;
 ```
 
 ***
@@ -482,16 +555,6 @@ ORDER BY pa.price ASC, pa.found_at DESC
 LIMIT 10;
 ```
 
-**Связь таблиц:**
-```
-user_settings (chat_id) 
-    ↓ 1:N
-unified_routes (id, chat_id)
-    ↓ 1:N
-route_results (route_id) → лучшие найденные билеты
-price_analytics (route_id, chat_id) → вся история цен
-```
-
 ***
 
 ### 📌 Получить все маршруты пользователя с количеством найденных билетов
@@ -509,72 +572,98 @@ GROUP BY ur.id
 ORDER BY ur.created_at DESC;
 ```
 
-**Связь таблиц:**
-```
-user_settings (chat_id)
-    ↓
-unified_routes (id, chat_id)
-    ↓ LEFT JOIN
-route_results (route_id) → подсчет билетов
-route_check_stats (route_id) → подсчет проверок
+***
+
+### 📌 Получить всех пользователей для рассылки (с timezone)
+
+```sql
+-- Все пользователи с активными маршрутами
+SELECT DISTINCT
+    us.chat_id,
+    us.timezone,
+    COUNT(DISTINCT ur.id) as routes_count
+FROM user_settings us
+LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
+GROUP BY us.chat_id
+HAVING routes_count > 0
+ORDER BY us.created_at DESC;
+
+-- Только активные пользователи (проверки за последние 7 дней)
+SELECT DISTINCT
+    us.chat_id,
+    us.timezone,
+    MAX(ur.last_check) as last_active
+FROM user_settings us
+JOIN unified_routes ur ON us.chat_id = ur.chat_id
+WHERE ur.last_check >= datetime('now', '-7 days')
+GROUP BY us.chat_id
+ORDER BY last_active DESC;
 ```
 
 ***
 
-### 📌 Статистика проверок с названиями маршрутов
+### 📌 Получить детальную информацию о рассылке
 
 ```sql
+-- Полная информация о рассылке с логами
 SELECT 
-    cs.id,
-    cs.check_timestamp,
-    cs.total_combinations,
-    cs.successful_checks,
-    cs.failed_checks,
-    (ur.origin || ' → ' || ur.destination) as route_name,
-    ur.chat_id,
-    us.timezone
-FROM route_check_stats cs
-JOIN unified_routes ur ON cs.route_id = ur.id
-JOIN user_settings us ON ur.chat_id = us.chat_id
-WHERE cs.check_timestamp >= datetime('now', '-7 days')
-ORDER BY cs.check_timestamp DESC;
-```
+    b.id,
+    b.message_text,
+    b.scheduled_time,
+    b.is_sent,
+    b.total_users,
+    b.sent_count,
+    b.created_at,
+    b.sent_at,
+    COUNT(CASE WHEN bl.status = 'success' THEN 1 END) as success_count,
+    COUNT(CASE WHEN bl.status = 'error' THEN 1 END) as error_count,
+    COUNT(CASE WHEN bl.status = 'skipped' THEN 1 END) as skipped_count
+FROM broadcasts b
+LEFT JOIN broadcast_log bl ON b.id = bl.broadcast_id
+WHERE b.id = ?
+GROUP BY b.id;
 
-**Связь таблиц:**
-```
-route_check_stats (route_id)
-    ↓
-unified_routes (id, chat_id) → получить origin/destination
-    ↓
-user_settings (chat_id) → получить настройки пользователя
+-- Получить пользователей кому уже отправлено
+SELECT 
+    bl.chat_id,
+    us.timezone,
+    bl.sent_at,
+    bl.status
+FROM broadcast_log bl
+LEFT JOIN user_settings us ON bl.chat_id = us.chat_id
+WHERE bl.broadcast_id = ?
+  AND bl.status = 'success'
+ORDER BY bl.sent_at ASC;
 ```
 
 ***
 
-### 📌 Топ пользователей по количеству маршрутов
+### 📌 Пользователи для рассылки в определенное время
 
 ```sql
+-- Получить пользователей у которых сейчас 10:00 по их локальному времени
+-- (для планировщика рассылок)
+WITH target_time AS (
+    SELECT '10:00' as scheduled_time
+)
 SELECT 
     us.chat_id,
     us.timezone,
-    COUNT(ur.id) as total_routes,
-    COUNT(CASE WHEN ur.is_paused = 0 THEN 1 END) as active_routes,
-    usub.subscription_type
+    strftime('%H:%M', datetime('now', 'localtime')) as server_time,
+    -- Вычисляем локальное время пользователя
+    strftime('%H:%M', 
+        datetime('now', 'utc', 
+            CASE us.timezone
+                WHEN 'Europe/Moscow' THEN '+3 hours'
+                WHEN 'Asia/Yekaterinburg' THEN '+5 hours'
+                WHEN 'Asia/Vladivostok' THEN '+10 hours'
+                -- добавить остальные таймзоны
+                ELSE '+0 hours'
+            END
+        )
+    ) as user_local_time
 FROM user_settings us
-LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
-LEFT JOIN user_subscriptions usub ON us.chat_id = usub.chat_id
-GROUP BY us.chat_id
-ORDER BY total_routes DESC
-LIMIT 10;
-```
-
-**Связь таблиц:**
-```
-user_settings (chat_id)
-    ↓ LEFT JOIN
-unified_routes (chat_id) → подсчет маршрутов
-    ↓ LEFT JOIN
-user_subscriptions (chat_id) → тип подписки
+WHERE user_local_time = (SELECT scheduled_time FROM target_time);
 ```
 
 ***
@@ -600,26 +689,70 @@ LEFT JOIN user_subscriptions usub ON ur.chat_id = usub.chat_id
 WHERE ur.id = ?;
 ```
 
-### Пример 2: Неудачные проверки с контекстом
+***
+
+### Пример 2: Создание рассылки и логирование
 
 ```sql
+-- Шаг 1: Создать рассылку
+INSERT INTO broadcasts (message_text, target_users, scheduled_time, total_users)
+VALUES (
+    '🎉 Новая функция! Теперь можно искать билеты с гибкими датами.',
+    'all',
+    '10:00',
+    (SELECT COUNT(*) FROM user_settings)
+);
+
+-- Шаг 2: Получить ID созданной рассылки
+SELECT last_insert_rowid() as broadcast_id;
+
+-- Шаг 3: При отправке каждому пользователю - добавить лог
+INSERT INTO broadcast_log (broadcast_id, chat_id, status)
+VALUES (1, 123456789, 'success');
+
+-- Шаг 4: Обновить счетчик отправленных
+UPDATE broadcasts
+SET sent_count = sent_count + 1
+WHERE id = 1;
+
+-- Шаг 5: Когда все отправлено - пометить как завершенную
+UPDATE broadcasts
+SET is_sent = 1, sent_at = CURRENT_TIMESTAMP
+WHERE id = 1 AND sent_count >= total_users;
+```
+
+***
+
+### Пример 3: Статистика рассылок
+
+```sql
+-- Общая статистика по всем рассылкам
 SELECT 
-    ccr.id,
-    ccr.departure_date,
-    ccr.return_date,
-    ccr.status,
-    ccr.error_reason,
-    ccr.check_timestamp,
-    (ur.origin || ' → ' || ur.destination) as route,
-    ur.chat_id,
-    ur.threshold_price,
-    us.timezone
-FROM combination_check_results ccr
-JOIN unified_routes ur ON ccr.route_id = ur.id
-JOIN user_settings us ON ur.chat_id = us.chat_id
-WHERE ccr.status = 'error'
-  AND ccr.check_timestamp >= datetime('now', '-1 day')
-ORDER BY ccr.check_timestamp DESC;
+    COUNT(*) as total_broadcasts,
+    SUM(CASE WHEN is_sent = 1 THEN 1 ELSE 0 END) as sent,
+    SUM(CASE WHEN is_sent = 0 THEN 1 ELSE 0 END) as pending,
+    SUM(total_users) as total_messages,
+    SUM(sent_count) as actually_sent,
+    AVG(sent_count * 100.0 / NULLIF(total_users, 0)) as avg_success_rate
+FROM broadcasts;
+
+-- Последние 10 рассылок с детальной статистикой
+SELECT 
+    b.id,
+    SUBSTR(b.message_text, 1, 50) || '...' as preview,
+    b.scheduled_time,
+    b.total_users,
+    b.sent_count,
+    ROUND(b.sent_count * 100.0 / NULLIF(b.total_users, 0), 2) || '%' as success_rate,
+    b.is_sent,
+    b.created_at,
+    COALESCE(
+        (SELECT COUNT(*) FROM broadcast_log WHERE broadcast_id = b.id AND status = 'error'),
+        0
+    ) as errors
+FROM broadcasts b
+ORDER BY b.created_at DESC
+LIMIT 10;
 ```
 
 ***
@@ -634,6 +767,8 @@ ORDER BY ccr.check_timestamp DESC;
 4. **price_analytics** — вся история цен для аналитики
 5. **route_check_stats** — агрегированная статистика проверок
 6. **combination_check_results** — детальные результаты каждой проверки
+7. **📢 broadcasts** — массовые рассылки (новое)
+8. **📢 broadcast_log** — логи отправки рассылок (новое)
 
 ### Ключевые Foreign Keys:
 
@@ -644,5 +779,20 @@ ORDER BY ccr.check_timestamp DESC;
 - `price_analytics.route_id` → `unified_routes.id`
 - `price_analytics.chat_id` → `user_settings.chat_id`
 - `user_subscriptions.chat_id` → `user_settings.chat_id`
+- **`broadcast_log.broadcast_id` → `broadcasts.id`** 📢
+- **`broadcast_log.chat_id` → `user_settings.chat_id`** 📢
+
+### Новая функциональность - Массовая рассылка:
+
+- Таблица `broadcasts` хранит информацию о рассылках
+- Таблица `broadcast_log` логирует каждую отправку
+- Поддержка отправки по локальному времени пользователя
+- Автоматическое соблюдение rate limits Telegram (25 сообщений/сек)
+- Полная статистика и отслеживание ошибок
 
 Теперь у вас есть полная карта базы данных! 🎉
+
+---
+
+*Последнее обновление: 03.02.2026*  
+*Версия БД: 2.0* - Добавлены таблицы для массовой рассылки
