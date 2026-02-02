@@ -215,26 +215,30 @@ class NotificationService {
 
       await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
 
-      // 👉 Новый блок: кнопка для покупки самого дешёвого билета по маршруту
-      try {
-        const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
-        const bestResult = bestResults[0];
+      // 👉 Исправленный блок: отправляем кнопки для всех маршрутов с найденными ценами
+      for (const stat of stats) {
+        if (stat.bestPrice) {
+          try {
+            const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
+            const bestResult = bestResults[0];
 
-        if (bestResult && bestResult.search_link) {
-          const inlineKeyboard = {
-            inline_keyboard: [[
-              { text: '🔗 Купить самый дешевый билет', url: bestResult.search_link }
-            ]]
-          };
+            if (bestResult && bestResult.search_link) {
+              const inlineKeyboard = {
+                inline_keyboard: [[
+                  { text: `🔗 Купить билет ${stat.origin} → ${stat.destination}`, url: bestResult.search_link }
+                ]]
+              };
 
-          await this.bot.sendMessage(
-              chatId,
-              `🔍 Лучшее предложение для *${stat.origin} → ${stat.destination}*`,
-              { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
-          );
+              await this.bot.sendMessage(
+                  chatId,
+                  `💰 Лучшее предложение для *${stat.origin} → ${stat.destination}*: ${stat.bestPrice.toLocaleString('ru-RU')} ₽`,
+                  { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
+              );
+            }
+          } catch (e) {
+            console.error('Ошибка получения лучшего результата для маршрута', stat.routeId, e);
+          }
         }
-      } catch (e) {
-        console.error('Ошибка получения лучшего результата для маршрута', 'stat' + stat, 'stats:' + stats, 'chatID' + chatID, e);
       }
 
       await this.recordNotification(chatId);

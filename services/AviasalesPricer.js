@@ -25,8 +25,13 @@ class AviasalesPricer {
       'http://PEesVANV:hiBzhNjR@85.142.1.182:62672',
       'http://PEesVANV:hiBzhNjR@85.142.5.72:62916',
       'http://PEesVANV:hiBzhNjR@85.142.7.101:64414',
-      'http://PEesVANV:hiBzhNjR@85.142.46.30:64626',
+      // 'http://PEesVANV:hiBzhNjR@85.142.46.30:64626',
       'http://PEesVANV:hiBzhNjR@85.142.81.248:64954',
+      'http://PEesVANV:hiBzhNjR@109.196.172.199:64320',
+      'http://PEesVANV:hiBzhNjR@85.142.0.77:63718',
+      'http://PEesVANV:hiBzhNjR@85.142.2.177:62616',
+      'http://PEesVANV:hiBzhNjR@85.142.48.85:63040',
+      'http://PEesVANV:hiBzhNjR@85.142.49.242:63112'
     ];
     this.workingProxies = [];
     this.currentProxyIndex = 0;

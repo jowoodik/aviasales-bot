@@ -94,7 +94,6 @@ class UnifiedMonitor {
 
             // 🔥 ИЗМЕНЕНО: используем enhancedSearchLink вместо простого URL
             const searchLink = priceResult?.enhancedSearchLink || urls[i];
-            console.log(searchLink);
 
             let status, errorReason = null;
 
