@@ -153,7 +153,7 @@ class DashboardPage {
             },
             {
                 icon: 'bi-graph-up',
-                value: statsData.avgRoutesPerUser ? statsData.avgRoutesPerUser.toFixed(1) : 0,
+                value: users.length ? (routes.length / users.length).toFixed(1) : 0,
                 label: 'Среднее маршрутов',
                 sublabel: 'На пользователя',
                 variant: 'warning',
