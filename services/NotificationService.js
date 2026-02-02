@@ -234,7 +234,7 @@ class NotificationService {
           );
         }
       } catch (e) {
-        console.error('Ошибка получения лучшего результата для маршрута', stat.routeId, e);
+        console.error('Ошибка получения лучшего результата для маршрута', 'stat' + stat, 'stats:' + stats, 'chatID' + chatID, e);
       }
 
       await this.recordNotification(chatId);
