@@ -6,67 +6,62 @@ class AirportService {
     /**
      * Регистронезависимый поиск аэропортов и городов
      */
+    /**
+     * Регистронезависимый поиск аэропортов и городов
+     */
     searchAirportsEnhanced(query, limit = 10) {
         return new Promise((resolve, reject) => {
             const searchTerm = query.trim().toLowerCase();
-            const searchPattern = `%${searchTerm}%`;
+            const searchPattern = `%${searchTerm.replace(/\s+/g, '%')}%`;
 
-            // Проверяем, не является ли запрос IATA кодом (3 буквы)
-            const isIataCode = /^[a-z]{3}$/.test(searchTerm);
+            // 🔥 ИСПРАВЛЕНИЕ: Проверяем на IATA код более точно
+            // IATA код всегда состоит из 3 букв (A-Z) и должен существовать в базе
+            const isPotentialIataCode = /^[a-z]{3}$/.test(searchTerm);
 
             let sql;
             let params;
 
-            if (isIataCode) {
-                // Если это IATA код, ищем точное совпадение в первую очередь
+            if (isPotentialIataCode) {
+                // Если это 3 буквы - это МОЖЕТ быть IATA код
+                // Ищем точное совпадение и текстовый поиск
                 const iataCode = searchTerm.toUpperCase();
 
                 sql = `
-                    SELECT
-                        iata_code,
-                        airport_name,
-                        airport_name_en,
-                        city_code,
-                        city_name,
-                        city_name_en,
-                        country_name,
-                        country_code,
-                        timezone,
-                        is_major,
-                        is_popular,
-                        is_international,
-                        region,
-                        airport_type
-                    FROM airports
-                    WHERE iata_code = ?
-
-                    UNION
-
-                    SELECT
-                        iata_code,
-                        airport_name,
-                        airport_name_en,
-                        city_code,
-                        city_name,
-                        city_name_en,
-                        country_name,
-                        country_code,
-                        timezone,
-                        is_major,
-                        is_popular,
-                        is_international,
-                        region,
-                        airport_type
-                    FROM airports
-                    WHERE
-                        city_name_lower LIKE ?
-                       OR airport_name_lower LIKE ?
-                       OR country_name_lower LIKE ?
-
+                    SELECT * FROM (
+                                      SELECT
+                                          iata_code,
+                                          airport_name,
+                                          airport_name_en,
+                                          city_code,
+                                          city_name,
+                                          city_name_en,
+                                          country_name,
+                                          country_code,
+                                          timezone,
+                                          is_major,
+                                          is_popular,
+                                          is_international,
+                                          region,
+                                          airport_type,
+                                          CASE
+                                              WHEN iata_code = ? THEN 1  -- Точный IATA код
+                                              WHEN LOWER(iata_code) = ? THEN 2  -- IATA код в нижнем регистре
+                                              ELSE 3
+                                              END as exact_match,
+                                          CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END as type_priority,
+                                          is_popular as popular_score
+                                      FROM airports
+                                      WHERE iata_code = ?
+                                         OR city_name_lower LIKE ?
+                                         OR airport_name_lower LIKE ?
+                                         OR LOWER(city_name_en) LIKE ?
+                                         OR LOWER(airport_name_en) LIKE ?
+                                         OR city_code LIKE ?
+                                  )
                     ORDER BY
-                        -- Сначала города
-                        CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END,
-                        is_popular DESC,
+                        exact_match,  -- Сначала точные IATA коды
+                        type_priority,  -- Затем города
+                        popular_score DESC,
                         is_major DESC,
                         city_name
                         LIMIT ?
@@ -74,14 +69,18 @@ class AirportService {
 
                 params = [
                     iataCode,
+                    searchTerm,
+                    iataCode,
                     searchPattern,
                     searchPattern,
                     searchPattern,
+                    searchPattern,
+                    `%${iataCode}%`,
                     limit
                 ];
 
             } else {
-                // Если это текст, ищем по полям в нижнем регистре
+                // Если это не 3 буквы или это текст - ищем как текст
                 sql = `
                     SELECT
                         iata_code,
@@ -97,25 +96,29 @@ class AirportService {
                         is_popular,
                         is_international,
                         region,
-                        airport_type
+                        airport_type,
+                        CASE
+                            -- Приоритет для точных совпадений в начале
+                            WHEN city_name_lower LIKE ? || '%' THEN 1
+                            WHEN airport_name_lower LIKE ? || '%' THEN 2
+                            WHEN LOWER(city_name_en) LIKE ? || '%' THEN 3
+                            WHEN LOWER(airport_name_en) LIKE ? || '%' THEN 4
+                            WHEN country_name_lower LIKE ? || '%' THEN 5
+                            ELSE 6
+                            END as match_priority,
+                        CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END as type_priority
                     FROM airports
                     WHERE
                         city_name_lower LIKE ?
                        OR airport_name_lower LIKE ?
                        OR country_name_lower LIKE ?
+                       OR LOWER(city_name_en) LIKE ?
+                       OR LOWER(airport_name_en) LIKE ?
                        OR iata_code LIKE ?
                        OR city_code LIKE ?
-
                     ORDER BY
-                        -- Приоритет для точных совпадений в начале строки
-                        CASE
-                            WHEN city_name_lower LIKE ? || '%' THEN 1
-                            WHEN airport_name_lower LIKE ? || '%' THEN 2
-                            WHEN country_name_lower LIKE ? || '%' THEN 3
-                            ELSE 4
-                            END,
-                        -- Сначала города, потом аэропорты
-                        CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END,
+                        match_priority,
+                        type_priority,
                         is_popular DESC,
                         is_major DESC,
                         city_name
@@ -123,23 +126,30 @@ class AirportService {
                 `;
 
                 params = [
+                    searchTerm,
+                    searchTerm,
+                    searchTerm,
+                    searchTerm,
+                    searchTerm,
+                    searchPattern,
+                    searchPattern,
                     searchPattern,
                     searchPattern,
                     searchPattern,
                     `%${searchTerm.toUpperCase()}%`,
                     `%${searchTerm.toUpperCase()}%`,
-                    searchTerm,
-                    searchTerm,
-                    searchTerm,
                     limit
                 ];
             }
 
             console.log('Searching airports and cities (case-insensitive):', searchTerm);
+            console.log('SQL query:', sql.substring(0, 200) + '...');
 
             db.all(sql, params, (err, rows) => {
                 if (err) {
                     console.error('Database error in searchAirportsEnhanced:', err);
+                    console.error('SQL:', sql);
+                    console.error('Params:', params);
                     reject(err);
                 } else {
                     console.log(`Found ${rows.length} results for query: ${searchTerm}`);
@@ -182,10 +192,10 @@ class AirportService {
             }
 
             sql += ` ORDER BY 
-        CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END,
-        display_order ASC, 
-        city_name 
-        LIMIT ?`;
+                CASE WHEN airport_type = 'city' THEN 0 ELSE 1 END,
+                display_order ASC, 
+                city_name 
+                LIMIT ?`;
 
             params.push(limit);
 
