@@ -123,18 +123,16 @@ class AviasalesPricer {
       // 🔥 ИСПРАВЛЕНО: static_fare_key из proposal.minimum_fare.fare_key
       if (proposal && proposal.minimum_fare && proposal.minimum_fare.fare_key) {
         queryParams.static_fare_key = encodeURIComponent(proposal.minimum_fare.fare_key);
-        console.log('      ✅ static_fare_key добавлен: ' + proposal.minimum_fare.fare_key);
       } else {
-        console.log('      ⚠️ minimum_fare.fare_key не найден в proposal');
+        console.error('      ⚠️ minimum_fare.fare_key не найден в proposal');
       }
 
       // 🔥 ИСПРАВЛЕНО: Параметр 't'
       const tParam = this.buildTParameter(ticket, price);
       if (tParam) {
         queryParams.t = tParam;
-        console.log('      ✅ параметр t добавлен');
       } else {
-        console.log('      ⚠️ Не удалось сформировать параметр t');
+        console.error('      ⚠️ Не удалось сформировать параметр t');
       }
 
       // Формируем итоговый URL
@@ -148,12 +146,7 @@ class AviasalesPricer {
           .filter(param => param !== '')
           .join('&');
 
-      const fullUrl = 'https://www.aviasales.ru/search/' + searchPath + '?' + queryString;
-
-      console.log('      ✅ Сформирована ссылка, длина:', fullUrl.length);
-      console.log('      🔗 начало:', fullUrl);
-
-      return fullUrl;
+      return 'https://www.aviasales.ru/search/' + searchPath + '?' + queryString;
     } catch (error) {
       console.error('      ❌ Ошибка формирования расширенной ссылки:', error.message);
       console.error('      Stack:', error.stack);
@@ -406,7 +399,7 @@ class AviasalesPricer {
   }
 
   async setCookie(attempt = 1, maxAttempts = 3) {
-    console.log('\n🍪 ========================================');
+    console.log('🍪 ========================================');
     console.log('🍪 УСТАНОВКА КУКИ (попытка ' + attempt + '/' + maxAttempts + ')');
     console.log('🍪 ========================================');
     console.log('🌐 Запуск браузера для получения куки...');

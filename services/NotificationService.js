@@ -144,28 +144,6 @@ class NotificationService {
             report += `❌ Цены не найдены\n`;
           }
 
-          // 👉 Новый блок: кнопка для покупки самого дешёвого билета по маршруту
-          try {
-            const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
-            const bestResult = bestResults[0];
-
-            if (bestResult && bestResult.search_link) {
-              const inlineKeyboard = {
-                inline_keyboard: [[
-                  { text: '🔗 Купить самый дешевый билет', url: bestResult.search_link }
-                ]]
-              };
-
-              await this.bot.sendMessage(
-                  chatId,
-                  `🔍 Лучшее предложение для *${stat.origin} → ${stat.destination}*`,
-                  { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
-              );
-            }
-          } catch (e) {
-            console.error('Ошибка получения лучшего результата для маршрута', stat.routeId, e);
-          }
-
           // 🔥 НОВОЕ: Статистика комбинаций для гибких маршрутов
           if (stat.isFlexible && stat.totalCombinations > 0) {
             report += `📋 Проверено: ${stat.successfulChecks}/${stat.totalCombinations} комбинаций\n`;
@@ -236,6 +214,29 @@ class NotificationService {
       }
 
       await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+
+      // 👉 Новый блок: кнопка для покупки самого дешёвого билета по маршруту
+      try {
+        const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
+        const bestResult = bestResults[0];
+
+        if (bestResult && bestResult.search_link) {
+          const inlineKeyboard = {
+            inline_keyboard: [[
+              { text: '🔗 Купить самый дешевый билет', url: bestResult.search_link }
+            ]]
+          };
+
+          await this.bot.sendMessage(
+              chatId,
+              `🔍 Лучшее предложение для *${stat.origin} → ${stat.destination}*`,
+              { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
+          );
+        }
+      } catch (e) {
+        console.error('Ошибка получения лучшего результата для маршрута', stat.routeId, e);
+      }
+
       await this.recordNotification(chatId);
 
       console.log(`✅ Отчет отправлен пользователю ${chatId}`);
