@@ -421,6 +421,10 @@ class RouteHandlers {
                     return await this._handleDepartureStartStep(chatId, text, state);
                 case 'departure_end':
                     return await this._handleDepartureEndStep(chatId, text, state);
+                case 'departure_start_retry':
+                    return await this._handleDepartureStartRetryStep(chatId, text, state);
+                case 'combination_limit_exceeded':
+                    return await this._handleCombinationLimitExceededStep(chatId, text, state);
                 case 'min_days':
                     return await this._handleMinDaysStep(chatId, text, state);
                 case 'max_days':
@@ -441,10 +445,6 @@ class RouteHandlers {
                     return await this._handleThresholdStep(chatId, text, state);
                 case 'confirm':
                     return await this._handleConfirmStep(chatId, text, state);
-                case 'departure_start_retry':
-                    return await this._handleDepartureStartRetryStep(chatId, text, state);
-                case 'combination_limit_exceeded':
-                    return await this._handleCombinationLimitExceededStep(chatId, text, state);
             }
         } catch (error) {
             console.error('Ошибка обработки шага:', error);
@@ -918,9 +918,9 @@ class RouteHandlers {
     }
 
     async _handleSearchTypeStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'destination';
+            await this._showDestinationStep(chatId, state);
             return true;
         }
 
@@ -942,7 +942,7 @@ class RouteHandlers {
                 keyboard: [
                     ['✅ Да, нужен обратный билет'],
                     ['❌ Нет, только в одну сторону'],
-                    ['🔙 Отмена']
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -960,9 +960,9 @@ class RouteHandlers {
     }
 
     async _handleHasReturnStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'search_type';
+            await this._showSearchTypeStep(chatId, state);
             return true;
         }
 
@@ -986,23 +986,39 @@ class RouteHandlers {
 
             // Гибкий поиск
             state.step = 'departure_start';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
             this.bot.sendMessage(
                 chatId,
                 `✅ ${hasReturn ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
                 `📍 Шаг 5/${hasReturn ? '12' : '10'}: Начало диапазона вылета\n\n` +
                 `${limitWarning}` +
                 `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
-                { reply_markup: { remove_keyboard: true } }
+                keyboard
             );
         } else {
             // Фиксированный поиск - без предупреждений о лимитах
             state.step = 'departure_date';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
             this.bot.sendMessage(
                 chatId,
                 `✅ ${hasReturn ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
                 `📍 Шаг 5/${hasReturn ? '12' : '11'}: Дата вылета\n\n` +
                 `Введите дату в формате ДД.ММ.ГГГГ, например: 15.03.2026`,
-                { reply_markup: { remove_keyboard: true } }
+                keyboard
             );
         }
 
@@ -1011,6 +1027,29 @@ class RouteHandlers {
 
 
     async _handleDepartureDateStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'has_return';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['✅ Да, нужен обратный билет'],
+                        ['❌ Нет, только в одну сторону'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Тип поиска: ${state.routeData.is_flexible ? 'Диапазон дат' : 'Конкретная дата'}\n\n` +
+                `📍 Шаг 4/12: Нужен ли обратный билет?`,
+                keyboard
+            );
+            return true;
+        }
+
         const date = DateUtils.convertDateFormat(text);
 
         if (!date) {
@@ -1032,12 +1071,20 @@ class RouteHandlers {
 
         if (state.routeData.has_return) {
             state.step = 'return_date';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
             this.bot.sendMessage(
                 chatId,
                 `✅ Дата вылета: ${DateUtils.formatDateDisplay(date)}\n\n` +
                 `📍 Шаг 6/12: Дата возврата\n\n` +
                 `Введите дату в формате ДД.ММ.ГГГГ:`,
-                { reply_markup: { remove_keyboard: true } }
+                keyboard
             );
         } else {
             // Переходим сразу к выбору авиакомпании
@@ -1049,6 +1096,26 @@ class RouteHandlers {
     }
 
     async _handleReturnDateStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'departure_date';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ ${state.routeData.has_return ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
+                `📍 Шаг 5/${state.routeData.has_return ? '12' : '11'}: Дата вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 15.03.2026`,
+                keyboard
+            );
+            return true;
+        }
+
         const date = DateUtils.convertDateFormat(text);
 
         if (!date) {
@@ -1072,10 +1139,33 @@ class RouteHandlers {
     }
 
     async _handleDepartureStartStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'has_return';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['✅ Да, нужен обратный билет'],
+                        ['❌ Нет, только в одну сторону'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Тип поиска: ${state.routeData.is_flexible ? 'Диапазон дат' : 'Конкретная дата'}\n\n` +
+                `📍 Шаг 4/12: Нужен ли обратный билет?`,
+                keyboard
+            );
+            return true;
+        }
+
         const date = DateUtils.convertDateFormat(text);
 
         if (!date) {
-            this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД-ММ-ГГГГ, например: 25-02-2026');
+            this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ, например: 25.02.2026');
             return true;
         }
 
@@ -1090,22 +1180,60 @@ class RouteHandlers {
 
         state.routeData.departure_start = date;
         state.step = 'departure_end';
+        const keyboard = {
+            reply_markup: {
+                keyboard: [['🔙 Назад']],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        };
 
         this.bot.sendMessage(
             chatId,
             `✅ Начало диапазона: ${DateUtils.formatDateDisplay(date)}\n\n` +
             `📍 Шаг 6/${state.routeData.has_return ? '12' : '10'}: Конец диапазона вылета\n\n` +
             `Введите дату в формате ДД.ММ.ГГГГ:`,
-            { reply_markup: { remove_keyboard: true } }
+            keyboard
         );
 
         return true;
     }
 
     async _handleDepartureEndStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'departure_start';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            const subscription = await SubscriptionService.getUserSubscription(chatId);
+            let limitWarning = '';
+            if (state.routeData.has_return) {
+                if (subscription.name === 'free') {
+                    limitWarning = `⚠️ Помните: максимум ${subscription.max_combinations} комбинаций для бесплатного тарифа!\n\n`;
+                } else if (subscription.name === 'plus') {
+                    limitWarning = `💎 Ваш тариф Plus: до ${subscription.max_combinations} комбинаций доступно!\n\n`;
+                }
+            }
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ ${state.routeData.has_return ? 'Туда-обратно' : 'В одну сторону'}\n\n` +
+                `📍 Шаг 5/${state.routeData.has_return ? '12' : '10'}: Начало диапазона вылета\n\n` +
+                `${limitWarning}` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
+                keyboard
+            );
+            return true;
+        }
+
         const date = DateUtils.convertDateFormat(text);
         if (!date) {
-            this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД-ММ-ГГГГ, например: 10-03-2026');
+            this.bot.sendMessage(chatId, '❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ, например: 10.03.2026');
             return true;
         }
 
@@ -1125,7 +1253,8 @@ class RouteHandlers {
                     keyboard: [
                         ['2', '3', '5'],
                         ['7', '10', '14'],
-                        ['21', '28', '30']
+                        ['21', '28', '30'],
+                        ['🔙 Назад']
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1185,7 +1314,56 @@ class RouteHandlers {
         return true;
     }
 
+    async _handleDepartureStartRetryStep(chatId, text, state) {
+        if (text === '🏠 Главное меню') {
+            delete this.userStates[chatId];
+            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+            return true;
+        }
+
+        if (text === '📅 Изменить диапазон дат') {
+            state.step = 'departure_start';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `📍 Начало диапазона вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
+                keyboard
+            );
+            return true;
+        }
+
+        return false;
+    }
+
     async _handleMinDaysStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            state.step = 'departure_end';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Начало диапазона: ${DateUtils.formatDateDisplay(state.routeData.departure_start)}\n\n` +
+                `📍 Шаг 6/${state.routeData.has_return ? '12' : '10'}: Конец диапазона вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ:`,
+                keyboard
+            );
+            return true;
+        }
+
         const minDays = parseInt(text);
 
         if (isNaN(minDays) || minDays < 1 || minDays > 365) {
@@ -1201,7 +1379,8 @@ class RouteHandlers {
                 keyboard: [
                     [String(minDays), String(minDays + 1), String(minDays + 2)],
                     ['7', '14', '21'],
-                    ['28', '30', '60']
+                    ['28', '30', '60'],
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1219,55 +1398,16 @@ class RouteHandlers {
         return true;
     }
 
-    // Обработка повтора ввода начала диапазона (для маршрутов без обратного билета)
-    async _handleDepartureStartRetryStep(chatId, text, state) {
-        if (text === '🏠 Главное меню') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
-            return true;
-        }
-
-        if (text === '📅 Изменить диапазон дат') {
-            state.step = 'departure_start';
-            this.bot.sendMessage(
-                chatId,
-                `📍 Начало диапазона вылета\n\n` +
-                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
-                { reply_markup: { remove_keyboard: true } }
-            );
-            return true;
-        }
-
-        return false;
-    }
-
-// Обработка превышения лимита комбинаций (для маршрутов с обратным билетом)
-    async _handleCombinationLimitExceededStep(chatId, text, state) {
-        if (text === '🏠 Главное меню') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
-            return true;
-        }
-
-        if (text === '📅 Изменить диапазон дат') {
-            state.step = 'departure_start';
-            this.bot.sendMessage(
-                chatId,
-                `📍 Начало диапазона вылета\n\n` +
-                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
-                { reply_markup: { remove_keyboard: true } }
-            );
-            return true;
-        }
-
-        if (text === '🗓️ Изменить дни в стране') {
+    async _handleMaxDaysStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
             state.step = 'min_days';
             const keyboard = {
                 reply_markup: {
                     keyboard: [
                         ['2', '3', '5'],
                         ['7', '10', '14'],
-                        ['21', '28', '30']
+                        ['21', '28', '30'],
+                        ['🔙 Назад']
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1276,17 +1416,14 @@ class RouteHandlers {
 
             this.bot.sendMessage(
                 chatId,
-                `📍 Минимальное количество дней в стране\n\n` +
+                `✅ Диапазон вылета: ${DateUtils.formatDateDisplay(state.routeData.departure_start)} - ${DateUtils.formatDateDisplay(state.routeData.departure_end)}\n\n` +
+                `📍 Шаг 7/12: Минимальное количество дней в стране\n\n` +
                 `Выберите или введите число:`,
                 keyboard
             );
             return true;
         }
 
-        return false;
-    }
-
-    async _handleMaxDaysStep(chatId, text, state) {
         const maxDays = parseInt(text);
         if (isNaN(maxDays) || maxDays < state.routeData.min_days || maxDays > 365) {
             this.bot.sendMessage(chatId, `❌ Введите число от ${state.routeData.min_days} до 365:`);
@@ -1348,6 +1485,59 @@ class RouteHandlers {
         return true;
     }
 
+    async _handleCombinationLimitExceededStep(chatId, text, state) {
+        if (text === '🏠 Главное меню') {
+            delete this.userStates[chatId];
+            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+            return true;
+        }
+
+        if (text === '📅 Изменить диапазон дат') {
+            state.step = 'departure_start';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [['🔙 Назад']],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `📍 Начало диапазона вылета\n\n` +
+                `Введите дату в формате ДД.ММ.ГГГГ, например: 25.02.2026`,
+                keyboard
+            );
+            return true;
+        }
+
+        if (text === '🗓️ Изменить дни в стране') {
+            state.step = 'min_days';
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['2', '3', '5'],
+                        ['7', '10', '14'],
+                        ['21', '28', '30'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `📍 Минимальное количество дней в стране\n\n` +
+                `Выберите или введите число:`,
+                keyboard
+            );
+            return true;
+        }
+
+        return false;
+    }
+
     _showAirlineKeyboard(chatId, state) {
         const data = state.routeData;
         let currentStep, totalSteps;
@@ -1367,7 +1557,7 @@ class RouteHandlers {
                     ['Etihad (EY)', 'Emirates (EK)'],
                     ['Flydubai (FZ)', 'Utair (UT)'],
                     ['🌍 Любая'],
-                    ['🔙 Отмена']
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1383,9 +1573,85 @@ class RouteHandlers {
     }
 
     async _handleAirlineStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            if (state.routeData.is_flexible) {
+                if (state.routeData.has_return) {
+                    state.step = 'max_days';
+                    const keyboard = {
+                        reply_markup: {
+                            keyboard: [
+                                [String(state.routeData.min_days), String(state.routeData.min_days + 1), String(state.routeData.min_days + 2)],
+                                ['7', '14', '21'],
+                                ['28', '30', '60'],
+                                ['🔙 Назад']
+                            ],
+                            one_time_keyboard: true,
+                            resize_keyboard: true
+                        }
+                    };
+
+                    this.bot.sendMessage(
+                        chatId,
+                        `✅ Минимум дней: ${state.routeData.min_days}\n\n` +
+                        `📍 Шаг 8/12: Максимальное количество дней в стране\n\n` +
+                        `Выберите или введите число (не менее ${state.routeData.min_days}):`,
+                        keyboard
+                    );
+                } else {
+                    state.step = 'departure_end';
+                    const keyboard = {
+                        reply_markup: {
+                            keyboard: [['🔙 Назад']],
+                            resize_keyboard: true,
+                            one_time_keyboard: true
+                        }
+                    };
+
+                    this.bot.sendMessage(
+                        chatId,
+                        `✅ Начало диапазона: ${DateUtils.formatDateDisplay(state.routeData.departure_start)}\n\n` +
+                        `📍 Шаг 6/10: Конец диапазона вылета\n\n` +
+                        `Введите дату в формате ДД.ММ.ГГГГ:`,
+                        keyboard
+                    );
+                }
+            } else {
+                if (state.routeData.has_return) {
+                    state.step = 'return_date';
+                    const keyboard = {
+                        reply_markup: {
+                            keyboard: [['🔙 Назад']],
+                            resize_keyboard: true,
+                            one_time_keyboard: true
+                        }
+                    };
+
+                    this.bot.sendMessage(
+                        chatId,
+                        `✅ Дата вылета: ${DateUtils.formatDateDisplay(state.routeData.departure_date)}\n\n` +
+                        `📍 Шаг 6/12: Дата возврата\n\n` +
+                        `Введите дату в формате ДД.ММ.ГГГГ:`,
+                        keyboard
+                    );
+                } else {
+                    state.step = 'departure_date';
+                    const keyboard = {
+                        reply_markup: {
+                            keyboard: [['🔙 Назад']],
+                            resize_keyboard: true,
+                            one_time_keyboard: true
+                        }
+                    };
+
+                    this.bot.sendMessage(
+                        chatId,
+                        `✅ В одну сторону\n\n` +
+                        `📍 Шаг 5/11: Дата вылета\n\n` +
+                        `Введите дату в формате ДД.ММ.ГГГГ, например: 15.03.2026`,
+                        keyboard
+                    );
+                }
+            }
             return true;
         }
 
@@ -1416,7 +1682,7 @@ class RouteHandlers {
                 keyboard: [
                     ['1', '2', '3'],
                     ['4', '5', '6'],
-                    ['🔙 Отмена']
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1435,9 +1701,9 @@ class RouteHandlers {
     }
 
     async _handleAdultsStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'airline';
+            this._showAirlineKeyboard(chatId, state);
             return true;
         }
 
@@ -1467,7 +1733,7 @@ class RouteHandlers {
                 keyboard: [
                     ['0 (без детей)'],
                     ['1', '2', '3'],
-                    ['🔙 Отмена']
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1486,9 +1752,37 @@ class RouteHandlers {
     }
 
     async _handleChildrenStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'adults';
+            const data = state.routeData;
+            let currentStep, totalSteps;
+            if (data.is_flexible) {
+                currentStep = data.has_return ? 10 : 8;
+                totalSteps = data.has_return ? 12 : 10;
+            } else {
+                currentStep = data.has_return ? 8 : 7;
+                totalSteps = data.has_return ? 12 : 11;
+            }
+
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['1', '2', '3'],
+                        ['4', '5', '6'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Авиакомпания: ${data.airline ? Formatters.getAirlineName(data.airline) : 'Любая'}\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Количество взрослых пассажиров (от 18 лет)\n\n` +
+                `Выберите или введите число:`,
+                keyboard
+            );
             return true;
         }
 
@@ -1516,9 +1810,9 @@ class RouteHandlers {
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ['✅ Да, нужен багаж 20 кг'],
-                    ['❌ Нет, только ручная кладь'],
-                    ['🔙 Отмена']
+                    ['🧳 С багажом 20 кг'],
+                    ['🎒 Без багажа'],
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1529,7 +1823,7 @@ class RouteHandlers {
             chatId,
             `✅ Детей: ${children}\n\n` +
             `📍 Шаг ${currentStep}/${totalSteps}: Багаж\n\n` +
-            `Нужен ли багаж? (20 кг в багажном отделении)`,
+            `Нужен ли багаж 20 кг?`,
             keyboard
         );
 
@@ -1537,13 +1831,41 @@ class RouteHandlers {
     }
 
     async _handleBaggageStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'children';
+            const data = state.routeData;
+            let currentStep, totalSteps;
+            if (data.is_flexible) {
+                currentStep = data.has_return ? 11 : 9;
+                totalSteps = data.has_return ? 12 : 10;
+            } else {
+                currentStep = data.has_return ? 9 : 8;
+                totalSteps = data.has_return ? 12 : 11;
+            }
+
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['0 (без детей)'],
+                        ['1', '2', '3'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Взрослых: ${data.adults}\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Количество детей (до 18 лет)\n\n` +
+                `Выберите или введите число:`,
+                keyboard
+            );
             return true;
         }
 
-        const baggage = text.includes('Да') ? 1 : 0;
+        const baggage = text.includes('С багажом') ? 1 : 0;
         state.routeData.baggage = baggage;
         state.step = 'max_stops';
 
@@ -1561,10 +1883,11 @@ class RouteHandlers {
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ['0 (только прямые рейсы)'],
-                    ['1 пересадка', '2 пересадки'],
-                    ['🌍 Любое количество'],
-                    ['🔙 Отмена']
+                    ['0 (прямой)'],
+                    ['1 (до 1)'],
+                    ['2 (до 2)'],
+                    ['🌐 Любое'],
+                    ['🔙 Назад']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1573,9 +1896,9 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            `✅ Багаж: ${baggage ? '20 кг' : 'Только ручная кладь'}\n\n` +
-            `📍 Шаг ${currentStep}/${totalSteps}: Пересадки\n\n` +
-            `Сколько пересадок допустимо?`,
+            `✅ Багаж: ${baggage ? '20 кг' : 'Без багажа'}\n\n` +
+            `📍 Шаг ${currentStep}/${totalSteps}: Максимальное количество пересадок\n\n` +
+            `Выберите максимальное количество пересадок:`,
             keyboard
         );
 
@@ -1583,14 +1906,42 @@ class RouteHandlers {
     }
 
     async _handleMaxStopsStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'baggage';
+            const data = state.routeData;
+            let currentStep, totalSteps;
+            if (data.is_flexible) {
+                currentStep = data.has_return ? 12 : 10;
+                totalSteps = data.has_return ? 12 : 10;
+            } else {
+                currentStep = data.has_return ? 10 : 9;
+                totalSteps = data.has_return ? 12 : 11;
+            }
+
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['🧳 С багажом 20 кг'],
+                        ['🎒 Без багажа'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Детей: ${data.children}\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Багаж\n\n` +
+                `Нужен ли багаж 20 кг?`,
+                keyboard
+            );
             return true;
         }
 
         let maxStops;
-        if (text.includes('0') || text.includes('прямые')) {
+        if (text.includes('0') || text.includes('прямой')) {
             maxStops = 0;
             state.routeData.max_layover_hours = 0;
         } else if (text.includes('1')) {
@@ -1598,7 +1949,7 @@ class RouteHandlers {
         } else if (text.includes('2')) {
             maxStops = 2;
         } else {
-            maxStops = 99; // Любое количество
+            maxStops = 99;
         }
 
         state.routeData.max_stops = maxStops;
@@ -1625,9 +1976,9 @@ class RouteHandlers {
             const keyboard = {
                 reply_markup: {
                     keyboard: [
-                        ['5 часов', '10 часов'],
-                        ['15 часов', '24 часа'],
-                        ['🔙 Отмена']
+                        ['5 ч', '10 ч', '15 ч'],
+                        ['24 ч'],
+                        ['🔙 Назад']
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1636,9 +1987,9 @@ class RouteHandlers {
 
             this.bot.sendMessage(
                 chatId,
-                `✅ Пересадок: ${maxStops === 99 ? 'Любое количество' : maxStops}\n\n` +
-                `📍 Шаг ${currentStep}/${totalSteps}: Максимальное время одной пересадки\n\n` +
-                `Выберите или введите количество часов:`,
+                `✅ Пересадки: ${maxStops === 99 ? 'Любое количество' : maxStops}\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Максимальное время пересадки\n\n` +
+                `Введите максимальное время пересадки в часах (от 1 до 48):`,
                 keyboard
             );
         }
@@ -1647,15 +1998,44 @@ class RouteHandlers {
     }
 
     async _handleMaxLayoverStep(chatId, text, state) {
-        if (text === '🔙 Отмена') {
-            delete this.userStates[chatId];
-            this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
+        if (text === '🔙 Назад') {
+            state.step = 'max_stops';
+            const data = state.routeData;
+            let currentStep, totalSteps;
+            if (data.is_flexible) {
+                currentStep = data.has_return ? 13 : 11;
+                totalSteps = data.has_return ? 13 : 11;
+            } else {
+                currentStep = data.has_return ? 11 : 10;
+                totalSteps = data.has_return ? 12 : 11;
+            }
+
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        ['0 (прямой)'],
+                        ['1 (до 1)'],
+                        ['2 (до 2)'],
+                        ['🌐 Любое'],
+                        ['🔙 Назад']
+                    ],
+                    one_time_keyboard: true,
+                    resize_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(
+                chatId,
+                `✅ Багаж: ${data.baggage ? '20 кг' : 'Без багажа'}\n\n` +
+                `📍 Шаг ${currentStep}/${totalSteps}: Максимальное количество пересадок\n\n` +
+                `Выберите максимальное количество пересадок:`,
+                keyboard
+            );
             return true;
         }
 
-        const hours = parseInt(text.replace(/\D/g, ''));
-
-        if (isNaN(hours) || hours <= 0 || hours > 48) {
+        const hours = parseInt(text.replace(/ч/g, ''));
+        if (isNaN(hours) || hours < 0 || hours > 48) {
             this.bot.sendMessage(chatId, '❌ Введите число от 1 до 48:');
             return true;
         }
@@ -1677,20 +2057,97 @@ class RouteHandlers {
             totalSteps = data.has_return ? 12 : 11;
         }
 
+        const keyboard = {
+            reply_markup: {
+                keyboard: [['🔙 Назад']],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        };
+
         this.bot.sendMessage(
             chatId,
-            `📍 Шаг ${totalSteps}/${totalSteps}: Пороговая цена\n\n` +
-            `💰 Введите максимальную цену в рублях за весь маршрут, при которой вы хотите получать уведомления.\n\n` +
+            `📍 Шаг ${totalSteps}/${totalSteps}: Порог цены\n\n` +
+            `Введите максимальную цену в рублях, при которой вы хотите получать уведомления.\n` +
             `Например: 50000`,
-            { reply_markup: { remove_keyboard: true } }
+            keyboard
         );
     }
 
     async _handleThresholdStep(chatId, text, state) {
+        if (text === '🔙 Назад') {
+            if (state.routeData.max_stops === 0) {
+                state.step = 'max_stops';
+                const data = state.routeData;
+                let currentStep, totalSteps;
+                if (data.is_flexible) {
+                    currentStep = data.has_return ? 13 : 11;
+                    totalSteps = data.has_return ? 13 : 11;
+                } else {
+                    currentStep = data.has_return ? 11 : 10;
+                    totalSteps = data.has_return ? 12 : 11;
+                }
+
+                const keyboard = {
+                    reply_markup: {
+                        keyboard: [
+                            ['0 (прямой)'],
+                            ['1 (до 1)'],
+                            ['2 (до 2)'],
+                            ['🌐 Любое'],
+                            ['🔙 Назад']
+                        ],
+                        one_time_keyboard: true,
+                        resize_keyboard: true
+                    }
+                };
+
+                this.bot.sendMessage(
+                    chatId,
+                    `✅ Багаж: ${data.baggage ? '20 кг' : 'Без багажа'}\n\n` +
+                    `📍 Шаг ${currentStep}/${totalSteps}: Максимальное количество пересадок\n\n` +
+                    `Выберите максимальное количество пересадок:`,
+                    keyboard
+                );
+            } else {
+                state.step = 'max_layover';
+                const data = state.routeData;
+                let currentStep, totalSteps;
+                if (data.is_flexible) {
+                    currentStep = data.has_return ? 14 : 12;
+                    totalSteps = data.has_return ? 14 : 12;
+                } else {
+                    currentStep = data.has_return ? 12 : 11;
+                    totalSteps = data.has_return ? 12 : 11;
+                }
+
+                const keyboard = {
+                    reply_markup: {
+                        keyboard: [
+                            ['5 ч', '10 ч', '15 ч'],
+                            ['24 ч'],
+                            ['🔙 Назад']
+                        ],
+                        one_time_keyboard: true,
+                        resize_keyboard: true
+                    }
+                };
+
+                this.bot.sendMessage(
+                    chatId,
+                    `✅ Пересадки: ${data.max_stops === 99 ? 'Любое количество' : data.max_stops}\n\n` +
+                    `📍 Шаг ${currentStep}/${totalSteps}: Максимальное время пересадки\n\n` +
+                    `Введите максимальное время пересадки в часах (от 1 до 48):`,
+                    keyboard
+                );
+            }
+            return true;
+        }
+
         const price = parseFloat(text);
 
         if (isNaN(price) || price <= 0) {
-            this.bot.sendMessage(chatId, '❌ Введите корректную цену (число больше 0):');
+            this.bot.sendMessage(chatId, '❌ Введите корректную цену больше 0');
             return true;
         }
 
@@ -1711,11 +2168,8 @@ class RouteHandlers {
         try {
             subscription = await SubscriptionService.getUserSubscription(chatId);
         } catch (error) {
-            // Если не удалось получить подписку, используем значения по умолчанию
-            subscription = {
-                name: 'free',
-                check_interval_hours: 4
-            };
+            console.error('Ошибка получения подписки:', error);
+            subscription = { name: 'free', check_interval_hours: 4 };
         }
 
         const checkInterval = subscription.check_interval_hours;
@@ -1727,14 +2181,14 @@ class RouteHandlers {
             return 'часов';
         };
 
-        let message = '✅ ПОДТВЕРЖДЕНИЕ МАРШРУТА\n\n';
-        message += `✈️ ${data.origin} → ${data.destination}\n\n`;
+        let message = '📋 ПРОВЕРЬТЕ ДАННЫЕ МАРШРУТА:\n\n';
+        message += `✈️ ${data.origin} → ${data.destination}\n`;
 
         // Даты
         if (data.is_flexible) {
-            message += `📅 Диапазон вылета: ${DateUtils.formatDateDisplay(data.departure_start)} - ${DateUtils.formatDateDisplay(data.departure_end)}\n`;
+            message += `📅 ${DateUtils.formatDateDisplay(data.departure_start)} - ${DateUtils.formatDateDisplay(data.departure_end)}\n`;
             if (data.has_return) {
-                message += `📆 Пребывание: ${data.min_days}-${data.max_days} дней\n`;
+                message += `📆 ${data.min_days}-${data.max_days} дней\n`;
                 const combCount = UnifiedRoute.countCombinations({
                     is_flexible: true,
                     has_return: true,
@@ -1743,18 +2197,16 @@ class RouteHandlers {
                     min_days: data.min_days,
                     max_days: data.max_days
                 });
-                message += `📊 Будет проверено ${combCount} ${this._pluralize(combCount, 'комбинация', 'комбинации', 'комбинаций')}\n`;
-            } else {
-                message += `📆 В одну сторону\n`;
+                message += `📊 ${combCount} ${this._pluralize(combCount, 'комбинация', 'комбинации', 'комбинаций')} для проверки\n`;
             }
         } else if (data.has_return) {
-            message += `📅 Вылет: ${DateUtils.formatDateDisplay(data.departure_date)}\n`;
-            message += `📅 Возврат: ${DateUtils.formatDateDisplay(data.return_date)}\n`;
+            message += `📅 ${DateUtils.formatDateDisplay(data.departure_date)}\n`;
+            message += `📅 ${DateUtils.formatDateDisplay(data.return_date)}\n`;
         } else {
-            message += `📅 Вылет: ${DateUtils.formatDateDisplay(data.departure_date)} (в одну сторону)\n`;
+            message += `📅 ${DateUtils.formatDateDisplay(data.departure_date)} (в одну сторону)\n`;
         }
 
-        message += `\n👥 ${Formatters.formatPassengers(data.adults, data.children)}\n`;
+        message += `👥 ${Formatters.formatPassengers(data.adults, data.children)}\n`;
         message += `🏢 ${Formatters.getAirlineName(data.airline)}\n`;
         message += data.baggage ? '🧳 С багажом 20 кг\n' : '🎒 Без багажа\n';
 
@@ -1765,26 +2217,23 @@ class RouteHandlers {
         } else {
             message += `🔄 До ${data.max_stops} ${this._pluralize(data.max_stops, 'пересадки', 'пересадок', 'пересадок')}\n`;
             if (data.max_layover_hours) {
-                message += `⏱ Макс. время пересадки: ${data.max_layover_hours}ч\n`;
+                message += `⏱ Макс. пересадка: ${data.max_layover_hours}ч\n`;
             }
         }
 
-        message += `\n💰 Пороговая цена: ${Formatters.formatPrice(data.threshold_price, data.currency)}\n`;
+        message += `💰 ${Formatters.formatPrice(data.threshold_price, data.currency)}\n`;
+        message += `⏰ Проверка каждые ${checkInterval} ${getHoursText(checkInterval)}\n\n`;
+        message += `✅ Всё верно? Создаём маршрут?`;
 
-        // Добавляем информацию о периодичности проверок в зависимости от подписки
-        message += `\n📌 Бот будет автоматически проверять цены каждые ${checkInterval} ${getHoursText(checkInterval)} `;
-        message += `и отправлять уведомления, когда найдет билеты дешевле указанного порога.`;
-
-        // Добавляем информацию о тарифе
         if (subscription.display_name) {
-            message += `\n\n📊 Ваш тариф: ${subscription.display_name}`;
+            message += `\n\n📊 Подписка: ${subscription.display_name}`;
         }
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ['✅ Сохранить маршрут'],
-                    ['❌ Отменить']
+                    ['✅ Да, создать'],
+                    ['❌ Нет, отменить']
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1795,13 +2244,13 @@ class RouteHandlers {
     }
 
     async _handleConfirmStep(chatId, text, state) {
-        if (text.includes('Отменить')) {
+        if (text.includes('Нет')) {
             delete this.userStates[chatId];
             this.bot.sendMessage(chatId, '❌ Создание маршрута отменено', this.getMainMenuKeyboard(chatId));
             return true;
         }
 
-        if (!text.includes('Сохранить')) {
+        if (!text.includes('Да')) {
             return true;
         }
 
@@ -1811,9 +2260,8 @@ class RouteHandlers {
 
             this.bot.sendMessage(
                 chatId,
-                '🎉 Маршрут успешно создан!\n\n' +
-                '✅ Бот начнет автоматическую проверку цен в течение часа.\n' +
-                '🔔 Вы получите уведомление, когда будет найдена цена ниже порога.',
+                '✅ Маршрут успешно создан!\n\n' +
+                'Бот автоматически начнёт проверять цены и сообщит вам, когда найдёт подходящие варианты.',
                 this.getMainMenuKeyboard(chatId)
             );
 
@@ -1823,7 +2271,7 @@ class RouteHandlers {
             console.error('Ошибка создания маршрута:', error);
             this.bot.sendMessage(
                 chatId,
-                '❌ Ошибка при сохранении маршрута: ' + error.message,
+                '❌ Ошибка создания маршрута: ' + error.message,
                 this.getMainMenuKeyboard(chatId)
             );
             delete this.userStates[chatId];
@@ -1838,18 +2286,18 @@ class RouteHandlers {
     handleEditRoute(chatId) {
         const state = this.userStates[chatId];
         if (!state || !state.route) {
-            this.bot.sendMessage(chatId, '❌ Ошибка: маршрут не найден');
+            this.bot.sendMessage(chatId, '❌ Маршрут не найден');
             return;
         }
 
         const route = state.route;
-        const pauseText = route.is_paused ? '▶️ Возобновить' : '⏸️ Поставить на паузу';
+        const pauseText = route.is_paused ? '▶️ Возобновить' : '⏸️ Пауза';
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    [pauseText],
-                    ['💰 Изменить порог цены'],
+                    [pauseText, '💰 Изменить порог'],
+                    ['📊 Показать статистику'],
                     ['◀️ Назад']
                 ],
                 resize_keyboard: true,
@@ -1857,26 +2305,25 @@ class RouteHandlers {
             }
         };
 
-        this.bot.sendMessage(chatId, '✏️ Выберите действие:', keyboard);
+        this.bot.sendMessage(chatId, 'Выберите действие:', keyboard);
         this.userStates[chatId] = { step: 'edit_action', route };
     }
 
     async handleEditAction(chatId, text) {
         const state = this.userStates[chatId];
-        if (!state || !state.route) {
-            return false;
-        }
+        if (!state || !state.route) return false;
 
         const route = state.route;
 
-        if (text.includes('паузу') || text.includes('Возобновить')) {
-            // Переключаем паузу
+        if (text.includes('Пауза') || text.includes('Возобновить')) {
             const newPauseStatus = !route.is_paused;
             await UnifiedRoute.updatePauseStatus(route.id, newPauseStatus);
 
             this.bot.sendMessage(
                 chatId,
-                newPauseStatus ? '⏸️ Маршрут поставлен на паузу. Проверка цен остановлена.' : '▶️ Маршрут возобновлен. Проверка цен продолжится.',
+                newPauseStatus
+                    ? '⏸️ Маршрут поставлен на паузу. Проверка цен приостановлена.'
+                    : '▶️ Маршрут возобновлён. Проверка цен активна.',
                 this.getMainMenuKeyboard(chatId)
             );
             delete this.userStates[chatId];
@@ -1887,14 +2334,14 @@ class RouteHandlers {
             state.step = 'edit_threshold';
             this.bot.sendMessage(
                 chatId,
-                `💰 Текущий порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n\n` +
-                'Введите новую пороговую цену в рублях:',
+                `Текущий порог: ${Formatters.formatPrice(route.threshold_price, route.currency)}\n\n` +
+                `Введите новый порог цены:`,
                 { reply_markup: { remove_keyboard: true } }
             );
             return true;
         }
 
-        if (text === '◀️ Назад') {
+        if (text.includes('Показать')) {
             await this.handleRouteDetails(chatId, state.routes.findIndex(r => r.id === route.id));
             return true;
         }
@@ -1904,13 +2351,11 @@ class RouteHandlers {
 
     async handleEditThreshold(chatId, text) {
         const state = this.userStates[chatId];
-        if (!state || !state.route) {
-            return false;
-        }
+        if (!state || !state.route) return false;
 
         const price = parseFloat(text);
         if (isNaN(price) || price <= 0) {
-            this.bot.sendMessage(chatId, '❌ Введите корректную цену (число больше 0):');
+            this.bot.sendMessage(chatId, '❌ Введите корректную цену больше 0');
             return true;
         }
 
@@ -1918,7 +2363,7 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            `✅ Пороговая цена изменена на ${Formatters.formatPrice(price, state.route.currency)}`,
+            `✅ Порог изменён на ${Formatters.formatPrice(price, state.route.currency)}`,
             this.getMainMenuKeyboard(chatId)
         );
 
@@ -1932,7 +2377,7 @@ class RouteHandlers {
     handleDeleteRoute(chatId) {
         const state = this.userStates[chatId];
         if (!state || !state.route) {
-            this.bot.sendMessage(chatId, '❌ Ошибка: маршрут не найден');
+            this.bot.sendMessage(chatId, '❌ Маршрут не найден');
             return;
         }
 
@@ -1951,9 +2396,9 @@ class RouteHandlers {
 
         this.bot.sendMessage(
             chatId,
-            `⚠️ Вы уверены, что хотите удалить маршрут?\n\n` +
-            `✈️ ${route.origin} → ${route.destination}\n\n` +
-            `Это действие нельзя отменить. Вся история цен будет удалена.`,
+            `❓ Вы уверены, что хотите удалить маршрут?\n\n` +
+            `${route.origin} → ${route.destination}\n\n` +
+            `Это действие нельзя отменить.`,
             keyboard
         );
 
@@ -1962,15 +2407,13 @@ class RouteHandlers {
 
     async handleConfirmDelete(chatId, text) {
         const state = this.userStates[chatId];
-        if (!state || !state.route) {
-            return false;
-        }
+        if (!state || !state.route) return false;
 
         if (text.includes('Да')) {
             await UnifiedRoute.delete(state.route.id);
             this.bot.sendMessage(
                 chatId,
-                '✅ Маршрут успешно удален',
+                '✅ Маршрут удалён',
                 this.getMainMenuKeyboard(chatId)
             );
         } else {
@@ -1991,17 +2434,15 @@ class RouteHandlers {
             const keyboard = {
                 reply_markup: {
                     keyboard: [
-                        ['✏️ Редактировать'],
                         ['📊 График цен', '🗺️ Heatmap'],
-                        ['🗑️ Удалить'],
-                        ['◀️ Назад к маршрутам']
+                        ['◀️ Назад к маршруту']
                     ],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
             };
 
-            await this.bot.sendMessage(chatId, '📊 Генерирую график цен...', keyboard);
+            await this.bot.sendMessage(chatId, 'Генерирую график...', keyboard);
 
             let chartBuffer;
             if (route.is_flexible) {
@@ -2013,9 +2454,9 @@ class RouteHandlers {
             if (!chartBuffer) {
                 await this.bot.sendMessage(
                     chatId,
-                    '❌ Недостаточно данных для построения графика.\n\nДождитесь накопления истории цен (минимум несколько проверок).'
+                    '❌ Недостаточно данных для построения графика. Подождите, пока бот найдёт первые результаты.'
                 );
-                return;
+                return true;
             }
 
             await this.bot.sendPhoto(chatId, chartBuffer, {
@@ -2024,8 +2465,8 @@ class RouteHandlers {
 
             return true;
         } catch (error) {
-            console.error('Ошибка генерации графика:', error);
-            await this.bot.sendMessage(chatId, '❌ Ошибка генерации графика: ' + error.message);
+            console.error('Ошибка при создании графика:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при создании графика: ' + error.message);
         }
     }
 
@@ -2038,17 +2479,15 @@ class RouteHandlers {
             const keyboard = {
                 reply_markup: {
                     keyboard: [
-                        ['✏️ Редактировать'],
                         ['📊 График цен', '🗺️ Heatmap'],
-                        ['🗑️ Удалить'],
-                        ['◀️ Назад к маршрутам']
+                        ['◀️ Назад к маршруту']
                     ],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
             };
 
-            await this.bot.sendMessage(chatId, '🔥 Генерирую тепловую карту...', keyboard);
+            await this.bot.sendMessage(chatId, 'Генерирую тепловую карту...', keyboard);
 
             const routeType = route.is_flexible ? 'flexible' : 'regular';
             const heatmapBuffer = await this.chartGenerator.generateHeatmapChart(route, chatId, routeType);
@@ -2056,18 +2495,18 @@ class RouteHandlers {
             if (!heatmapBuffer) {
                 await this.bot.sendMessage(
                     chatId,
-                    '❌ Недостаточно данных для тепловой карты.\n\nТребуется минимум 50-100 проверок для построения карты по часам и дням недели.'
+                    '❌ Недостаточно данных для построения тепловой карты. Обычно требуется 50-100 результатов. Подождите немного.'
                 );
                 return;
             }
 
             await this.bot.sendPhoto(chatId, heatmapBuffer, {
-                caption: `🔥 Тепловая карта цен: ${route.origin} → ${route.destination}\n\nПоказывает минимальные цены по дням недели и часам суток`
+                caption: `🗺️ Тепловая карта: ${route.origin} → ${route.destination}`
             });
 
         } catch (error) {
-            console.error('Ошибка генерации тепловой карты:', error);
-            await this.bot.sendMessage(chatId, '❌ Ошибка генерации тепловой карты: ' + error.message, );
+            console.error('Ошибка при создании тепловой карты:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при создании тепловой карты: ' + error.message);
         }
     }
 
