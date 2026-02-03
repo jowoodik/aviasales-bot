@@ -10,6 +10,7 @@ class SubscriptionsPage {
     constructor() {
         this.table = null;
         this.subscriptions = [];
+        this.subscriptionTypes = [];
     }
 
     async render() {
@@ -25,45 +26,10 @@ class SubscriptionsPage {
                 </div>
 
                 <!-- Subscription Types Overview -->
-                <div class="row g-3 mb-4">
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-body">
-                                <h6 class="text-muted">🆓 Free</h6>
-                                <h3 class="mb-0">Бесплатно</h3>
-                                <ul class="small mt-2 mb-0">
-                                    <li>3 фиксированных маршрута</li>
-                                    <li>1 гибкий маршрут</li>
-                                    <li>Проверка каждые 4 часа</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card border-success">
-                            <div class="card-body">
-                                <h6 class="text-success">💎 Plus</h6>
-                                <h3 class="mb-0">199 ₽/мес</h3>
-                                <ul class="small mt-2 mb-0">
-                                    <li>5 фиксированных маршрутов</li>
-                                    <li>3 гибких маршрута</li>
-                                    <li>Проверка каждые 2 часа</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card border-primary">
-                            <div class="card-body">
-                                <h6 class="text-primary">⚡ Admin</h6>
-                                <h3 class="mb-0">Безлимит</h3>
-                                <ul class="small mt-2 mb-0">
-                                    <li>Безлимит маршрутов</li>
-                                    <li>Проверка каждый час</li>
-                                    <li>Полный доступ</li>
-                                </ul>
-                            </div>
-                        </div>
+                <div id="subscription-types-cards" class="row g-3 mb-4">
+                    <div class="col-12 text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Загрузка типов подписок...</span>
                     </div>
                 </div>
 
@@ -73,7 +39,145 @@ class SubscriptionsPage {
 
         content.innerHTML = html;
 
+        await this.loadSubscriptionTypes();
         await this.loadSubscriptions();
+    }
+
+    async loadSubscriptionTypes() {
+        try {
+            this.subscriptionTypes = await api.getSubscriptionTypes();
+            this.renderSubscriptionTypeCards();
+        } catch (error) {
+            console.error('Error loading subscription types:', error);
+            const container = document.getElementById('subscription-types-cards');
+            container.innerHTML = `<div class="col-12"><div class="alert alert-danger">Ошибка загрузки типов подписок: ${error.message}</div></div>`;
+        }
+    }
+
+    renderSubscriptionTypeCards() {
+        const container = document.getElementById('subscription-types-cards');
+        const typeIcons = {
+            'free': '🆓',
+            'plus': '💎',
+            'admin': '⚡'
+        };
+        const typeColors = {
+            'free': { border: '', text: 'text-muted' },
+            'plus': { border: 'border-success', text: 'text-success' },
+            'admin': { border: 'border-primary', text: 'text-primary' }
+        };
+
+        container.innerHTML = this.subscriptionTypes.map(type => {
+            const icon = typeIcons[type.name] || '📋';
+            const colors = typeColors[type.name] || { border: '', text: '' };
+            const priceDisplay = type.price_per_month > 0 ? `${type.price_per_month} ₽/мес` : (type.name === 'admin' ? 'Безлимит' : 'Бесплатно');
+            const combinationsDisplay = type.max_combinations >= 999 ? 'Безлимит' : type.max_combinations;
+            const fixedDisplay = type.max_fixed_routes >= 999 ? 'Безлимит' : type.max_fixed_routes;
+            const flexibleDisplay = type.max_flexible_routes >= 999 ? 'Безлимит' : type.max_flexible_routes;
+
+            return `
+                <div class="col-md-4">
+                    <div class="card ${colors.border}">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <h6 class="${colors.text}">${icon} ${type.display_name}</h6>
+                                    <h3 class="mb-0">${priceDisplay}</h3>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="window.subscriptionsPage.editSubscriptionType(${type.id})" title="Редактировать">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                            </div>
+                            <ul class="small mt-2 mb-0">
+                                <li>${fixedDisplay} фиксированных маршрутов</li>
+                                <li>${flexibleDisplay} гибких маршрутов</li>
+                                <li>${combinationsDisplay} комбинаций</li>
+                                <li>Проверка каждые ${type.check_interval_hours} ч.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Сохраняем ссылку на страницу для доступа из onclick
+        window.subscriptionsPage = this;
+    }
+
+    async editSubscriptionType(typeId) {
+        const type = this.subscriptionTypes.find(t => t.id === typeId);
+        if (!type) return;
+
+        const formData = await Modal.form({
+            title: `Редактировать тип подписки: ${type.display_name}`,
+            size: 'md',
+            fields: [
+                {
+                    name: 'max_fixed_routes',
+                    label: 'Макс. фиксированных маршрутов',
+                    type: 'number',
+                    value: type.max_fixed_routes,
+                    min: 0,
+                    max: 999,
+                    required: true
+                },
+                {
+                    name: 'max_flexible_routes',
+                    label: 'Макс. гибких маршрутов',
+                    type: 'number',
+                    value: type.max_flexible_routes,
+                    min: 0,
+                    max: 999,
+                    required: true
+                },
+                {
+                    name: 'max_combinations',
+                    label: 'Макс. комбинаций',
+                    type: 'number',
+                    value: type.max_combinations,
+                    min: 1,
+                    max: 999,
+                    required: true,
+                    help: 'Количество комбинаций дат для гибких маршрутов'
+                },
+                {
+                    name: 'check_interval_hours',
+                    label: 'Интервал проверки (часы)',
+                    type: 'number',
+                    value: type.check_interval_hours,
+                    min: 1,
+                    max: 24,
+                    required: true
+                },
+                {
+                    name: 'price_per_month',
+                    label: 'Цена в месяц (₽)',
+                    type: 'number',
+                    value: type.price_per_month,
+                    min: 0,
+                    step: 1
+                }
+            ]
+        });
+
+        if (!formData) return;
+
+        try {
+            const updateData = {
+                max_fixed_routes: parseInt(formData.max_fixed_routes),
+                max_flexible_routes: parseInt(formData.max_flexible_routes),
+                max_combinations: parseInt(formData.max_combinations),
+                check_interval_hours: parseInt(formData.check_interval_hours),
+                price_per_month: parseFloat(formData.price_per_month) || 0
+            };
+
+            await api.updateSubscriptionType(typeId, updateData);
+            showToast('Тип подписки успешно обновлен', 'success');
+            await this.loadSubscriptionTypes();
+        } catch (error) {
+            console.error('Error updating subscription type:', error);
+            showToast('Ошибка обновления типа подписки: ' + error.message, 'danger');
+        }
     }
 
     async loadSubscriptions() {

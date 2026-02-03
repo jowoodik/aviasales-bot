@@ -21,6 +21,10 @@ export const CONFIG = {
         SUBSCRIPTIONS: '/subscriptions',
         SUBSCRIPTION_DETAIL: (id) => `/subscriptions/${id}`,
 
+        // Subscription Types
+        SUBSCRIPTION_TYPES: '/subscription-types',
+        SUBSCRIPTION_TYPE_DETAIL: (id) => `/subscription-types/${id}`,
+
         // Broadcasts
         BROADCASTS: '/broadcasts',
         BROADCAST_DETAIL: (id) => `/broadcasts/${id}`,

@@ -176,6 +176,18 @@ class APIClient {
     }
 
     // ============================================
+    // SUBSCRIPTION TYPES API
+    // ============================================
+
+    async getSubscriptionTypes() {
+        return this.get(CONFIG.API.SUBSCRIPTION_TYPES);
+    }
+
+    async updateSubscriptionType(id, data) {
+        return this.put(CONFIG.API.SUBSCRIPTION_TYPE_DETAIL(id), data);
+    }
+
+    // ============================================
     // BROADCASTS API
     // ============================================
     async getBroadcasts() {

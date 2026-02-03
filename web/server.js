@@ -2008,6 +2008,78 @@ app.delete('/admin/api/subscriptions/:id', requireAdmin, async (req, res) => {
 });
 
 // ============================================
+// SUBSCRIPTION TYPES API
+// ============================================
+
+// API: Получить все типы подписок
+app.get('/admin/api/subscription-types', requireAdmin, async (req, res) => {
+  try {
+    const types = await new Promise((resolve, reject) => {
+      db.all(`SELECT * FROM subscription_types ORDER BY id`, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(types);
+  } catch (error) {
+    console.error('Error loading subscription types:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Обновить тип подписки
+app.put('/admin/api/subscription-types/:id', requireAdmin, async (req, res) => {
+  try {
+    const typeId = parseInt(req.params.id);
+    const { max_fixed_routes, max_flexible_routes, max_combinations, check_interval_hours, price_per_month } = req.body;
+
+    // Получаем текущий тип
+    const current = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM subscription_types WHERE id = ?', [typeId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!current) {
+      return res.status(404).json({ error: 'Subscription type not found' });
+    }
+
+    // Обновляем тип подписки
+    await new Promise((resolve, reject) => {
+      db.run(
+          `UPDATE subscription_types
+           SET max_fixed_routes = ?,
+               max_flexible_routes = ?,
+               max_combinations = ?,
+               check_interval_hours = ?,
+               price_per_month = ?
+           WHERE id = ?`,
+          [
+            max_fixed_routes ?? current.max_fixed_routes,
+            max_flexible_routes ?? current.max_flexible_routes,
+            max_combinations ?? current.max_combinations,
+            check_interval_hours ?? current.check_interval_hours,
+            price_per_month ?? current.price_per_month,
+            typeId
+          ],
+          function(err) {
+            if (err) reject(err);
+            else resolve();
+          }
+      );
+    });
+
+    console.log(`[ADMIN] Updated subscription type #${typeId} (${current.name})`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error updating subscription type:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // FAILED CHECKS API
 // ============================================
 
