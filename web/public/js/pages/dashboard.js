@@ -287,18 +287,31 @@ class DashboardPage {
         );
         this.charts.activity.render();
 
-        // Subscriptions Chart
-        const subscriptionCounts = {
-            free: routes.filter(r => !r.subscription_type || r.subscription_type === 'free').length,
-            plus: routes.filter(r => r.subscription_type === 'plus').length,
-            admin: routes.filter(r => r.subscription_type === 'admin').length
-        };
+        // Subscriptions Chart - используем данные из API (по пользователям)
+        const subscriptionStats = statsData.subscriptionStats || [];
+        const labels = [];
+        const values = [];
+
+        // Сортируем по количеству пользователей
+        subscriptionStats.forEach(sub => {
+            const typeName = sub.subscription_type === 'free' ? 'Free' :
+                             sub.subscription_type === 'plus' ? 'Plus' :
+                             sub.subscription_type === 'admin' ? 'Admin' : sub.subscription_type;
+            labels.push(typeName);
+            values.push(sub.user_count);
+        });
+
+        // Если нет данных, показываем пустой график
+        if (labels.length === 0) {
+            labels.push('Нет данных');
+            values.push(0);
+        }
 
         this.charts.subscriptions = ChartComponent.doughnutChart(
             'subscriptions-chart',
-            ['Free', 'Plus', 'Admin'],
-            [subscriptionCounts.free, subscriptionCounts.plus, subscriptionCounts.admin],
-            [CONFIG.CHART_COLORS.INFO, CONFIG.CHART_COLORS.SUCCESS, CONFIG.CHART_COLORS.PURPLE]
+            labels,
+            values,
+            [CONFIG.CHART_COLORS.INFO, CONFIG.CHART_COLORS.SUCCESS, CONFIG.CHART_COLORS.PURPLE, CONFIG.CHART_COLORS.WARNING]
         );
         this.charts.subscriptions.render();
     }
