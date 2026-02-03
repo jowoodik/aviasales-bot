@@ -495,7 +495,8 @@ class AviasalesPricer {
       });
 
       cookiesObj.currency = cookiesObj.currency || 'rub';
-      cookiesObj.marker = this.marker;
+      // Маркер НЕ добавляем в куки - чтобы не искажать статистику travelpayouts
+      // Маркер будет добавлен только в ссылку для пользователя (buildEnhancedSearchLink)
 
       console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
       console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));

@@ -1196,8 +1196,8 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
-    // Популярные маршруты
-    const popularRoutes = await new Promise((resolve) => {
+    // Популярные маршруты (исправлено имя на topRoutes)
+    const topRoutes = await new Promise((resolve) => {
       db.all(`
         SELECT
           origin,
@@ -1246,12 +1246,101 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
+    // Статистика проверок (всего, успешных, неудачных)
+    const checkStats = await new Promise((resolve) => {
+      db.get(`
+        SELECT
+          COALESCE(SUM(total_combinations), 0) as total_combinations,
+          COALESCE(SUM(successful_checks), 0) as successful_checks,
+          COALESCE(SUM(failed_checks), 0) as failed_checks,
+          COUNT(*) as total_check_runs
+        FROM route_check_stats
+      `, (err, row) => {
+        resolve(row || { total_combinations: 0, successful_checks: 0, failed_checks: 0, total_check_runs: 0 });
+      });
+    });
+
+    // DAU/WAU/MAU - активные пользователи по last_check маршрутов
+    const dau = await new Promise((resolve) => {
+      db.get(`
+        SELECT COUNT(DISTINCT chat_id) as count
+        FROM unified_routes
+        WHERE last_check >= datetime('now', '-1 day')
+      `, (err, row) => {
+        resolve(row?.count || 0);
+      });
+    });
+
+    const wau = await new Promise((resolve) => {
+      db.get(`
+        SELECT COUNT(DISTINCT chat_id) as count
+        FROM unified_routes
+        WHERE last_check >= datetime('now', '-7 days')
+      `, (err, row) => {
+        resolve(row?.count || 0);
+      });
+    });
+
+    const mau = await new Promise((resolve) => {
+      db.get(`
+        SELECT COUNT(DISTINCT chat_id) as count
+        FROM unified_routes
+        WHERE last_check >= datetime('now', '-30 days')
+      `, (err, row) => {
+        resolve(row?.count || 0);
+      });
+    });
+
+    // Подсчет общего числа комбинаций по всем маршрутам
+    const allRoutes = await new Promise((resolve) => {
+      db.all(`SELECT * FROM unified_routes`, (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    let totalCombinations = 0;
+    let fixedCombinations = 0;
+    let flexibleCombinations = 0;
+
+    for (const route of allRoutes) {
+      const count = UnifiedRoute.countCombinations(route);
+      totalCombinations += count;
+      if (route.is_flexible) {
+        flexibleCombinations += count;
+      } else {
+        fixedCombinations += count;
+      }
+    }
+
+    // Статистика подписок (по пользователям)
+    const subscriptionStats = await new Promise((resolve) => {
+      db.all(`
+        SELECT
+          COALESCE(us.subscription_type, 'free') as subscription_type,
+          COUNT(DISTINCT ur.chat_id) as user_count
+        FROM unified_routes ur
+        LEFT JOIN user_subscriptions us ON ur.chat_id = us.chat_id
+        GROUP BY subscription_type
+        ORDER BY user_count DESC
+      `, (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
     res.json({
       success: true,
       topUsers,
-      popularRoutes,
+      topRoutes,
       hourlyStats,
-      avgPrices
+      avgPrices,
+      checkStats,
+      userActivity: { dau, wau, mau },
+      combinations: {
+        total: totalCombinations,
+        fixed: fixedCombinations,
+        flexible: flexibleCombinations
+      },
+      subscriptionStats
     });
   } catch (error) {
     console.error('Ошибка загрузки аналитики:', error);

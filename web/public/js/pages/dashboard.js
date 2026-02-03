@@ -35,6 +35,18 @@ class DashboardPage {
     renderContent(statsData, users, routes, checkStats) {
         const content = document.getElementById('main-content');
 
+        // Статистика проверок из API
+        const apiCheckStats = statsData.checkStats || {};
+        const successRate = apiCheckStats.total_combinations > 0
+            ? ((apiCheckStats.successful_checks / apiCheckStats.total_combinations) * 100).toFixed(1)
+            : 0;
+
+        // DAU/WAU/MAU
+        const userActivity = statsData.userActivity || { dau: 0, wau: 0, mau: 0 };
+
+        // Комбинации
+        const combinations = statsData.combinations || { total: 0, fixed: 0, flexible: 0 };
+
         const html = `
             <div class="container-fluid">
                 <div class="row mb-4">
@@ -46,6 +58,91 @@ class DashboardPage {
 
                 <!-- Stats Cards -->
                 <div id="stats-cards" class="mb-4"></div>
+
+                <!-- Комбинации и проверки -->
+                <div class="row g-4 mb-4">
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">🔢 Комбинации для проверки</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <h3 class="text-primary mb-0">${combinations.total.toLocaleString()}</h3>
+                                        <small class="text-muted">Всего</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <h3 class="text-info mb-0">${combinations.fixed.toLocaleString()}</h3>
+                                        <small class="text-muted">Фиксированные</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <h3 class="text-warning mb-0">${combinations.flexible.toLocaleString()}</h3>
+                                        <small class="text-muted">Гибкие</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">📋 Статистика проверок</h5>
+                                <a href="#check-stats" class="btn btn-sm btn-outline-secondary">Подробнее</a>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center">
+                                    <div class="col-3">
+                                        <h3 class="text-primary mb-0">${apiCheckStats.total_check_runs?.toLocaleString() || 0}</h3>
+                                        <small class="text-muted">Проверок</small>
+                                    </div>
+                                    <div class="col-3">
+                                        <h3 class="text-success mb-0">${apiCheckStats.successful_checks?.toLocaleString() || 0}</h3>
+                                        <small class="text-muted">Успешных</small>
+                                    </div>
+                                    <div class="col-3">
+                                        <h3 class="text-danger mb-0">${apiCheckStats.failed_checks?.toLocaleString() || 0}</h3>
+                                        <small class="text-muted">Неудачных</small>
+                                    </div>
+                                    <div class="col-3">
+                                        <h3 class="text-info mb-0">${successRate}%</h3>
+                                        <small class="text-muted">Success Rate</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DAU/WAU/MAU -->
+                <div class="row g-4 mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">👥 Активность пользователей</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <h2 class="text-success mb-0">${userActivity.dau}</h2>
+                                        <p class="text-muted mb-0">DAU</p>
+                                        <small class="text-muted">за последние 24 часа</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <h2 class="text-primary mb-0">${userActivity.wau}</h2>
+                                        <p class="text-muted mb-0">WAU</p>
+                                        <small class="text-muted">за последние 7 дней</small>
+                                    </div>
+                                    <div class="col-4">
+                                        <h2 class="text-info mb-0">${userActivity.mau}</h2>
+                                        <p class="text-muted mb-0">MAU</p>
+                                        <small class="text-muted">за последние 30 дней</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Charts Row -->
                 <div class="row g-4 mb-4">
