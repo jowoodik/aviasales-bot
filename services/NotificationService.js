@@ -410,7 +410,7 @@ class NotificationService {
       const promises = batch.map(async (chatId) => {
         try {
           await this.bot.sendMessage(chatId, messageText, {
-            parse_mode: 'Markdown',
+            parse_mode: 'HTML',
             disable_web_page_preview: false
           });
 
