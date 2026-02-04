@@ -679,7 +679,8 @@ class AviasalesPricer {
         assisted: true
       },
       market_code: 'ru',
-      marker: this.marker,
+      // Маркер НЕ добавляем в API-запросы - чтобы не искажать статистику travelpayouts
+      // Маркер будет добавлен только в ссылку для пользователя (buildEnhancedSearchLink)
       citizenship: 'RU',
       currency_code: 'rub',
       languages: { ru: 1 },
