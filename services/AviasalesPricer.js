@@ -288,10 +288,7 @@ class AviasalesPricer {
       if (flightParts.length === 0) return null;
 
       // Итоговый параметр t: {flights}_{signature}_{price}
-      const result = flightParts.join('') + '_' + ticket.signature + '_' + Math.round(price);
-
-      console.log(' ✅ Сформирован параметр t');
-      return result;
+      return flightParts.join('') + '_' + ticket.signature + '_' + Math.round(price);
 
     } catch (error) {
       console.error(' ⚠️ Ошибка формирования t параметра:', error.message);
@@ -961,10 +958,6 @@ class AviasalesPricer {
 
     // 🔥 НОВОЕ: Формируем расширенную ссылку
     const enhancedSearchLink = this.buildEnhancedSearchLink(params, bestTicket, bestProposal, minPrice);
-
-    if (enhancedSearchLink) {
-      console.log(prefix + ' > 🔗 Сформирована расширенная ссылка');
-    }
 
     return {
       price: minPrice,
