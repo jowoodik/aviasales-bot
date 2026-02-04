@@ -26,6 +26,9 @@ class Table {
             searchTerm: '',
             currentPage: 1
         };
+
+        this.searchDebounceTimer = null;
+        this.searchDebounceDelay = 1500; // 300мс задержка
     }
 
     render() {
@@ -297,16 +300,27 @@ class Table {
         const searchInput = container.querySelector('#table-search');
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
-                this.handleSearch(e.target.value);
+                const value = e.target.value;
+
+                // Обновляем состояние сразу (чтобы инпут показывал введенное значение)
+                this.state.searchTerm = value;
+
+                // Очищаем предыдущий таймер
+                if (this.searchDebounceTimer) {
+                    clearTimeout(this.searchDebounceTimer);
+                }
+
+                // Запускаем новый таймер для применения фильтра
+                this.searchDebounceTimer = setTimeout(() => {
+                    this.handleSearchDebounced(value);
+                }, this.searchDebounceDelay);
             });
         }
 
         // Sort
         const sortHeaders = container.querySelectorAll('th.sortable');
         sortHeaders.forEach(header => {
-            header.addEventListener('click', () => {
-                this.handleSort(header.dataset.column);
-            });
+            header.addEventListener('click', () => this.handleSort(header.dataset.column));
         });
 
         // Actions
@@ -332,22 +346,17 @@ class Table {
         // Refresh
         const refreshBtn = container.querySelector('#table-refresh');
         if (refreshBtn && this.config.onRefresh) {
-            refreshBtn.addEventListener('click', () => {
-                this.config.onRefresh();
-            });
+            refreshBtn.addEventListener('click', this.config.onRefresh);
         }
 
         // Create
         const createBtn = container.querySelector('#table-create');
         if (createBtn && this.config.onCreate) {
-            createBtn.addEventListener('click', () => {
-                this.config.onCreate();
-            });
+            createBtn.addEventListener('click', this.config.onCreate);
         }
     }
 
-    handleSearch(searchTerm) {
-        this.state.searchTerm = searchTerm;
+    handleSearchDebounced() {
         this.state.currentPage = 1;
         this.applyFilters();
         this.render();

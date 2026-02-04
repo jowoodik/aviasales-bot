@@ -1731,7 +1731,7 @@ app.get('/admin/api/failed-checks', requireAdmin, async (req, res) => {
 app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
   try {
     const chatId = parseInt(req.params.chatId);
-    const { timezone, quiet_hours_start, quiet_hours_end } = req.body;
+    const { timezone, quiet_hours_start, quiet_hours_end, notify_on_check  } = req.body;
 
     // Проверяем существование пользователя
     const userExists = await new Promise((resolve, reject) => {
@@ -1745,9 +1745,9 @@ app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
       // Создаем пользователя если не существует
       await new Promise((resolve, reject) => {
         db.run(
-            `INSERT INTO user_settings (chat_id, timezone, quiet_hours_start, quiet_hours_end)
-                     VALUES (?, ?, ?, ?)`,
-            [chatId, timezone, quiet_hours_start, quiet_hours_end],
+            `INSERT INTO user_settings (chat_id, timezone, quiet_hours_start, quiet_hours_end, notify_on_check)
+                     VALUES (?, ?, ?, ?, ?)`,
+            [chatId, timezone, quiet_hours_start, quiet_hours_end, notify_on_check],
             function(err) {
               if (err) reject(err);
               else resolve();
@@ -1759,9 +1759,9 @@ app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
       await new Promise((resolve, reject) => {
         db.run(
             `UPDATE user_settings 
-                     SET timezone = ?, quiet_hours_start = ?, quiet_hours_end = ?
+                     SET timezone = ?, quiet_hours_start = ?, quiet_hours_end = ?, notify_on_check = ?
                      WHERE chat_id = ?`,
-            [timezone, quiet_hours_start, quiet_hours_end, chatId],
+            [timezone, quiet_hours_start, quiet_hours_end, notify_on_check, chatId],
             function(err) {
               if (err) reject(err);
               else resolve();

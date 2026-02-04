@@ -213,7 +213,7 @@ class NotificationService {
         }
       }
 
-      await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+      await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown', disable_notification: true });
 
       // 👉 Исправленный блок: отправляем кнопки для всех маршрутов с найденными ценами
       for (const stat of stats) {
@@ -232,7 +232,7 @@ class NotificationService {
               await this.bot.sendMessage(
                   chatId,
                   `💰 Лучшее предложение для *${stat.origin} → ${stat.destination}*: ${stat.bestPrice.toLocaleString('ru-RU')} ₽`,
-                  { parse_mode: 'Markdown', reply_markup: inlineKeyboard }
+                  { parse_mode: 'Markdown', reply_markup: inlineKeyboard, disable_notification: true }
               );
             }
           } catch (e) {
