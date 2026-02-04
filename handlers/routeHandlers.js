@@ -6,6 +6,7 @@ const ChartGenerator = require("../services/ChartGenerator");
 const AirportService = require('../services/AirportService');
 const AirportFormatter = require('../utils/airportFormatter');
 const SubscriptionService = require('../services/SubscriptionService');
+const ActivityService = require('../services/ActivityService');
 
 class RouteHandlers {
     constructor(bot, userStates) {
@@ -56,6 +57,9 @@ class RouteHandlers {
      * СПИСОК МАРШРУТОВ ПОЛЬЗОВАТЕЛЯ
      */
     async handleMyRoutes(chatId) {
+        // Логируем просмотр списка маршрутов
+        ActivityService.logEvent(chatId, 'view_routes').catch(err => console.error('Activity log error:', err));
+
         try {
             const routes = await UnifiedRoute.findByChatId(chatId);
 
@@ -219,6 +223,9 @@ class RouteHandlers {
      * ДЕТАЛЬНЫЙ ПРОСМОТР МАРШРУТА
      */
     async handleRouteDetails(chatId, routeIndex) {
+        // Логируем просмотр деталей маршрута
+        ActivityService.logEvent(chatId, 'view_route_detail', { routeIndex }).catch(err => console.error('Activity log error:', err));
+
         try {
             const state = this.userStates[chatId];
 
@@ -357,6 +364,9 @@ class RouteHandlers {
      * НАЧАЛО СОЗДАНИЯ МАРШРУТА
      */
     async handleCreateRoute(chatId) {
+        // Логируем начало создания маршрута
+        ActivityService.logEvent(chatId, 'create_route_start').catch(err => console.error('Activity log error:', err));
+
         this.userStates[chatId] = {
             step: 'origin',
             routeData: {}
@@ -2259,6 +2269,9 @@ class RouteHandlers {
             // Сохраняем маршрут
             const routeId = await UnifiedRoute.create(chatId, state.routeData);
 
+            // Логируем успешное создание маршрута
+            ActivityService.logEvent(chatId, 'route_created', { routeId }).catch(err => console.error('Activity log error:', err));
+
             this.bot.sendMessage(
                 chatId,
                 '✅ Маршрут успешно создан!\n\n' +
@@ -2290,6 +2303,9 @@ class RouteHandlers {
             this.bot.sendMessage(chatId, '❌ Маршрут не найден');
             return;
         }
+
+        // Логируем редактирование маршрута
+        ActivityService.logEvent(chatId, 'edit_route', { routeId: state.route.id }).catch(err => console.error('Activity log error:', err));
 
         const route = state.route;
         const pauseText = route.is_paused ? '▶️ Возобновить' : '⏸️ Пауза';
@@ -2411,6 +2427,9 @@ class RouteHandlers {
         if (!state || !state.route) return false;
 
         if (text.includes('Да')) {
+            // Логируем удаление маршрута
+            ActivityService.logEvent(chatId, 'delete_route', { routeId: state.route.id }).catch(err => console.error('Activity log error:', err));
+
             await UnifiedRoute.delete(state.route.id);
             this.bot.sendMessage(
                 chatId,
@@ -2430,6 +2449,9 @@ class RouteHandlers {
     }
 
     async handleShowChart(chatId, route) {
+        // Логируем просмотр графика
+        ActivityService.logEvent(chatId, 'view_chart', { routeId: route.id }).catch(err => console.error('Activity log error:', err));
+
         try {
             // Кнопки действий
             const keyboard = {
@@ -2475,6 +2497,9 @@ class RouteHandlers {
      * Показать тепловую карту для маршрута
      */
     async handleShowHeatmap(chatId, route) {
+        // Логируем просмотр heatmap
+        ActivityService.logEvent(chatId, 'view_heatmap', { routeId: route.id }).catch(err => console.error('Activity log error:', err));
+
         try {
             // Кнопки действий
             const keyboard = {

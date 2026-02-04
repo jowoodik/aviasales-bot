@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const TimezoneUtils = require('../utils/timezoneUtils');
+const ActivityService = require('../services/ActivityService');
 
 class SettingsHandlers {
   constructor(bot) {
@@ -34,6 +35,9 @@ class SettingsHandlers {
    * ГЛАВНОЕ МЕНЮ НАСТРОЕК
    */
   async handleSettings(chatId) {
+    // Логируем открытие настроек
+    ActivityService.logEvent(chatId, 'settings').catch(err => console.error('Activity log error:', err));
+
     try {
       const settings = await this._getUserSettings(chatId);
 

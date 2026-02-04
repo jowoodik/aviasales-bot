@@ -5,6 +5,7 @@ const RouteHandlers = require('./handlers/routeHandlers');
 const SettingsHandlers = require('./handlers/settingsHandlers');
 const SubscriptionHandlers = require('./handlers/subscriptionHandlers'); // Добавляем
 const SubscriptionService = require('./services/SubscriptionService'); // Добавляем
+const ActivityService = require('./services/ActivityService'); // Логирование активности
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: true });
@@ -47,6 +48,9 @@ RouteHandlers.prototype.getMainMenuKeyboard = getMainMenuKeyboard;
  */
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
+
+  // Логируем событие start
+  ActivityService.logEvent(chatId, 'start').catch(err => console.error('Activity log error:', err));
 
   // Проверяем, первый ли раз пользователь
   const isFirstTime = await checkIfFirstTime(chatId);
@@ -155,6 +159,9 @@ bot.on('message', async (msg) => {
     }
 
     if (text === '🏠 Главное меню') {
+      // Логируем возврат в главное меню
+      ActivityService.logEvent(chatId, 'main_menu').catch(err => console.error('Activity log error:', err));
+
       bot.sendMessage(
           chatId,
           'Главное меню',
@@ -364,6 +371,9 @@ bot.on('callback_query', async (callbackQuery) => {
 });
 
 async function handleHelp(chatId) {
+  // Логируем просмотр помощи
+  ActivityService.logEvent(chatId, 'help').catch(err => console.error('Activity log error:', err));
+
   // Загружаем тарифы из БД
   const subscriptionTypes = await new Promise((resolve, reject) => {
     db.all(

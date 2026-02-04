@@ -4,6 +4,7 @@ const session = require('express-session');
 const db = require('../config/database');
 const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
+const ActivityService = require('../services/ActivityService');
 
 
 const app = express();
@@ -1260,36 +1261,15 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
-    // DAU/WAU/MAU - активные пользователи по last_check маршрутов
-    const dau = await new Promise((resolve) => {
-      db.get(`
-        SELECT COUNT(DISTINCT chat_id) as count
-        FROM unified_routes
-        WHERE last_check >= datetime('now', '-1 day')
-      `, (err, row) => {
-        resolve(row?.count || 0);
-      });
-    });
-
-    const wau = await new Promise((resolve) => {
-      db.get(`
-        SELECT COUNT(DISTINCT chat_id) as count
-        FROM unified_routes
-        WHERE last_check >= datetime('now', '-7 days')
-      `, (err, row) => {
-        resolve(row?.count || 0);
-      });
-    });
-
-    const mau = await new Promise((resolve) => {
-      db.get(`
-        SELECT COUNT(DISTINCT chat_id) as count
-        FROM unified_routes
-        WHERE last_check >= datetime('now', '-30 days')
-      `, (err, row) => {
-        resolve(row?.count || 0);
-      });
-    });
+    // DAU/WAU/MAU - реальная активность пользователей из user_activity_log
+    const [dau, wau, mau, routesFunnel, subscriptionFunnel, dauHistory] = await Promise.all([
+      ActivityService.getDAU(),
+      ActivityService.getWAU(),
+      ActivityService.getMAU(),
+      ActivityService.getRoutesFunnel('30d'),
+      ActivityService.getSubscriptionFunnel('30d'),
+      ActivityService.getDAUHistory(30)
+    ]);
 
     // Подсчет общего числа комбинаций по всем маршрутам
     const allRoutes = await new Promise((resolve) => {
@@ -1340,7 +1320,12 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
         fixed: fixedCombinations,
         flexible: flexibleCombinations
       },
-      subscriptionStats
+      subscriptionStats,
+      funnels: {
+        routes: routesFunnel,
+        subscription: subscriptionFunnel
+      },
+      dauHistory
     });
   } catch (error) {
     console.error('Ошибка загрузки аналитики:', error);

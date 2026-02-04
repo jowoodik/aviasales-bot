@@ -1,4 +1,5 @@
 const SubscriptionService = require('../services/SubscriptionService');
+const ActivityService = require('../services/ActivityService');
 const path = require('path');
 const fs = require('fs');
 
@@ -14,6 +15,9 @@ class SubscriptionHandlers {
      * Показать информацию о текущей подписке
      */
     async handleSubscriptionInfo(chatId) {
+        // Логируем просмотр подписки
+        ActivityService.logEvent(chatId, 'subscription_info').catch(err => console.error('Activity log error:', err));
+
         try {
             const stats = await SubscriptionService.getSubscriptionStats(chatId);
             let message = `📊 ВАША ПОДПИСКА: ${stats.subscription}\n\n`;
@@ -117,6 +121,9 @@ class SubscriptionHandlers {
      * Обработка нажатия на кнопку оплаты
      */
     async handlePaymentCallback(chatId, callbackQueryId) {
+        // Логируем попытку апгрейда
+        ActivityService.logEvent(chatId, 'upgrade_attempt').catch(err => console.error('Activity log error:', err));
+
         try {
             // Отвечаем на callback query
             this.bot.answerCallbackQuery(callbackQueryId, {

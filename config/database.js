@@ -327,6 +327,26 @@ db.serialize(() => {
 
   console.log('✅ Таблицы для массовой рассылки готовы');
 
+  // ============================================
+  // ТАБЛИЦА ЛОГОВ АКТИВНОСТИ ПОЛЬЗОВАТЕЛЕЙ
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_activity_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT,
+      created_at DATETIME DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Индексы для user_activity_log
+  db.run(`CREATE INDEX IF NOT EXISTS idx_activity_chat_id ON user_activity_log(chat_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_activity_event_type ON user_activity_log(event_type)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_activity_created_at ON user_activity_log(created_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_activity_chat_date ON user_activity_log(chat_id, created_at)`);
+
+  console.log('✅ Таблица user_activity_log готова');
 
   // Добавляем timezone в user_settings (если её нет)
   db.run(`ALTER TABLE user_settings ADD COLUMN timezone TEXT DEFAULT 'Asia/Yekaterinburg'`, (err) => {

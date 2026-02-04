@@ -144,6 +144,9 @@ class DashboardPage {
                     </div>
                 </div>
 
+                <!-- Воронки конверсии -->
+                ${this.renderFunnels(statsData.funnels || {})}
+
                 <!-- Charts Row -->
                 <div class="row g-4 mb-4">
                     <div class="col-lg-8">
@@ -383,6 +386,109 @@ class DashboardPage {
                         `).join('')}
                     </tbody>
                 </table>
+            </div>
+        `;
+    }
+
+    renderFunnels(funnels) {
+        const routes = funnels.routes || { active_users: 0, viewed_routes: 0, started_creation: 0, completed_creation: 0 };
+        const subscription = funnels.subscription || { viewed_subscription: 0, upgrade_attempts: 0 };
+
+        // Рассчитываем проценты для воронки маршрутов
+        const routesBase = routes.active_users || 1;
+        const viewedRoutesPercent = Math.round((routes.viewed_routes / routesBase) * 100);
+        const startedPercent = routes.viewed_routes > 0
+            ? Math.round((routes.started_creation / routes.viewed_routes) * 100)
+            : 0;
+        const completedPercent = routes.started_creation > 0
+            ? Math.round((routes.completed_creation / routes.started_creation) * 100)
+            : 0;
+
+        // Рассчитываем проценты для воронки подписки
+        const subscriptionBase = subscription.viewed_subscription || 1;
+        const upgradePercent = Math.round((subscription.upgrade_attempts / subscriptionBase) * 100);
+
+        return `
+            <div class="row g-4 mb-4">
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">📊 Воронка маршрутов (30 дней)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="funnel-step mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Активные пользователи</span>
+                                    <span class="badge bg-primary">${routes.active_users} (100%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-primary" style="width: 100%;"></div>
+                                </div>
+                            </div>
+                            <div class="text-center text-muted mb-2">↓</div>
+                            <div class="funnel-step mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Просмотрели маршруты</span>
+                                    <span class="badge bg-info">${routes.viewed_routes} (${viewedRoutesPercent}%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-info" style="width: ${viewedRoutesPercent}%;"></div>
+                                </div>
+                            </div>
+                            <div class="text-center text-muted mb-2">↓</div>
+                            <div class="funnel-step mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Начали создание</span>
+                                    <span class="badge bg-warning">${routes.started_creation} (${startedPercent}%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-warning" style="width: ${startedPercent}%;"></div>
+                                </div>
+                            </div>
+                            <div class="text-center text-muted mb-2">↓</div>
+                            <div class="funnel-step">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Завершили создание</span>
+                                    <span class="badge bg-success">${routes.completed_creation} (${completedPercent}%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-success" style="width: ${completedPercent}%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">💎 Воронка подписки (30 дней)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="funnel-step mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Просмотрели подписку</span>
+                                    <span class="badge bg-primary">${subscription.viewed_subscription} (100%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-primary" style="width: 100%;"></div>
+                                </div>
+                            </div>
+                            <div class="text-center text-muted mb-2">↓</div>
+                            <div class="funnel-step">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Попытка апгрейда</span>
+                                    <span class="badge bg-success">${subscription.upgrade_attempts} (${upgradePercent}%)</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar bg-success" style="width: ${upgradePercent}%;"></div>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-muted">
+                                <small>* Воронка показывает конверсию пользователей в монетизацию</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     }
