@@ -495,8 +495,7 @@ class AviasalesPricer {
       });
 
       cookiesObj.currency = cookiesObj.currency || 'rub';
-      // Маркер НЕ добавляем в куки - чтобы не искажать статистику travelpayouts
-      // Маркер будет добавлен только в ссылку для пользователя (buildEnhancedSearchLink)
+      cookiesObj.marker = this.marker;
 
       console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
       console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));
@@ -679,8 +678,7 @@ class AviasalesPricer {
         assisted: true
       },
       market_code: 'ru',
-      // Маркер НЕ добавляем в API-запросы - чтобы не искажать статистику travelpayouts
-      // Маркер будет добавлен только в ссылку для пользователя (buildEnhancedSearchLink)
+      marker: this.marker,
       citizenship: 'RU',
       currency_code: 'rub',
       languages: { ru: 1 },
