@@ -8,7 +8,19 @@ const SubscriptionService = require('./services/SubscriptionService'); // Доб
 const ActivityService = require('./services/ActivityService'); // Логирование активности
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(TOKEN, { polling: false });
+
+bot.startPolling({
+  restart: true,
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10,
+      allowed_updates: ['message', 'callback_query', 'pre_checkout_query', 'shipping_query']
+    }
+  }
+});
 
 // Состояния пользователей
 const userStates = {};
@@ -106,6 +118,12 @@ bot.onText(/\/start/, async (msg) => {
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
+
+  // Обработка успешного платежа (Telegram Payments)
+  if (msg.successful_payment) {
+    await subscriptionHandlers.handleSuccessfulPayment(msg);
+    return;
+  }
 
   if (!text || text.startsWith('/')) return;
 
@@ -338,6 +356,33 @@ bot.onText(/\/admin_check/, (msg) => {
   if (chatId === 341508411) {
     handleCheckNow(chatId);
   }
+});
+
+/**
+ * ОБРАБОТКА PRE_CHECKOUT_QUERY (Telegram Payments)
+ * ВАЖНО: Нужно ответить в течение 10 секунд!
+ */
+bot.on('pre_checkout_query', async (query) => {
+  console.log('pre_checkout_query handler');
+  await subscriptionHandlers.handlePreCheckoutQuery(query);
+});
+
+bot.on('message', (msg) => {
+  console.log('[UPDATE] message:', msg.chat.id, msg.text);
+});
+
+bot.on('callback_query', (query) => {
+  console.log('[UPDATE] callback_query:', query.id);
+});
+
+// Логируем ВСЕ события
+bot.on('polling_error', (error) => {
+  console.error('[POLLING ERROR]:', error);
+});
+
+// Для некоторых библиотек работает универсальный обработчик
+bot.on('update', (update) => {
+  console.log('[RAW UPDATE]:', JSON.stringify(update, null, 2));
 });
 
 /**

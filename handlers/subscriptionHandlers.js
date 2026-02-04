@@ -1,14 +1,22 @@
 const SubscriptionService = require('../services/SubscriptionService');
 const ActivityService = require('../services/ActivityService');
-const path = require('path');
-const fs = require('fs');
+const db = require('../config/database');
+
+// Токен провайдера платежей (ЮKassa)
+const PAYMENT_TOKEN = process.env.PAYMENT_TOKEN;
+
+// Конфигурация подписки Plus
+const PLUS_SUBSCRIPTION = {
+    title: 'Plus подписка',
+    description: 'Расширенные возможности мониторинга на 1 месяц',
+    price: 19900,  // копейки (199 рублей)
+    currency: 'RUB'
+};
 
 class SubscriptionHandlers {
     constructor(bot, userStates) {
         this.bot = bot;
         this.userStates = userStates;
-        // Путь к изображению с QR-кодом
-        this.qrCodePath = path.join(__dirname, '../assets/qr.jpeg');
     }
 
     /**
@@ -118,7 +126,7 @@ class SubscriptionHandlers {
     }
 
     /**
-     * Обработка нажатия на кнопку оплаты
+     * Обработка нажатия на кнопку оплаты - отправка счёта через Telegram Payments
      */
     async handlePaymentCallback(chatId, callbackQueryId) {
         // Логируем попытку апгрейда
@@ -127,85 +135,142 @@ class SubscriptionHandlers {
         try {
             // Отвечаем на callback query
             this.bot.answerCallbackQuery(callbackQueryId, {
-                text: '💳 Загружаю данные для оплаты...',
+                text: '💳 Создаю счёт для оплаты...',
                 show_alert: false
             });
 
-            // Формируем текст инструкций (БЕЗ Markdown entities!)
-            const instructionsText =
-                `💳 ОПЛАТА ПОДПИСКИ PLUS\n\n` +
-                `💰 Сумма: 199 ₽\n` +
-                `⏱ Срок: 30 дней\n\n` +
-                `📱 СПОСОБЫ ОПЛАТЫ:\n\n` +
-                `1️⃣ По QR-коду:\n` +
-                `   Отсканируйте QR-код на изображении выше\n\n` +
-                `2️⃣ По номеру телефона:\n` +
-                `   📞 +7-922-296-45-50\n` +
-                `   🏦 ТБанк (СБП)\n\n` +
-                `⚠️ ВАЖНО! В комментарии к переводу обязательно укажите:\n` +
-                `\`${chatId}\` (скопируйте это число кликом по нему)\n\n` +
-                `После оплаты подписка активируется вручную в течение 15 минут.\n` +
-                `Если есть вопросы - напишите в поддержку.`;
+            // Генерируем уникальный payload
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substring(2, 8);
+            const payload = `plus_${chatId}_${timestamp}_${random}`;
 
-            const keyboard = {
-                inline_keyboard: [[
-                    { text: '✅ Я оплатил', callback_data: 'payment_confirm' },
-                    { text: '❓ Помощь', callback_data: 'payment_help' }
-                ]]
-            };
+            // Сохраняем запись о платеже в БД
+            await this._createPaymentRecord(chatId, payload, 'plus', PLUS_SUBSCRIPTION.price);
 
-            // Проверяем наличие файла с QR-кодом
-            if (fs.existsSync(this.qrCodePath)) {
-                // Сначала отправляем изображение БЕЗ caption
-                await this.bot.sendPhoto(chatId, this.qrCodePath);
+            // Отправляем счёт через Telegram Payments
+            await this.bot.sendInvoice(
+                chatId,
+                PLUS_SUBSCRIPTION.title,                    // title
+                PLUS_SUBSCRIPTION.description,              // description
+                payload,                                    // payload (уникальный идентификатор)
+                PAYMENT_TOKEN,                              // provider_token
+                PLUS_SUBSCRIPTION.currency,                 // currency
+                [{ label: 'Plus подписка (30 дней)', amount: PLUS_SUBSCRIPTION.price }]  // prices
+            );
 
-                // Затем отправляем текст отдельным сообщением
-                await this.bot.sendMessage(chatId, instructionsText, {
-                    parse_mode: 'Markdown', reply_markup: keyboard
-                });
-            } else {
-                // Если файла нет, отправляем только текст с предупреждением
-                const textWithWarning =
-                    `⚠️ QR-код временно недоступен\n\n` + instructionsText;
-
-                await this.bot.sendMessage(chatId, textWithWarning, {
-                    parse_mode: 'Markdown', reply_markup: keyboard
-                });
-            }
-
-            // Сохраняем в состояние, что пользователь ожидает оплаты
-            this.userStates[chatId] = {
-                step: 'awaiting_payment',
-                timestamp: Date.now()
-            };
+            console.log(`📤 Отправлен счёт для ${chatId}, payload: ${payload}`);
 
         } catch (error) {
-            console.error('Ошибка отправки данных для оплаты:', error);
-            this.bot.sendMessage(chatId, '❌ Ошибка загрузки данных для оплаты. Попробуйте позже.');
+            console.error('Ошибка отправки счёта:', error);
+            this.bot.sendMessage(chatId, '❌ Ошибка создания счёта. Попробуйте позже.');
         }
     }
+    async handlePreCheckoutQuery(query) {
+        const chatId = query.from.id;
+        const payload = query.invoice_payload;
+        console.log(`📥 Pre-checkout от ${chatId}, payload: ${payload}`);
 
+        try {
+            const payment = await this._getPaymentByPayload(payload);
+
+            if (!payment) {
+                console.error(`❌ Платёж не найден: ${payload}`);
+                await this.bot.answerPreCheckoutQuery(query.id, false, {
+                    error_message: 'Счёт не найден. Пожалуйста, создайте новый счёт.'
+                });
+                return;
+            }
+
+            // ✅ ИЗМЕНЕНИЕ: Разрешаем повторные попытки, если платёж ещё не завершён
+            if (payment.status === 'completed') {
+                console.error(`❌ Платёж уже завершён: ${payment.status}`);
+                await this.bot.answerPreCheckoutQuery(query.id, false, {
+                    error_message: 'Этот счёт уже оплачен. Создайте новый счёт для повторной оплаты.'
+                });
+                return;
+            }
+
+            // Обновляем статус на pre_checkout (можно делать несколько раз)
+            await this._updatePaymentStatus(payload, 'pre_checkout');
+
+            // Подтверждаем pre-checkout
+            await this.bot.answerPreCheckoutQuery(query.id, true);
+            console.log(`✅ Pre-checkout подтверждён для ${chatId}`);
+
+        } catch (error) {
+            console.error('Ошибка обработки pre_checkout:', error);
+            await this.bot.answerPreCheckoutQuery(query.id, false, {
+                error_message: 'Ошибка обработки платежа. Попробуйте позже.'
+            });
+        }
+    }
     /**
-     * Подтверждение оплаты
+     * Обработка successful_payment - успешная оплата
      */
-    async handlePaymentConfirm(chatId, callbackQueryId) {
-        this.bot.answerCallbackQuery(callbackQueryId, {
-            text: '✅ Спасибо! Проверяем оплату...',
-            show_alert: false
-        });
+    async handleSuccessfulPayment(message) {
+        const chatId = message.chat.id;
+        const payment = message.successful_payment;
+        const payload = payment.invoice_payload;
+        const telegramChargeId = payment.telegram_payment_charge_id;
+        const providerChargeId = payment.provider_payment_charge_id;
 
-        this.bot.sendMessage(
-            chatId,
-            '✅ Спасибо за оплату!\n\n' +
-            '⏳ Проверяем поступление платежа. Это займет до 15 минут.\n\n' +
-            '📬 Вы получите уведомление, как только подписка будет активирована.\n\n' +
-            'Если платеж не поступит в течение часа, напишите в поддержку с указанием:\n' +
-            `• Вашего ID: ${chatId}\n` +
-            '• Времени оплаты\n' +
-            '• Скриншота чека'
-        );
+        console.log(`💰 Успешная оплата от ${chatId}:`);
+        console.log(`   Payload: ${payload}`);
+        console.log(`   Telegram charge ID: ${telegramChargeId}`);
+        console.log(`   Provider charge ID: ${providerChargeId}`);
+        console.log(`   Сумма: ${payment.total_amount} ${payment.currency}`);
 
-        delete this.userStates[chatId];
+        try {
+            // Получаем запись о платеже
+            const paymentRecord = await this._getPaymentByPayload(payload);
+
+            if (!paymentRecord) {
+                console.error(`❌ Запись о платеже не найдена: ${payload}`);
+                this.bot.sendMessage(chatId,
+                    '⚠️ Оплата получена, но произошла ошибка при обработке.\n' +
+                    'Пожалуйста, свяжитесь с поддержкой: @jowoodik'
+                );
+                return;
+            }
+
+            // Обновляем статус платежа на completed
+            await this._updatePaymentStatus(payload, 'completed', telegramChargeId, providerChargeId);
+
+            // Активируем подписку
+            await SubscriptionService.updateSubscription(chatId, paymentRecord.subscription_type);
+
+            // Логируем успешную оплату
+            ActivityService.logEvent(chatId, 'payment_success', {
+                subscription_type: paymentRecord.subscription_type,
+                amount: payment.total_amount,
+                currency: payment.currency
+            }).catch(err => console.error('Activity log error:', err));
+
+            // Отправляем подтверждение
+            const validTo = new Date();
+            validTo.setMonth(validTo.getMonth() + 1);
+
+            this.bot.sendMessage(chatId,
+                '🎉 Оплата успешно получена!\n\n' +
+                '💎 Подписка Plus активирована!\n\n' +
+                `📅 Действует до: ${validTo.toLocaleDateString('ru-RU')}\n\n` +
+                '✨ Теперь вам доступны:\n' +
+                '• 5 фиксированных маршрутов\n' +
+                '• 3 гибких маршрута\n' +
+                '• До 50 комбинаций\n' +
+                '• Проверка каждые 2 часа\n\n' +
+                'Спасибо за поддержку проекта! 🙏'
+            );
+
+            console.log(`✅ Подписка Plus активирована для ${chatId}`);
+
+        } catch (error) {
+            console.error('Ошибка обработки successful_payment:', error);
+            this.bot.sendMessage(chatId,
+                '⚠️ Оплата получена, но произошла ошибка при активации подписки.\n' +
+                'Пожалуйста, свяжитесь с поддержкой: @jowoodik'
+            );
+        }
     }
 
     /**
@@ -217,16 +282,15 @@ class SubscriptionHandlers {
         this.bot.sendMessage(
             chatId,
             '❓ ПОМОЩЬ ПО ОПЛАТЕ\n\n' +
-            '📱 Инструкция для СБП:\n\n' +
-            '1️⃣ Откройте приложение вашего банка\n' +
-            '2️⃣ Найдите раздел "Переводы по СБП" или "Переводы по номеру телефона"\n' +
-            '3️⃣ Введите номер: +7-922-296-45-50\n' +
-            '4️⃣ Выберите банк получателя: ТБанк\n' +
-            '5️⃣ Укажите сумму: 199 ₽\n' +
-            `6️⃣ В комментарии обязательно укажите: ${chatId}\n` +
-            '7️⃣ Подтвердите перевод\n\n' +
-            '⏱ Подписка активируется  вручную в течение 15 минут после оплаты.\n\n' +
-            '❗️ Если у вас возникли проблемы, напишите в поддержку.'
+            '💳 Оплата происходит через Telegram Payments с провайдером ЮKassa.\n\n' +
+            '📝 Инструкция:\n' +
+            '1️⃣ Нажмите кнопку "Оплатить 199 ₽"\n' +
+            '2️⃣ В открывшемся окне выберите способ оплаты\n' +
+            '3️⃣ Введите данные карты\n' +
+            '4️⃣ Подтвердите оплату\n\n' +
+            '✅ Подписка активируется автоматически сразу после оплаты!\n\n' +
+            '🔒 Оплата безопасна - данные карты не сохраняются.\n\n' +
+            '❗️ Если возникли проблемы, напишите в поддержку: @jowoodik'
         );
     }
 
@@ -244,10 +308,6 @@ class SubscriptionHandlers {
                     await this.handlePaymentCallback(chatId, query.id);
                     break;
 
-                case 'payment_confirm':
-                    await this.handlePaymentConfirm(chatId, query.id);
-                    break;
-
                 case 'payment_help':
                     await this.handlePaymentHelp(chatId, query.id);
                     break;
@@ -262,6 +322,62 @@ class SubscriptionHandlers {
                 show_alert: true
             });
         }
+    }
+
+    // ============================================
+    // МЕТОДЫ РАБОТЫ С БД (payments)
+    // ============================================
+
+    /**
+     * Создать запись о платеже
+     */
+    _createPaymentRecord(chatId, payload, subscriptionType, amount) {
+        return new Promise((resolve, reject) => {
+            db.run(`
+                INSERT INTO payments (chat_id, payload, subscription_type, amount, status, created_at)
+                VALUES (?, ?, ?, ?, 'pending', datetime('now'))
+            `, [chatId, payload, subscriptionType, amount], function(err) {
+                if (err) reject(err);
+                else resolve(this.lastID);
+            });
+        });
+    }
+
+    /**
+     * Обновить статус платежа
+     */
+    _updatePaymentStatus(payload, status, telegramChargeId = null, providerChargeId = null) {
+        return new Promise((resolve, reject) => {
+            let sql, params;
+
+            if (status === 'pre_checkout') {
+                sql = `UPDATE payments SET status = ?, pre_checkout_at = datetime('now') WHERE payload = ?`;
+                params = [status, payload];
+            } else if (status === 'completed') {
+                sql = `UPDATE payments SET status = ?, telegram_payment_charge_id = ?, provider_payment_charge_id = ?, completed_at = datetime('now') WHERE payload = ?`;
+                params = [status, telegramChargeId, providerChargeId, payload];
+            } else {
+                sql = `UPDATE payments SET status = ? WHERE payload = ?`;
+                params = [status, payload];
+            }
+
+            db.run(sql, params, (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    }
+
+    /**
+     * Получить запись о платеже по payload
+     */
+    _getPaymentByPayload(payload) {
+        return new Promise((resolve, reject) => {
+            db.get(`SELECT * FROM payments WHERE payload = ?`, [payload], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
     }
 
     _pluralize(number, one, two, five) {

@@ -292,6 +292,33 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_user_subscriptions_type ON user_subscriptions(subscription_type)`);
 
   // ============================================
+  // ТАБЛИЦА ПЛАТЕЖЕЙ (Telegram Payments)
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      payload TEXT NOT NULL UNIQUE,
+      subscription_type TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      currency TEXT DEFAULT 'RUB',
+      status TEXT DEFAULT 'pending',
+      telegram_payment_charge_id TEXT,
+      provider_payment_charge_id TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      pre_checkout_at DATETIME,
+      completed_at DATETIME
+    )
+  `);
+
+  // Индексы для таблицы payments
+  db.run(`CREATE INDEX IF NOT EXISTS idx_payments_chat_id ON payments(chat_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_payments_payload ON payments(payload)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)`);
+
+  console.log('✅ Таблица payments готова');
+
+  // ============================================
 // МАССОВАЯ РАССЫЛКА
 // ============================================
 
