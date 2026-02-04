@@ -152,10 +152,10 @@ class DashboardPage {
                     <div class="col-lg-8">
                         <div class="card">
                             <div class="card-header">
-                                <h5 class="mb-0">📊 Активность по дням</h5>
+                                <h5 class="mb-0">📊 DAU - Активные пользователи по дням</h5>
                             </div>
                             <div class="card-body">
-                                <canvas id="activity-chart" height="300"></canvas>
+                                <canvas id="dau-history-chart" height="300"></canvas>
                             </div>
                         </div>
                     </div>
@@ -166,6 +166,30 @@ class DashboardPage {
                             </div>
                             <div class="card-body">
                                 <canvas id="subscriptions-chart" height="300"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hourly Stats & Avg Prices -->
+                <div class="row g-4 mb-4">
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">⏰ Проверки по часам (7 дней)</h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="hourly-chart" height="250"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">💰 Средние цены по направлениям</h5>
+                            </div>
+                            <div class="card-body">
+                                ${this.renderAvgPrices(statsData.avgPrices || [])}
                             </div>
                         </div>
                     </div>
@@ -220,6 +244,9 @@ class DashboardPage {
 
         // Render charts
         this.renderCharts(statsData, routes);
+
+        // Render hourly chart
+        this.renderHourlyChart(statsData.hourlyStats || []);
     }
 
     renderStatsCards(statsData, users, routes) {
@@ -270,25 +297,36 @@ class DashboardPage {
     }
 
     renderCharts(statsData, routes) {
-        // Activity Chart (last 7 days)
-        const last7Days = this.getLast7Days();
-        const activityData = last7Days.map(date => {
-            return routes.filter(r => {
-                const created = new Date(r.created_at).toISOString().split('T')[0];
-                return created === date;
-            }).length;
-        });
+        // DAU History Chart - реальная активность пользователей
+        const dauHistory = statsData.dauHistory || [];
 
-        this.charts.activity = ChartComponent.lineChart(
-            'activity-chart',
-            last7Days.map(d => new Date(d).toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' })),
+        // Подготавливаем данные для графика
+        let dauLabels = [];
+        let dauData = [];
+
+        if (dauHistory.length > 0) {
+            dauLabels = dauHistory.map(d => {
+                const date = new Date(d.date);
+                return date.toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' });
+            });
+            dauData = dauHistory.map(d => d.users);
+        } else {
+            // Если нет данных, показываем последние 7 дней с нулями
+            const last7Days = this.getLast7Days();
+            dauLabels = last7Days.map(d => new Date(d).toLocaleDateString('ru-RU', { month: 'short', day: 'numeric' }));
+            dauData = last7Days.map(() => 0);
+        }
+
+        this.charts.dauHistory = ChartComponent.lineChart(
+            'dau-history-chart',
+            dauLabels,
             [{
-                label: 'Новые маршруты',
-                data: activityData,
-                color: CONFIG.CHART_COLORS.PRIMARY
+                label: 'Активные пользователи (DAU)',
+                data: dauData,
+                color: CONFIG.CHART_COLORS.SUCCESS
             }]
         );
-        this.charts.activity.render();
+        this.charts.dauHistory.render();
 
         // Subscriptions Chart - используем данные из API (по пользователям)
         const subscriptionStats = statsData.subscriptionStats || [];
@@ -501,6 +539,58 @@ class DashboardPage {
             dates.push(date.toISOString().split('T')[0]);
         }
         return dates;
+    }
+
+    renderHourlyChart(hourlyStats) {
+        // Подготавливаем данные для всех 24 часов
+        const hoursData = new Array(24).fill(0);
+        hourlyStats.forEach(stat => {
+            if (stat.hour >= 0 && stat.hour < 24) {
+                hoursData[stat.hour] = stat.checks;
+            }
+        });
+
+        const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`);
+
+        this.charts.hourly = ChartComponent.barChart(
+            'hourly-chart',
+            labels,
+            [{
+                label: 'Проверки',
+                data: hoursData,
+                color: CONFIG.CHART_COLORS.INFO
+            }]
+        );
+        this.charts.hourly.render();
+    }
+
+    renderAvgPrices(avgPrices) {
+        if (!avgPrices || avgPrices.length === 0) {
+            return '<p class="text-muted">Нет данных о ценах</p>';
+        }
+
+        return `
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Направление</th>
+                            <th>Средняя цена</th>
+                            <th>Кол-во</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${avgPrices.slice(0, 10).map(price => `
+                            <tr>
+                                <td><strong>${price.origin} → ${price.destination}</strong></td>
+                                <td>${Math.round(price.avgprice).toLocaleString()} ₽</td>
+                                <td><span class="badge bg-secondary">${price.pricecount}</span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 
     destroy() {
