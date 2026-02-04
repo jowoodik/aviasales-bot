@@ -8,7 +8,7 @@ const AviasalesAPI = require('./AviasalesAPI');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 7;
+    this.maxConcurrent = 10;
     this.debug = debug;
     // Партнёрский маркер для ссылок пользователям (влияет на статистику travelpayouts)
     this.marker = marker;
@@ -29,7 +29,7 @@ class AviasalesPricer {
       'http://PEesVANV:hiBzhNjR@85.142.1.182:62672',
       'http://PEesVANV:hiBzhNjR@85.142.5.72:62916',
       'http://PEesVANV:hiBzhNjR@85.142.7.101:64414',
-      // 'http://PEesVANV:hiBzhNjR@85.142.46.30:64626',
+      'http://PEesVANV:hiBzhNjR@85.142.46.30:64626',
       'http://PEesVANV:hiBzhNjR@85.142.81.248:64954',
       'http://PEesVANV:hiBzhNjR@109.196.172.199:64320',
       'http://PEesVANV:hiBzhNjR@85.142.0.77:63718',
