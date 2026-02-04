@@ -221,13 +221,14 @@ class RouteHandlers {
     async handleRouteDetails(chatId, routeIndex) {
         try {
             const state = this.userStates[chatId];
-            if (!state || !state.routes) {
-                this.bot.sendMessage(chatId, '❌ Ошибка: маршрут не найден');
-                return;
-            }
 
-            const route = state.routes[routeIndex];
-            if (!route) {
+            // Поддержка возврата из графика/heatmap - используем state.route напрямую
+            let route;
+            if (state?.route && routeIndex === state.routeIndex) {
+                route = state.route;
+            } else if (state?.routes && state.routes[routeIndex]) {
+                route = state.routes[routeIndex];
+            } else {
                 this.bot.sendMessage(chatId, '❌ Ошибка: маршрут не найден');
                 return;
             }

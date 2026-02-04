@@ -208,6 +208,10 @@ bot.on('message', async (msg) => {
         routeHandlers.handleDeleteRoute(chatId);
         return;
       }
+      if (text === '◀️ Назад к маршруту') {
+        await routeHandlers.handleRouteDetails(chatId, state.routeIndex);
+        return;
+      }
     }
 
     // Редактирование маршрута
