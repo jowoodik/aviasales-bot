@@ -61,6 +61,7 @@ export const CONFIG = {
                 { key: 'totalroutes', label: 'Маршруты', sortable: true, type: 'badge' },
                 { key: 'timezone', label: 'Таймзона', sortable: true },
                 { key: 'quiet_hours_start', label: 'Тихие часы', sortable: false, type: 'quiet-hours' },
+                { key: 'notify_on_check', label: 'Уведомления', sortable: true, type: 'boolean' },
                 { key: 'lastactivity', label: 'Последняя активность', sortable: true, type: 'datetime' },
                 { key: 'created_at', label: 'Создан', sortable: true, type: 'date' }
             ],

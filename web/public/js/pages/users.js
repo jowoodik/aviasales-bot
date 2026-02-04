@@ -120,6 +120,10 @@ class UsersPage {
                                 <td>${this.formatQuietHours(user)}</td>
                             </tr>
                             <tr>
+                                <td><strong>Уведомления при проверке:</strong></td>
+                                <td>${user.notify_on_check ? '<span class="badge bg-success">Да</span>' : '<span class="badge bg-secondary">Нет</span>'}</td>
+                            </tr>
+                            <tr>
                                 <td><strong>Создан:</strong></td>
                                 <td>${new Date(user.created_at).toLocaleString('ru-RU')}</td>
                             </tr>
@@ -201,6 +205,12 @@ class UsersPage {
                     min: 0,
                     max: 23,
                     placeholder: '0-23 (пусто = не установлено)'
+                },
+                {
+                    name: 'notify_on_check',
+                    label: 'Уведомления при каждой проверке',
+                    type: 'checkbox',
+                    value: user.notify_on_check ? true : false
                 }
             ]
         });
@@ -212,7 +222,8 @@ class UsersPage {
             const updateData = {
                 timezone: formData.timezone,
                 quiet_hours_start: formData.quiet_hours_start === '' ? null : parseInt(formData.quiet_hours_start),
-                quiet_hours_end: formData.quiet_hours_end === '' ? null : parseInt(formData.quiet_hours_end)
+                quiet_hours_end: formData.quiet_hours_end === '' ? null : parseInt(formData.quiet_hours_end),
+                notify_on_check: formData.notify_on_check ? 1 : 0
             };
 
             await api.updateUser(user.chat_id, updateData);

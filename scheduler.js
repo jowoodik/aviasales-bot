@@ -11,12 +11,172 @@ const bot = new TelegramBot(TOKEN, { polling: false });
 
 console.log('📅 Планировщик запущен');
 
-// Интервалы проверок для каждого типа подписки
-const CHECK_INTERVALS = {
-  'free': '0 */4 * * *',    // каждые 4 часа
-  'plus': '0 */2 * * *',    // каждые 2 часа
-  'admin': '0 * * * *'      // каждый час
-};
+// Динамическое управление cron-задачами
+const activeJobs = new Map();           // хранение cron-задач по типу подписки
+let currentIntervals = {};              // текущие интервалы из БД (type -> hours)
+const CONFIG_CHECK_INTERVAL = 60000;    // проверка изменений каждые 60 сек
+
+/**
+ * Преобразование часов в cron-выражение
+ * @param {number} hours - интервал в часах
+ * @returns {string} cron-выражение
+ */
+function hoursToCron(hours) {
+  if (hours <= 0) hours = 1;
+  if (hours >= 24) {
+    return '0 0 * * *'; // раз в день в полночь
+  }
+  if (hours === 1) {
+    return '0 * * * *'; // каждый час
+  }
+  return `0 */${hours} * * *`; // каждые N часов
+}
+
+/**
+ * Загрузка интервалов из таблицы subscription_types
+ * @returns {Promise<Object>} объект { type: hours }
+ */
+function getIntervalsFromDB() {
+  return new Promise((resolve, reject) => {
+    db.all(`
+      SELECT name, check_interval_hours
+      FROM subscription_types
+      WHERE is_active = 1
+    `, [], (err, rows) => {
+      if (err) reject(err);
+      else {
+        const intervals = {};
+        for (const row of rows || []) {
+          intervals[row.name] = row.check_interval_hours || 4; // fallback 4 часа
+        }
+        resolve(intervals);
+      }
+    });
+  });
+}
+
+/**
+ * Создание cron-задачи для типа подписки
+ * @param {string} type - тип подписки
+ * @param {number} hours - интервал в часах
+ */
+function createSubscriptionJob(type, hours) {
+  const cronExpression = hoursToCron(hours);
+
+  const job = cron.schedule(cronExpression, async () => {
+    const emoji = type === 'admin' ? '🔴' : type === 'plus' ? '🟠' : '🟢';
+    console.log(`\n${emoji} Запуск проверки для ${type.toUpperCase()} подписки...`);
+    await checkRoutesBySubscription(type);
+  });
+
+  activeJobs.set(type, job);
+  console.log(`   • ${type.toUpperCase()} подписка: ${cronExpression} (каждые ${hours} ч.)`);
+}
+
+/**
+ * Проверка изменений интервалов и перезапуск задач при необходимости
+ */
+async function updateSchedulerJobs() {
+  try {
+    const newIntervals = await getIntervalsFromDB();
+
+    // Проверяем изменения
+    let hasChanges = false;
+    const changes = [];
+
+    for (const type of Object.keys(newIntervals)) {
+      if (currentIntervals[type] !== newIntervals[type]) {
+        hasChanges = true;
+        changes.push({
+          type,
+          oldHours: currentIntervals[type],
+          newHours: newIntervals[type]
+        });
+      }
+    }
+
+    // Проверяем удаленные типы
+    for (const type of Object.keys(currentIntervals)) {
+      if (!(type in newIntervals)) {
+        hasChanges = true;
+        changes.push({
+          type,
+          oldHours: currentIntervals[type],
+          newHours: null
+        });
+      }
+    }
+
+    if (!hasChanges) return;
+
+    // Логируем изменения
+    console.log('\n🔄 Обнаружены изменения интервалов проверки:');
+    for (const change of changes) {
+      if (change.newHours === null) {
+        console.log(`   • ${change.type}: удален`);
+      } else if (change.oldHours === undefined) {
+        console.log(`   • ${change.type}: добавлен (${change.newHours} ч.)`);
+      } else {
+        console.log(`   • ${change.type}: ${change.oldHours} ч. → ${change.newHours} ч.`);
+      }
+    }
+
+    // Останавливаем старые задачи
+    for (const [type, job] of activeJobs) {
+      job.stop();
+    }
+    activeJobs.clear();
+
+    // Создаем новые задачи
+    console.log('\n📅 Перезапуск планировщика с новыми интервалами:');
+    for (const [type, hours] of Object.entries(newIntervals)) {
+      createSubscriptionJob(type, hours);
+    }
+
+    currentIntervals = newIntervals;
+
+  } catch (error) {
+    console.error('❌ Ошибка при обновлении интервалов:', error);
+  }
+}
+
+/**
+ * Инициализация планировщика
+ */
+async function initializeScheduler() {
+  try {
+    console.log('🚀 Инициализация динамического планировщика...');
+
+    // Загружаем интервалы из БД
+    currentIntervals = await getIntervalsFromDB();
+
+    if (Object.keys(currentIntervals).length === 0) {
+      console.log('⚠️ Не найдено активных типов подписок в БД, используем значения по умолчанию');
+      currentIntervals = { free: 4, plus: 2, admin: 1 };
+    }
+
+    // Создаем cron-задачи
+    console.log('✅ Планировщик настроен:');
+    for (const [type, hours] of Object.entries(currentIntervals)) {
+      createSubscriptionJob(type, hours);
+    }
+    console.log(`   • Очистка данных: 0 3 * * * (3:00 ночи)`);
+
+    // Запускаем периодическую проверку изменений
+    setInterval(updateSchedulerJobs, CONFIG_CHECK_INTERVAL);
+    console.log(`\n🔄 Проверка изменений интервалов: каждые ${CONFIG_CHECK_INTERVAL / 1000} сек.`);
+
+  } catch (error) {
+    console.error('❌ Ошибка инициализации планировщика:', error);
+
+    // Fallback на статические интервалы
+    console.log('⚠️ Используем fallback интервалы...');
+    currentIntervals = { free: 4, plus: 2, admin: 1 };
+    for (const [type, hours] of Object.entries(currentIntervals)) {
+      createSubscriptionJob(type, hours);
+    }
+  }
+}
 
 /**
  * Проверить маршруты для определенного типа подписки
@@ -114,26 +274,10 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
 }
 
 // ========================================
-// CRON ЗАДАЧИ ДЛЯ КАЖДОГО ТИПА ПОДПИСКИ
+// CRON ЗАДАЧИ УПРАВЛЯЮТСЯ ДИНАМИЧЕСКИ
 // ========================================
-
-// Проверка для FREE подписки (каждые 4 часа)
-cron.schedule(CHECK_INTERVALS.free, async () => {
-  console.log('\n🟢 Запуск проверки для FREE подписки...');
-  await checkRoutesBySubscription('free');
-});
-
-// Проверка для PLUS подписки (каждые 2 часа)
-cron.schedule(CHECK_INTERVALS.plus, async () => {
-  console.log('\n🟠 Запуск проверки для PLUS подписки...');
-  await checkRoutesBySubscription('plus');
-});
-
-// Проверка для ADMIN подписки (каждый час)
-cron.schedule(CHECK_INTERVALS.admin, async () => {
-  console.log('\n🔴 Запуск проверки для ADMIN подписки...');
-  await checkRoutesBySubscription('admin');
-});
+// Задачи для подписок создаются в initializeScheduler()
+// и обновляются автоматически при изменении в БД
 
 // ========================================
 // ДОПОЛНИТЕЛЬНЫЕ CRON ЗАДАЧИ
@@ -321,12 +465,8 @@ async function cleanupOldData() {
 // ИНИЦИАЛИЗАЦИЯ И УПРАВЛЕНИЕ
 // ========================================
 
-console.log('✅ Планировщик настроен:');
-console.log(`   • FREE подписка: ${CHECK_INTERVALS.free} (каждые 4 часа)`);
-console.log(`   • PLUS подписка: ${CHECK_INTERVALS.plus} (каждые 2 часа)`);
-console.log(`   • ADMIN подписка: ${CHECK_INTERVALS.admin} (каждый час)`);
-console.log(`   • Ежедневная проверка: 0 9 * * * (9:00 утра)`);
-console.log(`   • Очистка данных: 0 3 * * * (3:00 ночи)`);
+// Инициализация динамического планировщика
+initializeScheduler();
 
 // Функция для ручного запуска проверки
 async function runManualCheck(subscriptionType) {
@@ -338,7 +478,9 @@ async function runManualCheck(subscriptionType) {
 module.exports = {
   runManualCheck,
   checkRoutesBySubscription,
-  CHECK_INTERVALS
+  updateSchedulerJobs,      // для принудительного обновления интервалов
+  getIntervalsFromDB,       // для диагностики
+  activeJobs                // для мониторинга активных задач
 };
 
 // Держим процесс активным

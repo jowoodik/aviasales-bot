@@ -173,6 +173,10 @@ class Table {
                 return value === 'error'
                     ? '<span class="badge bg-danger">Error</span>'
                     : '<span class="badge bg-warning text-dark">Not Found</span>';
+            case 'boolean':
+                return value
+                    ? '<span class="badge bg-success">Да</span>'
+                    : '<span class="badge bg-secondary">Нет</span>';
             default:
                 return escapeHtml(value);
         }
