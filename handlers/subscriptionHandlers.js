@@ -17,6 +17,11 @@ class SubscriptionHandlers {
     constructor(bot, userStates) {
         this.bot = bot;
         this.userStates = userStates;
+
+        // Проверка токена при инициализации
+        const tokenType = PAYMENT_TOKEN.includes('TEST') ? '🧪 TEST' : '💳 LIVE';
+        console.log(`💰 Payment provider: ${tokenType}`);
+        console.log(`   Token: ${PAYMENT_TOKEN.substring(0, 20)}...`);
     }
 
     /**
