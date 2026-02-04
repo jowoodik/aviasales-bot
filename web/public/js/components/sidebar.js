@@ -96,10 +96,76 @@ class Sidebar {
         const toggle = document.getElementById('sidebar-toggle');
         const sidebar = document.getElementById('sidebar');
 
-        if (toggle && sidebar) {
-            toggle.addEventListener('click', () => {
-                sidebar.classList.toggle('show');
-            });
+        if (!toggle || !sidebar) return;
+
+        // Открытие/закрытие по кнопке toggle
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            sidebar.classList.toggle('show');
+
+            // Добавляем/убираем backdrop
+            this.toggleBackdrop(sidebar.classList.contains('show'));
+        });
+
+        // Закрытие при клике на пункт меню (на мобилке)
+        sidebar.addEventListener('click', (e) => {
+            const link = e.target.closest('.sidebar-link');
+            if (link && window.innerWidth < 768) {
+                sidebar.classList.remove('show');
+                this.toggleBackdrop(false);
+            }
+        });
+
+        // Закрытие при клике вне сайдбара (на backdrop)
+        document.addEventListener('click', (e) => {
+            if (
+                sidebar.classList.contains('show') &&
+                !sidebar.contains(e.target) &&
+                !toggle.contains(e.target)
+            ) {
+                sidebar.classList.remove('show');
+                this.toggleBackdrop(false);
+            }
+        });
+
+        // Закрытие по ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && sidebar.classList.contains('show')) {
+                sidebar.classList.remove('show');
+                this.toggleBackdrop(false);
+            }
+        });
+    }
+
+    toggleBackdrop(show) {
+        let backdrop = document.getElementById('sidebar-backdrop');
+
+        if (show) {
+            // Создаем backdrop если его нет
+            if (!backdrop) {
+                backdrop = document.createElement('div');
+                backdrop.id = 'sidebar-backdrop';
+                backdrop.className = 'sidebar-backdrop';
+                document.body.appendChild(backdrop);
+
+                // Закрытие по клику на backdrop
+                backdrop.addEventListener('click', () => {
+                    const sidebar = document.getElementById('sidebar');
+                    if (sidebar) {
+                        sidebar.classList.remove('show');
+                        this.toggleBackdrop(false);
+                    }
+                });
+            }
+            backdrop.classList.add('show');
+            document.body.style.overflow = 'hidden'; // Блокируем скролл
+        } else {
+            // Убираем backdrop
+            if (backdrop) {
+                backdrop.classList.remove('show');
+                setTimeout(() => backdrop.remove(), 300); // Удаляем после анимации
+            }
+            document.body.style.overflow = ''; // Возвращаем скролл
         }
     }
 }
