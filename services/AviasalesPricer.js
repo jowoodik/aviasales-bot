@@ -10,7 +10,11 @@ class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
     this.maxConcurrent = 7;
     this.debug = debug;
+    // Партнёрский маркер для ссылок пользователям (влияет на статистику travelpayouts)
     this.marker = marker;
+    // Технический маркер для API-запросов (НЕ влияет на статистику переходов)
+    // Используем '0' чтобы API работал, но переходы не засчитывались
+    this.apiMarker = '0';
     this.aviasalesAPI = new AviasalesAPI(process.env.TRAVELPAYOUTS_TOKEN);
 
     // API конфигурация
@@ -495,7 +499,8 @@ class AviasalesPricer {
       });
 
       cookiesObj.currency = cookiesObj.currency || 'rub';
-      cookiesObj.marker = this.marker;
+      // Используем технический маркер для API (не искажает статистику переходов)
+      cookiesObj.marker = this.apiMarker;
 
       console.log('🍪 Получено куков:', Object.keys(cookiesObj).length);
       console.log('🍪 Куки:', Object.keys(cookiesObj).join(', '));
@@ -678,7 +683,8 @@ class AviasalesPricer {
         assisted: true
       },
       market_code: 'ru',
-      marker: this.marker,
+      // Используем технический маркер для API (не искажает статистику переходов)
+      marker: this.apiMarker,
       citizenship: 'RU',
       currency_code: 'rub',
       languages: { ru: 1 },
