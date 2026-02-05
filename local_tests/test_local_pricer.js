@@ -1,5 +1,5 @@
-const AviasalesPricer = require('./AviasalesPricer');
-const AviasalesAPI = require('./AviasalesAPI');
+const AviasalesPricer = require('../services/AviasalesPricer');
+const AviasalesAPI = require('../services/AviasalesAPI');
 const fs = require('fs');
 const path = require('path');
 

@@ -496,12 +496,32 @@ async function handleCheckNow(chatId) {
 
     const UnifiedMonitor = require('./services/UnifiedMonitor');
     const NotificationService = require('./services/NotificationService');
+    const RouteResult = require('./models/RouteResult');
+    const airportResolver = require('./utils/AirportCodeResolver');
     const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
     const notificationService = new NotificationService(bot);
 
+    await airportResolver.load();
     await monitor.checkAllRoutes();
+
+    // Формируем сводный отчёт в новом формате
     const stats = await notificationService.getUserRoutesStats(chatId);
-    await notificationService.sendCheckReport(chatId, stats);
+    const timezone = await notificationService._getUserTimezone(chatId);
+    const routeBlocks = [];
+
+    for (const stat of stats) {
+      const route = { id: stat.routeId, origin: stat.origin, destination: stat.destination, threshold_price: stat.thresholdPrice, is_flexible: stat.isFlexible };
+      const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
+      const bestResult = bestResults[0] || null;
+      const analytics = await notificationService.getRouteAnalytics(stat.routeId);
+      const checkStats = await notificationService.getRouteCheckStats(stat.routeId);
+      const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
+      routeBlocks.push({ block, route, priority: stat.foundCheaper ? 'CRITICAL' : 'LOW' });
+    }
+
+    if (routeBlocks.length > 0) {
+      await notificationService.sendConsolidatedReport(chatId, routeBlocks, timezone, false);
+    }
 
     bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard(chatId));
   } catch (error) {

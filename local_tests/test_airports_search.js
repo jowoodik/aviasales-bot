@@ -1,5 +1,5 @@
 // test-airport-search.js
-const AirportService = require('./AirportService');
+const AirportService = require('../services/AirportService');
 
 // Создаем экземпляр сервиса
 const airportService = new AirportService();

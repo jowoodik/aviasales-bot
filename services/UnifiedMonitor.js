@@ -2,7 +2,6 @@ const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
 const AviasalesPricer = require('./AviasalesPricer');
 const AviasalesAPI = require('./AviasalesAPI');
-const NotificationService = require('./NotificationService');
 const db = require('../config/database');
 
 class UnifiedMonitor {
@@ -14,7 +13,6 @@ class UnifiedMonitor {
             process.env.AVIASALES_MARKER || '696196'
         );
         this.api = new AviasalesAPI(token, process.env.AVIASALES_MARKER || '696196');
-        this.notificationService = new NotificationService(bot);
     }
 
     /**
@@ -118,22 +116,7 @@ class UnifiedMonitor {
                     combination: combination
                 });
 
-                // 🔥 Проверка порога цены
-                if (route.threshold_price && priceResult.price <= route.threshold_price) {
-                    console.log(`🔥 Найдена цена ниже порога: ${priceResult.price} ₽ (порог: ${route.threshold_price} ₽)`);
-
-                    await this.notificationService.sendPriceAlert(
-                        route.chat_id,
-                        route,
-                        {
-                            price: priceResult.price,
-                            currency: priceResult.currency || 'RUB',
-                            airline: route.airline || 'ANY',
-                            link: searchLink // 🔥 ОТПРАВЛЯЕМ РАСШИРЕННУЮ ССЫЛКУ
-                        },
-                        combination
-                    );
-                }
+                // Уведомления теперь маршрутизируются через scheduler → NotificationService.processAndRouteNotification
 
                 // Сохраняем в price_analytics
                 await this.saveToPriceAnalytics(route, priceResult.price, combination);

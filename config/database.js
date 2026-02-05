@@ -393,6 +393,74 @@ db.serialize(() => {
     }
   });
 
+  // ============================================
+  // ТАБЛИЦА ЛОГОВ УВЕДОМЛЕНИЙ
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS notification_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      route_id INTEGER,
+      priority TEXT NOT NULL,
+      price REAL,
+      message_type TEXT NOT NULL,
+      sent_at DATETIME DEFAULT (datetime('now')),
+      disable_notification INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_notif_log_chat_priority ON notification_log(chat_id, priority, sent_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_notif_log_route ON notification_log(route_id, priority, sent_at)`);
+
+  // ============================================
+  // ОЧЕРЕДЬ ДАЙДЖЕСТА
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS daily_digest_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      route_id INTEGER NOT NULL,
+      priority TEXT NOT NULL,
+      price REAL NOT NULL,
+      avg_price REAL,
+      historical_min REAL,
+      best_result_id INTEGER,
+      created_at DATETIME DEFAULT (datetime('now')),
+      processed INTEGER DEFAULT 0
+    )
+  `);
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_digest_queue_chat ON daily_digest_queue(chat_id, processed)`);
+
+  // Новые колонки для уведомлений в user_settings
+  db.run(`ALTER TABLE user_settings ADD COLUMN night_mode INTEGER DEFAULT 1`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления night_mode:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка night_mode в user_settings');
+    }
+  });
+
+  db.run(`ALTER TABLE user_settings ADD COLUMN notifications_enabled INTEGER DEFAULT 1`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления notifications_enabled:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка notifications_enabled в user_settings');
+      // Миграция старого значения notify_on_check
+      db.run(`UPDATE user_settings SET notifications_enabled = notify_on_check, digest_enabled = notify_on_check WHERE notify_on_check = 1`, (err2) => {
+        if (!err2) console.log('✅ Мигрированы значения notify_on_check');
+      });
+    }
+  });
+
+  db.run(`ALTER TABLE user_settings ADD COLUMN digest_enabled INTEGER DEFAULT 1`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления digest_enabled:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка digest_enabled в user_settings');
+    }
+  });
+
   console.log('✅ База данных инициализирована и мигрирована');
   console.log('🔥 Новые таблицы для статистики проверок готовы');
 });
