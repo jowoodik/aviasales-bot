@@ -2,6 +2,7 @@ import api from '../api.js';
 import ChartComponent from '../components/chart.js';
 import CONFIG from '../config.js';
 import { showLoading, showError, formatNumber } from '../utils/helpers.js';
+import airportService from '../services/airportService.js';
 
 class AnalyticsPage {
     constructor() {
@@ -263,6 +264,20 @@ class AnalyticsPage {
     `).join('');
     }
 
+    formatRouteLabel(route) {
+        if (route.origin_city && route.destination_city) {
+            return `${route.origin_city} (${route.origin}) → ${route.destination_city} (${route.destination})`;
+        }
+        return `${route.origin} → ${route.destination}`;
+    }
+
+    formatCityLabel(code, cityName) {
+        if (cityName && cityName !== code) {
+            return `${cityName} (${code})`;
+        }
+        return airportService.formatCode(code);
+    }
+
     renderTopRoutesChart() {
         const data = this.analyticsData.topRoutes || [];
         const tableContainer = document.getElementById('table-top-routes');
@@ -288,7 +303,7 @@ class AnalyticsPage {
           ${data.slice(0, 10).map((route, index) => `
             <tr>
               <td>${index + 1}</td>
-              <td><strong>${route.origin} → ${route.destination}</strong></td>
+              <td><strong>${this.formatRouteLabel(route)}</strong></td>
               <td>${route.count}</td>
               <td>${route.active_count}</td>
               <td>${formatNumber(Math.round(route.avg_threshold))} ₽</td>
@@ -299,10 +314,10 @@ class AnalyticsPage {
     `;
         tableContainer.innerHTML = html;
 
-        // График
+        // График - короткие метки для читаемости
         this.charts.topRoutes = ChartComponent.barChart(
             'chart-top-routes',
-            data.slice(0, 10).map(r => `${r.origin}-${r.destination}`),
+            data.slice(0, 10).map(r => r.origin_city ? `${r.origin_city} → ${r.destination_city}` : `${r.origin}-${r.destination}`),
             [{
                 label: 'Количество маршрутов',
                 data: data.slice(0, 10).map(r => r.count),
@@ -319,7 +334,7 @@ class AnalyticsPage {
 
         this.charts.destinations = ChartComponent.doughnutChart(
             'chart-destinations',
-            data.slice(0, 10).map(d => d.destination),
+            data.slice(0, 10).map(d => this.formatCityLabel(d.destination, d.destination_city)),
             data.slice(0, 10).map(d => d.count),
             Object.values(CONFIG.CHART_COLORS)
         );
@@ -333,7 +348,7 @@ class AnalyticsPage {
 
         this.charts.origins = ChartComponent.doughnutChart(
             'chart-origins',
-            data.slice(0, 10).map(d => d.origin),
+            data.slice(0, 10).map(d => this.formatCityLabel(d.origin, d.origin_city)),
             data.slice(0, 10).map(d => d.count),
             Object.values(CONFIG.CHART_COLORS)
         );
@@ -380,7 +395,7 @@ class AnalyticsPage {
           ${data.map((item, index) => `
             <tr>
               <td>${index + 1}</td>
-              <td><strong>${item.origin} → ${item.destination}</strong></td>
+              <td><strong>${this.formatRouteLabel(item)}</strong></td>
               <td>${formatNumber(Math.round(item.average_price))} ₽</td>
               <td>${formatNumber(Math.round(item.min_price))} ₽</td>
               <td>${formatNumber(Math.round(item.max_price))} ₽</td>
@@ -525,7 +540,7 @@ class AnalyticsPage {
           ${data.slice(0, 15).map((deal, index) => `
             <tr>
               <td>${index + 1}</td>
-              <td><strong>${deal.origin} → ${deal.destination}</strong></td>
+              <td><strong>${this.formatRouteLabel(deal)}</strong></td>
               <td><small>${new Date(deal.departure_date).toLocaleDateString('ru-RU')}${deal.return_date ? ' - ' + new Date(deal.return_date).toLocaleDateString('ru-RU') : ''}</small></td>
               <td><strong>${formatNumber(Math.round(deal.total_price))} ₽</strong></td>
               <td>${formatNumber(Math.round(deal.threshold_price))} ₽</td>

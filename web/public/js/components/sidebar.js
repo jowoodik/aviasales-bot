@@ -14,16 +14,16 @@ const MENU_ITEMS = [
         route: '#users'
     },
     {
-        id: 'routes',
-        label: 'Маршруты',
-        icon: 'bi-airplane',
-        route: '#routes'
-    },
-    {
         id: 'subscriptions',
         label: 'Подписки',
         icon: 'bi-star',
         route: '#subscriptions'
+    },
+    {
+        id: 'routes',
+        label: 'Маршруты',
+        icon: 'bi-airplane',
+        route: '#routes'
     },
     {
         id: 'check-stats',
@@ -36,12 +36,6 @@ const MENU_ITEMS = [
         label: 'Аналитика',
         icon: 'bi-pie-chart',
         route: '#analytics'
-    },
-    {
-        id: 'failed-checks',
-        label: 'Неудачные проверки',
-        icon: 'bi-exclamation-triangle',
-        route: '#failed-checks'
     },
     {
         id: 'notifications',

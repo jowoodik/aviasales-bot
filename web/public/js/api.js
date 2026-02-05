@@ -151,6 +151,26 @@ class APIClient {
         return this.patch(CONFIG.API.ROUTE_THRESHOLD(id), { threshold_price: thresholdPrice });
     }
 
+    async getRouteCheckStats(id) {
+        return this.get(CONFIG.API.ROUTE_CHECK_STATS(id));
+    }
+
+    async getRouteNotifications(id) {
+        return this.get(CONFIG.API.ROUTE_NOTIFICATIONS(id));
+    }
+
+    async getRoutePriceHistory(id) {
+        return this.get(CONFIG.API.ROUTE_PRICE_HISTORY(id));
+    }
+
+    // ============================================
+    // AIRPORTS API
+    // ============================================
+
+    async getAirports() {
+        return this.get(CONFIG.API.AIRPORTS);
+    }
+
     // ============================================
     // SUBSCRIPTIONS API
     // ============================================
@@ -236,10 +256,6 @@ class APIClient {
 
     async getCheckStats() {
         return this.get(CONFIG.API.CHECK_STATS);
-    }
-
-    async getFailedChecks() {
-        return this.get(CONFIG.API.FAILED_CHECKS);
     }
 
     async getAnalytics() {

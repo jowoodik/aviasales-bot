@@ -65,7 +65,7 @@ CREATE INDEX idx_activity_chat_date ON user_activity_log(chat_id, created_at);
 **Файл:** `services/ActivityService.js` (новый файл)
 
 ```javascript
-const db = require('../config/database');
+const db = require('./database');
 
 class ActivityService {
     /**
@@ -162,7 +162,12 @@ class ActivityService {
                 `,
                 (err, row) => {
                     if (err) reject(err);
-                    else resolve(row || { active_users: 0, viewed_routes: 0, started_creation: 0, completed_creation: 0 });
+                    else resolve(row || {
+                        active_users: 0,
+                        viewed_routes: 0,
+                        started_creation: 0,
+                        completed_creation: 0
+                    });
                 }
             );
         });
@@ -183,7 +188,7 @@ class ActivityService {
                 `,
                 (err, row) => {
                     if (err) reject(err);
-                    else resolve(row || { viewed_subscription: 0, upgrade_attempts: 0 });
+                    else resolve(row || {viewed_subscription: 0, upgrade_attempts: 0});
                 }
             );
         });

@@ -5,6 +5,7 @@ const db = require('../config/database');
 const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
 const ActivityService = require('../services/ActivityService');
+const airportResolver = require('../utils/AirportCodeResolver');
 
 
 const app = express();
@@ -313,11 +314,53 @@ app.get('/admin/api/routes', requireAdmin, async (req, res) => {
         else resolve(rows || []);
       });
     });
+
+    // Добавляем названия городов
+    routes.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+
     res.json(routes);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// API: Получить маппинг аэропортов для клиента
+app.get('/admin/api/airports', requireAdmin, async (req, res) => {
+  try {
+    const airports = await new Promise((resolve, reject) => {
+      db.all(`SELECT iata_code, city_name FROM airports GROUP BY iata_code`, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    const mapping = {};
+    airports.forEach(a => {
+      mapping[a.iata_code] = a.city_name;
+    });
+
+    res.json(mapping);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Хелпер для резолва routename в названия городов
+function resolveRoutenames(rows) {
+  rows.forEach(r => {
+    if (r.routename) {
+      const parts = r.routename.split(' → ');
+      if (parts.length === 2) {
+        const o = parts[0], d = parts[1];
+        r.routename = `${airportResolver.getCityName(o)} (${o}) → ${airportResolver.getCityName(d)} (${d})`;
+      }
+    }
+  });
+  return rows;
+}
 
 // API: Статистика проверок
 app.get('/admin/api/check-stats', requireAdmin, async (req, res) => {
@@ -343,6 +386,7 @@ app.get('/admin/api/check-stats', requireAdmin, async (req, res) => {
       });
     });
 
+    resolveRoutenames(stats);
     res.json(stats);
   } catch (error) {
     console.error('Ошибка загрузки статистики:', error);
@@ -380,6 +424,7 @@ app.get('/admin/api/failed-checks', requireAdmin, async (req, res) => {
       });
     });
 
+    resolveRoutenames(failed);
     res.json(failed);
   } catch (error) {
     console.error('Ошибка загрузки ошибок:', error);
@@ -1813,36 +1858,61 @@ app.get('/admin/api/users/:chatId/stats', requireAdmin, async (req, res) => {
   try {
     const chatId = parseInt(req.params.chatId);
 
-    const stats = await new Promise((resolve) => {
-      db.serialize(() => {
-        const data = {};
-
-        db.get('SELECT COUNT(*) as count FROM unified_routes WHERE chat_id = ?',
-            [chatId], (err, row) => {
-              data.totalRoutes = row ? row.count : 0;
-            });
-
-        db.get('SELECT COUNT(*) as count FROM unified_routes WHERE chat_id = ? AND is_paused = 0',
-            [chatId], (err, row) => {
-              data.activeRoutes = row ? row.count : 0;
-            });
-
-        db.get(`SELECT COUNT(*) as count FROM route_check_stats rcs
-              JOIN unified_routes ur ON rcs.route_id = ur.id
-                WHERE ur.chat_id = ?`,
-            [chatId], (err, row) => {
-              data.totalChecks = row ? row.count : 0;
-            });
-
-        db.get('SELECT * FROM user_settings WHERE chat_id = ?',
-            [chatId], (err, row) => {
-              data.settings = row || null;
-              setTimeout(() => resolve(data), 50);
-            });
+    // Получаем настройки пользователя
+    const settings = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM user_settings WHERE chat_id = ?', [chatId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row || {});
       });
     });
 
-    res.json(stats);
+    // Получаем подписку
+    const subscription = await new Promise((resolve, reject) => {
+      db.get('SELECT subscription_type FROM user_subscriptions WHERE chat_id = ? AND is_active = 1', [chatId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    // Статистика маршрутов
+    const routeStats = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT
+          COUNT(*) as total_routes,
+          SUM(CASE WHEN is_paused = 0 THEN 1 ELSE 0 END) as active_routes,
+          SUM(CASE WHEN is_flexible = 1 THEN 1 ELSE 0 END) as flexible_routes
+        FROM unified_routes
+        WHERE chat_id = ?
+      `, [chatId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row || {});
+      });
+    });
+
+    // Количество полученных уведомлений
+    const notificationsReceived = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM notification_log WHERE chat_id = ?', [chatId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.count : 0);
+      });
+    });
+
+    res.json({
+      // Подписка
+      subscription_type: subscription ? subscription.subscription_type : 'free',
+      // Настройки пользователя
+      timezone: settings.timezone || 'Europe/Moscow',
+      notifications_enabled: settings.notifications_enabled !== 0,
+      night_mode: !!settings.night_mode,
+      digest_enabled: !!settings.digest_enabled,
+      created_at: settings.created_at,
+      // Статистика маршрутов
+      total_routes: routeStats.total_routes || 0,
+      active_routes: routeStats.active_routes || 0,
+      flexible_routes: routeStats.flexible_routes || 0,
+      // Уведомления
+      notifications_received: notificationsReceived
+    });
   } catch (error) {
     console.error('Ошибка получения статистики пользователя:', error);
     res.status(500).json({ error: error.message });
@@ -1927,6 +1997,146 @@ app.get('/admin/api/routes/:id/tickets', requireAdmin, async (req, res) => {
     res.json(results);
   } catch (error) {
     console.error('Ошибка получения билетов:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Статистика проверок для конкретного маршрута
+app.get('/admin/api/routes/:id/check-stats', requireAdmin, async (req, res) => {
+  try {
+    const routeId = parseInt(req.params.id);
+
+    // Сводка
+    const summary = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT
+          COUNT(*) as total_checks,
+          SUM(successful_checks) as total_success,
+          SUM(failed_checks) as total_failed,
+          AVG(CAST(successful_checks AS REAL) / NULLIF(total_combinations, 0) * 100) as avg_success_rate,
+          MAX(check_timestamp) as last_check_time
+        FROM route_check_stats
+        WHERE route_id = ?
+      `, [routeId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row || {});
+      });
+    });
+
+    // Последние 20 проверок
+    const recent = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          id,
+          total_combinations,
+          successful_checks,
+          failed_checks,
+          check_timestamp
+        FROM route_check_stats
+        WHERE route_id = ?
+        ORDER BY check_timestamp DESC
+        LIMIT 20
+      `, [routeId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json({ summary, recent });
+  } catch (error) {
+    console.error('Ошибка получения статистики проверок:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Уведомления для конкретного маршрута
+app.get('/admin/api/routes/:id/notifications', requireAdmin, async (req, res) => {
+  try {
+    const routeId = parseInt(req.params.id);
+
+    const notifications = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          id,
+          chat_id,
+          priority,
+          price,
+          message_type,
+          sent_at,
+          disable_notification
+        FROM notification_log
+        WHERE route_id = ?
+        ORDER BY sent_at DESC
+        LIMIT 30
+      `, [routeId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(notifications);
+  } catch (error) {
+    console.error('Ошибка получения уведомлений маршрута:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: История цен для конкретного маршрута
+app.get('/admin/api/routes/:id/price-history', requireAdmin, async (req, res) => {
+  try {
+    const routeId = parseInt(req.params.id);
+
+    // Получаем origin и destination маршрута
+    const route = await new Promise((resolve, reject) => {
+      db.get('SELECT origin, destination FROM unified_routes WHERE id = ?', [routeId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!route) {
+      return res.status(404).json({ error: 'Маршрут не найден' });
+    }
+
+    // Сводка из price_analytics
+    const summary = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT
+          MIN(price) as min_price,
+          AVG(price) as avg_price,
+          MAX(price) as max_price,
+          COUNT(*) as data_points
+        FROM price_analytics
+        WHERE origin = ? AND destination = ?
+          AND found_at >= datetime('now', '-30 days')
+      `, [route.origin, route.destination], (err, row) => {
+        if (err) reject(err);
+        else resolve(row || {});
+      });
+    });
+
+    // Тренд по дням за 30 дней
+    const trend = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          DATE(found_at) as date,
+          MIN(price) as min_price,
+          AVG(price) as avg_price,
+          COUNT(*) as count
+        FROM price_analytics
+        WHERE origin = ? AND destination = ?
+          AND found_at >= datetime('now', '-30 days')
+        GROUP BY DATE(found_at)
+        ORDER BY date ASC
+      `, [route.origin, route.destination], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json({ summary, trend });
+  } catch (error) {
+    console.error('Ошибка получения истории цен:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2150,30 +2360,6 @@ app.put('/admin/api/subscription-types/:id', requireAdmin, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error updating subscription type:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// FAILED CHECKS API
-// ============================================
-
-// API: Удалить запись об ошибке
-app.delete('/admin/api/failed-checks/:id', requireAdmin, async (req, res) => {
-  try {
-    const checkId = parseInt(req.params.id);
-
-    await new Promise((resolve, reject) => {
-      db.run('DELETE FROM combination_check_results WHERE id = ?', [checkId], function(err) {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-
-    console.log(`[ADMIN] Deleted failed check #${checkId}`);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting failed check:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2557,6 +2743,26 @@ app.get('/admin/api/analytics', requireAdmin, async (req, res) => {
 
     console.log('✅ Analytics complete');
 
+    // Добавляем названия городов в аналитику
+    topRoutes.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+    topDestinations.forEach(r => {
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+    topOrigins.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+    });
+    avgPrices.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+    bestDeals.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+
     res.json({
       success: true,
       generalStats,
@@ -2797,6 +3003,7 @@ app.get('/admin/api/notifications', requireAdmin, async (req, res) => {
       });
     });
 
+    resolveRoutenames(notifications);
     res.json(notifications);
   } catch (error) {
     console.error('Ошибка загрузки лога уведомлений:', error);
@@ -2834,6 +3041,7 @@ app.get('/admin/api/digest-queue', requireAdmin, async (req, res) => {
       });
     });
 
+    resolveRoutenames(queue);
     res.json(queue);
   } catch (error) {
     console.error('Ошибка загрузки очереди дайджеста:', error);
@@ -2866,11 +3074,21 @@ console.log('✅ All admin API endpoints loaded');
 
 // ===== КОНЕЦ API ENDPOINTS =====
 
-app.listen(PORT, () => {
-  console.log(`🌐 Web-интерфейс запущен: http://localhost:${PORT}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard?chat_id=YOUR_CHAT_ID`);
-  console.log(`🔐 Admin панель: http://localhost:${PORT}/admin`);
-  console.log(`🔑 Пароль админки: ${ADMIN_PASSWORD}`);
-});
+// Запуск сервера с инициализацией
+(async () => {
+  try {
+    await airportResolver.load();
+    console.log('✅ AirportResolver loaded');
+  } catch (err) {
+    console.error('⚠️ AirportResolver load failed:', err.message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`🌐 Web-интерфейс запущен: http://localhost:${PORT}`);
+    console.log(`📊 Dashboard: http://localhost:${PORT}/dashboard?chat_id=YOUR_CHAT_ID`);
+    console.log(`🔐 Admin панель: http://localhost:${PORT}/admin`);
+    console.log(`🔑 Пароль админки: ${ADMIN_PASSWORD}`);
+  });
+})();
 
 module.exports = app;

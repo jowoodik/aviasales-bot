@@ -1,5 +1,3 @@
-// web/public/js/config.js
-
 export const CONFIG = {
     // API Base URL
     API_BASE: '/admin/api',
@@ -11,11 +9,17 @@ export const CONFIG = {
         USER_DETAIL: (chatId) => `/users/${chatId}`,
         USER_STATS: (chatId) => `/users/${chatId}/stats`,
 
+        // Airports
+        AIRPORTS: '/airports',
+
         // Routes
         ROUTES: '/routes',
         ROUTE_DETAIL: (id) => `/routes/${id}`,
         ROUTE_PAUSE: (id) => `/routes/${id}/pause`,
         ROUTE_THRESHOLD: (id) => `/routes/${id}/threshold`,
+        ROUTE_CHECK_STATS: (id) => `/routes/${id}/check-stats`,
+        ROUTE_NOTIFICATIONS: (id) => `/routes/${id}/notifications`,
+        ROUTE_PRICE_HISTORY: (id) => `/routes/${id}/price-history`,
 
         // Subscriptions
         SUBSCRIPTIONS: '/subscriptions',

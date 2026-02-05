@@ -1,10 +1,6 @@
-// web/public/js/app.js
-
-import CONFIG from './config.js';
-import api from './api.js';
 import router from './router.js';
 import sidebar from './components/sidebar.js';
-import header from './components/header.js';
+import airportService from './services/airportService.js';
 
 // Import pages
 import DashboardPage from './pages/dashboard.js';
@@ -13,7 +9,6 @@ import RoutesPage from './pages/routes.js';
 import SubscriptionsPage from './pages/subscriptions.js';
 import CheckStatsPage from './pages/checkStats.js';
 import AnalyticsPage from './pages/analytics.js';
-import FailedChecksPage from './pages/failedChecks.js';
 import NotificationsPage from './pages/notifications.js';
 import DigestQueuePage from './pages/digest.js';
 import BroadcastsPage from './pages/broadcasts.js';
@@ -29,6 +24,9 @@ class App {
         console.log('🚀 Initializing Aviasales Bot Admin Panel...');
 
         try {
+            // Load airport codes cache
+            await airportService.load();
+
             // Initialize sidebar
             sidebar.render();
 
@@ -56,7 +54,6 @@ class App {
             subscriptions: new SubscriptionsPage(),
             checkStats: new CheckStatsPage(),
             analytics: new AnalyticsPage(),
-            failedChecks: new FailedChecksPage(),
             notifications: new NotificationsPage(),
             digestQueue: new DigestQueuePage(),
             broadcasts: new BroadcastsPage(),
@@ -73,9 +70,6 @@ class App {
         });
 
         // Register additional routes if needed
-        router.register('failed-checks', (params) => {
-            this.pages.failedChecks.render(params);
-        });
 
         router.register('check-stats', (params) => {
             this.pages.checkStats.render(params);

@@ -145,7 +145,6 @@ class Table {
         if (value === null || value === undefined) {
             return '<span class="text-muted">—</span>';
         }
-        console.log(value, type, row)
 
         switch (type) {
             case 'date':
@@ -165,6 +164,9 @@ class Table {
             case 'status':
                 return this.formatStatus(value);
             case 'route':
+                if (row.origin_city) {
+                    return `<strong>${row.origin_city} (${row.origin}) → ${row.destination_city} (${row.destination})</strong>`;
+                }
                 return `<strong>${row.origin} → ${row.destination}</strong>`;
             case 'route-type':
                 return value ? '<span class="badge bg-info">Гибкий</span>' : '<span class="badge bg-secondary">Фиксированный</span>';
@@ -179,7 +181,7 @@ class Table {
                 const typeLabels = {
                     'instant': 'Мгновенное', 'digest': 'Дайджест', 'report': 'Отчёт'
                 };
-                return `<span class="badge bg-outline-primary">${typeLabels[value] || value}</span>`;
+                return `<span class="badge bg-primary">${typeLabels[value] || value}</span>`;
             case 'error-status':
                 return value === 'error'
                     ? '<span class="badge bg-danger">Error</span>'
