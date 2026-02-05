@@ -215,6 +215,22 @@ class APIClient {
     }
 
     // ============================================
+    // NOTIFICATIONS API
+    // ============================================
+
+    async getNotifications() {
+        return this.get(CONFIG.API.NOTIFICATIONS);
+    }
+
+    async getDigestQueue() {
+        return this.get(CONFIG.API.DIGEST_QUEUE);
+    }
+
+    async deleteDigestItem(id) {
+        return this.delete(CONFIG.API.DIGEST_QUEUE_DETAIL(id));
+    }
+
+    // ============================================
     // STATISTICS API
     // ============================================
 

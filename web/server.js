@@ -274,15 +274,15 @@ app.get('/admin/api/users', requireAdmin, async (req, res) => {
         SELECT
           us.chat_id,
           us.timezone,
-          us.quiet_hours_start,
-          us.quiet_hours_end,
-          us.notify_on_check,
+          us.notifications_enabled,
+          us.night_mode,
+          us.digest_enabled,
           us.created_at,
           COUNT(DISTINCT ur.id) as totalroutes,
           MAX(ur.last_check) as lastactivity
         FROM user_settings us
                LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
-        GROUP BY us.chat_id, us.timezone, us.quiet_hours_start, us.quiet_hours_end, us.notify_on_check, us.created_at
+        GROUP BY us.chat_id, us.timezone, us.notifications_enabled, us.night_mode, us.digest_enabled, us.created_at
         ORDER BY lastactivity DESC NULLS LAST
       `, (err, rows) => {
         if (err) reject(err);
@@ -1593,14 +1593,15 @@ app.get('/admin/api/users', requireAdmin, async (req, res) => {
         SELECT
           us.chat_id,
           us.timezone,
-          us.quiet_hours_start,
-          us.quiet_hours_end,
+          us.notifications_enabled,
+          us.night_mode,
+          us.digest_enabled,
           us.created_at,
           COUNT(DISTINCT ur.id) as totalroutes,
           MAX(ur.last_check) as lastactivity
         FROM user_settings us
                LEFT JOIN unified_routes ur ON us.chat_id = ur.chat_id
-        GROUP BY us.chat_id, us.timezone, us.quiet_hours_start, us.quiet_hours_end, us.created_at
+        GROUP BY us.chat_id, us.timezone, us.notifications_enabled, us.night_mode, us.digest_enabled, us.created_at
         ORDER BY lastactivity DESC NULLS LAST
       `, (err, rows) => {
         if (err) reject(err);
@@ -1731,7 +1732,7 @@ app.get('/admin/api/failed-checks', requireAdmin, async (req, res) => {
 app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
   try {
     const chatId = parseInt(req.params.chatId);
-    const { timezone, quiet_hours_start, quiet_hours_end, notify_on_check  } = req.body;
+    const { timezone, notifications_enabled, night_mode, digest_enabled } = req.body;
 
     // Проверяем существование пользователя
     const userExists = await new Promise((resolve, reject) => {
@@ -1745,9 +1746,9 @@ app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
       // Создаем пользователя если не существует
       await new Promise((resolve, reject) => {
         db.run(
-            `INSERT INTO user_settings (chat_id, timezone, quiet_hours_start, quiet_hours_end, notify_on_check)
+            `INSERT INTO user_settings (chat_id, timezone, notifications_enabled, night_mode, digest_enabled)
                      VALUES (?, ?, ?, ?, ?)`,
-            [chatId, timezone, quiet_hours_start, quiet_hours_end, notify_on_check],
+            [chatId, timezone, notifications_enabled, night_mode, digest_enabled],
             function(err) {
               if (err) reject(err);
               else resolve();
@@ -1758,10 +1759,10 @@ app.put('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
       // Обновляем существующего
       await new Promise((resolve, reject) => {
         db.run(
-            `UPDATE user_settings 
-                     SET timezone = ?, quiet_hours_start = ?, quiet_hours_end = ?, notify_on_check = ?
+            `UPDATE user_settings
+                     SET timezone = ?, notifications_enabled = ?, night_mode = ?, digest_enabled = ?
                      WHERE chat_id = ?`,
-            [timezone, quiet_hours_start, quiet_hours_end, notify_on_check, chatId],
+            [timezone, notifications_enabled, night_mode, digest_enabled, chatId],
             function(err) {
               if (err) reject(err);
               else resolve();
@@ -2766,6 +2767,99 @@ app.get('/admin/api/export/:type', requireAdmin, async (req, res) => {
   }
 });
 
+
+// ============================================
+// NOTIFICATION LOG API
+// ============================================
+
+// API: Лог уведомлений
+app.get('/admin/api/notifications', requireAdmin, async (req, res) => {
+  try {
+    const notifications = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          nl.id,
+          nl.chat_id,
+          nl.route_id,
+          nl.priority,
+          nl.price,
+          nl.message_type,
+          nl.sent_at,
+          nl.disable_notification,
+          (r.origin || ' → ' || r.destination) as routename
+        FROM notification_log nl
+        LEFT JOIN unified_routes r ON nl.route_id = r.id
+        ORDER BY nl.sent_at DESC
+        LIMIT 200
+      `, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(notifications);
+  } catch (error) {
+    console.error('Ошибка загрузки лога уведомлений:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// DIGEST QUEUE API
+// ============================================
+
+// API: Очередь дайджеста
+app.get('/admin/api/digest-queue', requireAdmin, async (req, res) => {
+  try {
+    const queue = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          dq.id,
+          dq.chat_id,
+          dq.route_id,
+          dq.priority,
+          dq.price,
+          dq.avg_price,
+          dq.historical_min,
+          dq.created_at,
+          dq.processed,
+          (r.origin || ' → ' || r.destination) as routename
+        FROM daily_digest_queue dq
+        LEFT JOIN unified_routes r ON dq.route_id = r.id
+        ORDER BY dq.created_at DESC
+        LIMIT 200
+      `, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(queue);
+  } catch (error) {
+    console.error('Ошибка загрузки очереди дайджеста:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Удаление элемента из очереди дайджеста
+app.delete('/admin/api/digest-queue/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+
+    await new Promise((resolve, reject) => {
+      db.run('DELETE FROM daily_digest_queue WHERE id = ?', [id], function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    console.log(`[ADMIN] Deleted digest queue item ${id}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Ошибка удаления из очереди дайджеста:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 console.log('✅ All admin API endpoints loaded');
 

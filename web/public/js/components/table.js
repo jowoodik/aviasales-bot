@@ -170,8 +170,16 @@ class Table {
                 return value ? '<span class="badge bg-info">Гибкий</span>' : '<span class="badge bg-secondary">Фиксированный</span>';
             case 'dates':
                 return this.formatDates(row);
-            case 'quiet-hours':
-                return this.formatQuietHours(row);
+            case 'priority':
+                const priorityColors = {
+                    'CRITICAL': 'danger', 'HIGH': 'warning', 'MEDIUM': 'info', 'LOW': 'secondary'
+                };
+                return `<span class="badge bg-${priorityColors[value] || 'secondary'}">${value}</span>`;
+            case 'notification-type':
+                const typeLabels = {
+                    'instant': 'Мгновенное', 'digest': 'Дайджест', 'report': 'Отчёт'
+                };
+                return `<span class="badge bg-outline-primary">${typeLabels[value] || value}</span>`;
             case 'error-status':
                 return value === 'error'
                     ? '<span class="badge bg-danger">Error</span>'
@@ -197,13 +205,6 @@ class Table {
         } else {
             return `<small>${row.departure_date || ''}${row.return_date ? '<br>' + row.return_date : ''}</small>`;
         }
-    }
-
-    formatQuietHours(row) {
-        if (row.quiet_hours_start !== null && row.quiet_hours_end !== null) {
-            return `<small>${String(row.quiet_hours_start).padStart(2, '0')}:00 - ${String(row.quiet_hours_end).padStart(2, '0')}:00</small>`;
-        }
-        return '<span class="text-muted">Не установлено</span>';
     }
 
     renderActionButtons(row) {

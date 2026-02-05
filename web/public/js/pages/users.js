@@ -116,12 +116,16 @@ class UsersPage {
                                 <td>${user.timezone || 'Asia/Yekaterinburg'}</td>
                             </tr>
                             <tr>
-                                <td><strong>Тихие часы:</strong></td>
-                                <td>${this.formatQuietHours(user)}</td>
+                                <td><strong>Уведомления:</strong></td>
+                                <td>${user.notifications_enabled ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
                             </tr>
                             <tr>
-                                <td><strong>Уведомления при проверке:</strong></td>
-                                <td>${user.notify_on_check ? '<span class="badge bg-success">Да</span>' : '<span class="badge bg-secondary">Нет</span>'}</td>
+                                <td><strong>Ночной режим:</strong></td>
+                                <td>${user.night_mode ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Дайджест:</strong></td>
+                                <td>${user.digest_enabled ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
                             </tr>
                             <tr>
                                 <td><strong>Создан:</strong></td>
@@ -189,28 +193,22 @@ class UsersPage {
                     required: true
                 },
                 {
-                    name: 'quiet_hours_start',
-                    label: 'Начало тихих часов',
-                    type: 'number',
-                    value: user.quiet_hours_start !== null ? user.quiet_hours_start : '',
-                    min: 0,
-                    max: 23,
-                    placeholder: '0-23 (пусто = не установлено)'
-                },
-                {
-                    name: 'quiet_hours_end',
-                    label: 'Конец тихих часов',
-                    type: 'number',
-                    value: user.quiet_hours_end !== null ? user.quiet_hours_end : '',
-                    min: 0,
-                    max: 23,
-                    placeholder: '0-23 (пусто = не установлено)'
-                },
-                {
-                    name: 'notify_on_check',
-                    label: 'Уведомления при каждой проверке',
+                    name: 'notifications_enabled',
+                    label: 'Уведомления',
                     type: 'checkbox',
-                    value: user.notify_on_check ? true : false
+                    value: user.notifications_enabled ? true : false
+                },
+                {
+                    name: 'night_mode',
+                    label: 'Ночной режим (23:00-08:00)',
+                    type: 'checkbox',
+                    value: user.night_mode ? true : false
+                },
+                {
+                    name: 'digest_enabled',
+                    label: 'Ежедневный дайджест',
+                    type: 'checkbox',
+                    value: user.digest_enabled ? true : false
                 }
             ]
         });
@@ -218,12 +216,11 @@ class UsersPage {
         if (!formData) return;
 
         try {
-            // Convert empty strings to null
             const updateData = {
                 timezone: formData.timezone,
-                quiet_hours_start: formData.quiet_hours_start === '' ? null : parseInt(formData.quiet_hours_start),
-                quiet_hours_end: formData.quiet_hours_end === '' ? null : parseInt(formData.quiet_hours_end),
-                notify_on_check: formData.notify_on_check ? 1 : 0
+                notifications_enabled: formData.notifications_enabled ? 1 : 0,
+                night_mode: formData.night_mode ? 1 : 0,
+                digest_enabled: formData.digest_enabled ? 1 : 0
             };
 
             await api.updateUser(user.chat_id, updateData);
@@ -252,13 +249,6 @@ class UsersPage {
             console.error('Error deleting user:', error);
             showToast('Ошибка удаления пользователя: ' + error.message, 'danger');
         }
-    }
-
-    formatQuietHours(user) {
-        if (user.quiet_hours_start !== null && user.quiet_hours_end !== null) {
-            return `${String(user.quiet_hours_start).padStart(2, '0')}:00 - ${String(user.quiet_hours_end).padStart(2, '0')}:00`;
-        }
-        return 'Не установлено';
     }
 
     destroy() {

@@ -14,6 +14,8 @@ import SubscriptionsPage from './pages/subscriptions.js';
 import CheckStatsPage from './pages/checkStats.js';
 import AnalyticsPage from './pages/analytics.js';
 import FailedChecksPage from './pages/failedChecks.js';
+import NotificationsPage from './pages/notifications.js';
+import DigestQueuePage from './pages/digest.js';
 import BroadcastsPage from './pages/broadcasts.js';
 import DatabasePage from './pages/database.js';
 
@@ -55,6 +57,8 @@ class App {
             checkStats: new CheckStatsPage(),
             analytics: new AnalyticsPage(),
             failedChecks: new FailedChecksPage(),
+            notifications: new NotificationsPage(),
+            digestQueue: new DigestQueuePage(),
             broadcasts: new BroadcastsPage(),
             database: new DatabasePage()
         };
@@ -75,6 +79,10 @@ class App {
 
         router.register('check-stats', (params) => {
             this.pages.checkStats.render(params);
+        });
+
+        router.register('digest-queue', (params) => {
+            this.pages.digestQueue.render(params);
         });
     }
 

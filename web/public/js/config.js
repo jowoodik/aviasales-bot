@@ -30,6 +30,11 @@ export const CONFIG = {
         BROADCAST_DETAIL: (id) => `/broadcasts/${id}`,
         BROADCAST_USERS: '/broadcast-users',
 
+        // Notifications
+        NOTIFICATIONS: '/notifications',
+        DIGEST_QUEUE: '/digest-queue',
+        DIGEST_QUEUE_DETAIL: (id) => `/digest-queue/${id}`,
+
         // Statistics
         CHECK_STATS: '/check-stats',
         FAILED_CHECKS: '/failed-checks',
@@ -60,8 +65,9 @@ export const CONFIG = {
                 { key: 'chat_id', label: 'Chat ID', sortable: true, type: 'code' },
                 { key: 'totalroutes', label: 'Маршруты', sortable: true, type: 'badge' },
                 { key: 'timezone', label: 'Таймзона', sortable: true },
-                { key: 'quiet_hours_start', label: 'Тихие часы', sortable: false, type: 'quiet-hours' },
-                { key: 'notify_on_check', label: 'Уведомления', sortable: true, type: 'boolean' },
+                { key: 'notifications_enabled', label: 'Уведомления', sortable: true, type: 'boolean' },
+                { key: 'night_mode', label: 'Ночной режим', sortable: true, type: 'boolean' },
+                { key: 'digest_enabled', label: 'Дайджест', sortable: true, type: 'boolean' },
                 { key: 'lastactivity', label: 'Последняя активность', sortable: true, type: 'datetime' },
                 { key: 'created_at', label: 'Создан', sortable: true, type: 'date' }
             ],
@@ -127,6 +133,34 @@ export const CONFIG = {
                 { key: 'created_at', label: 'Создана', sortable: true, type: 'datetime' }
             ],
             actions: ['view', 'edit', 'delete']
+        },
+
+        NOTIFICATIONS: {
+            columns: [
+                { key: 'id', label: 'ID', sortable: true },
+                { key: 'chat_id', label: 'Chat ID', sortable: true, type: 'code' },
+                { key: 'routename', label: 'Маршрут', sortable: false },
+                { key: 'priority', label: 'Приоритет', sortable: true, type: 'priority' },
+                { key: 'price', label: 'Цена', sortable: true, type: 'price' },
+                { key: 'message_type', label: 'Тип', sortable: true, type: 'notification-type' },
+                { key: 'disable_notification', label: 'Тихое', sortable: true, type: 'boolean' },
+                { key: 'sent_at', label: 'Отправлено', sortable: true, type: 'datetime' }
+            ],
+            actions: ['view']
+        },
+
+        DIGEST_QUEUE: {
+            columns: [
+                { key: 'id', label: 'ID', sortable: true },
+                { key: 'chat_id', label: 'Chat ID', sortable: true, type: 'code' },
+                { key: 'routename', label: 'Маршрут', sortable: false },
+                { key: 'priority', label: 'Приоритет', sortable: true, type: 'priority' },
+                { key: 'price', label: 'Цена', sortable: true, type: 'price' },
+                { key: 'avg_price', label: 'Средняя', sortable: true, type: 'price' },
+                { key: 'processed', label: 'Обработано', sortable: true, type: 'boolean' },
+                { key: 'created_at', label: 'Создано', sortable: true, type: 'datetime' }
+            ],
+            actions: ['view', 'delete']
         }
     },
 

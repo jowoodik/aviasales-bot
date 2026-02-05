@@ -44,6 +44,18 @@ const MENU_ITEMS = [
         route: '#failed-checks'
     },
     {
+        id: 'notifications',
+        label: 'Лог уведомлений',
+        icon: 'bi-bell',
+        route: '#notifications'
+    },
+    {
+        id: 'digest-queue',
+        label: 'Очередь дайджеста',
+        icon: 'bi-inbox',
+        route: '#digest-queue'
+    },
+    {
         id: 'broadcasts',
         label: 'Планировщик рассылок',
         icon: 'bi-chat',
