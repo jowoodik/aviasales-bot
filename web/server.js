@@ -25,6 +25,16 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'tg-bot-2026';
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Удаляем старый cookie connect.sid перед инициализацией сессии
+app.use((req, res, next) => {
+  // Удаляем старый cookie если он есть
+  if (req.headers.cookie && req.headers.cookie.includes('connect.sid')) {
+    res.clearCookie('connect.sid', { path: '/' });
+    console.log('[CLEANUP] Удалён старый cookie connect.sid');
+  }
+  next();
+});
+
 // 🔥 СЕССИИ ДОЛЖНЫ БЫТЬ ДО СТАТИКИ!
 app.use(session({
   name: 'flyalert.sid', // Уникальное имя cookie
