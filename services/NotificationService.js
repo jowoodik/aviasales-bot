@@ -431,7 +431,7 @@ class NotificationService {
 
     const airlineName = Formatters.getAirlineName(route.airline);
     if (airlineName && airlineName !== 'Любая') {
-      paramsLine += ` • ${airlineName}`;
+      paramsLine += `  • ${airlineName}`;
     }
 
     text += paramsLine + '\n\n';
@@ -471,13 +471,8 @@ class NotificationService {
 
       text += `${currentPrice > analytics.avgPrice ? "🔴" : "🟢"} <b>Средняя:</b> ${Formatters.formatPrice(analytics.avgPrice)}\n`;
       text += `<code>[${avgBar}]</code>\n`;
-      text += `<b>Цена: ${Formatters.formatPrice(currentPrice)}</b> • ${avgSign}${Formatters.formatPrice(Math.abs(avgDiff))} (${avgSign}${avgDiffPercent}%)\n\n`;
+      text += `<b>Цена: ${Formatters.formatPrice(currentPrice)}</b> • ${avgSign}${Formatters.formatPrice(Math.abs(avgDiff))} (${avgSign}${avgDiffPercent}%)\n`;
     }
-
-    // Время проверки
-    const now = new Date();
-    const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Yekaterinburg' });
-    text += `<i>Проверено в ${time}</i>`;
 
     // ДОБАВЛЯЕМ ССЫЛКУ ПРЯМО В БЛОК
     if (bestResult?.search_link) {
@@ -515,16 +510,40 @@ class NotificationService {
       const hasCritical = routeBlocks.some(b => b.priority === 'CRITICAL');
       const hasFinds = routeBlocks.some(b => b.block.searchLink !== null || b.block.text.includes('Купить билет'));
 
-      const header = hasCritical ? `🚨 Отличные новости! • ${time}` : `📊 Проверка завершена • ${time}`;
-      const footer = hasFinds ? '\n\nОтличные цены! Не упусти 🎯' : '\n\nПродолжаю мониторинг 🔍';
-      const separator = '\n\n━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
-      // Собираем сообщение
-      let message = header + '\n\n';
+      // Функция для генерации линии с самолетом (для HTML экранирование не нужно)
+      const generatePlaneLine = (position, totalSteps) => {
+        const LINE_LENGTH = 20;
+        const planePos = Math.round((position / totalSteps) * LINE_LENGTH);
 
-      for (let i = 0; i < routeBlocks.length; i++) {
+        const left = '─'.repeat(planePos);
+        const right = '─'.repeat(LINE_LENGTH - planePos);
+
+        return `<b>${left}✈${right}</b>`; // Делаем линию жирной для лучшей видимости
+      };
+
+      const total = routeBlocks.length;
+
+      // 1. Header: Самолет в начале (0/total)
+      const headerTitle = hasCritical ? `🚨 <b>Отличные новости!</b> • ${time}` : `📊 <b>Проверка завершена</b> • ${time}`;
+      const header = `${headerTitle}\n\n${generatePlaneLine(0, total)}\n\n`;
+
+      // 2. Footer: Самолет в конце (total/total)
+      const footerTitle = hasFinds ? '<b>Отличные цены! Не упусти 🎯</b>' : '<i>Продолжаю мониторинг 🔍</i>';
+      const footer = `\n\n${generatePlaneLine(total, total)}\n\n${footerTitle}`;
+
+      // 3. Сборка сообщения
+      let message = header;
+
+      for (let i = 0; i < total; i++) {
         const { block } = routeBlocks[i];
-        if (i > 0) message += separator;
+
+        // Разделитель между блоками
+        if (i > 0) {
+          // Самолет смещается на i-тую позицию из total
+          message += `\n\n${generatePlaneLine(i, total)}\n\n`;
+        }
+
         message += block.text;
       }
 
@@ -558,7 +577,7 @@ class NotificationService {
     if (text.length <= maxLength) return [text];
 
     const chunks = [];
-    const separator = '━━━━━━━━━━━━━━━━━━━━━━━';
+    const separator = '───────── ✈ ─────────';
     const parts = text.split(separator);
 
     let current = '';
