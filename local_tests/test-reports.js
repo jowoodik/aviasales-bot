@@ -35,6 +35,10 @@ const mockBot = {
 };
 
 const NotificationService = require('../services/NotificationService');
+// const TelegramBot = require("node-telegram-bot-api");
+// const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+// const bot = new TelegramBot(TOKEN, { polling: false });
+// const notificationService = new NotificationService(bot);
 const notificationService = new NotificationService(mockBot);
 
 // ─── Хелперы ────────────────────────────────────────────────

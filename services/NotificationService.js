@@ -346,26 +346,23 @@ class NotificationService {
     return { action: 'silent', priority };
   }
 
+  // ============================================
+  // ОТПРАВКА АЛЕРТА (обновлено)
+  // ============================================
+
   async _sendInstantAlert(chatId, routeId, block, priority, price, timezone, silent) {
     try {
       const time = this._formatTimeForUser(new Date(), timezone);
       const header = priority === 'CRITICAL' ? `🚨 Отличные новости! • ${time}` : `📊 Проверка завершена • ${time}`;
-      const footer = priority === 'CRITICAL' ? '\nОтличные цены! Не упусти 🎯' : '\nПродолжаю мониторинг 🔍';
+      const footer = priority === 'CRITICAL' ? '\n\nОтличные цены! Не упусти 🎯' : '\n\nПродолжаю мониторинг 🔍';
 
       const message = `${header}\n\n${block.text}${footer}`;
 
       const sendOpts = {
-        parse_mode: 'Markdown',
-        disable_notification: silent
+        parse_mode: 'HTML',
+        disable_notification: silent,
+        disable_web_page_preview: true // Отключаем превью
       };
-
-      if (block.searchLink) {
-        sendOpts.reply_markup = {
-          inline_keyboard: [[
-            { text: '🔗 Купить билет →', url: block.searchLink }
-          ]]
-        };
-      }
 
       await this.bot.sendMessage(chatId, message, sendOpts);
       await this._logNotification(chatId, routeId, priority, price, 'instant', silent);
@@ -377,7 +374,7 @@ class NotificationService {
   }
 
   // ============================================
-  // ФОРМАТИРОВАНИЕ БЛОКА МАРШРУТА
+  // ФОРМАТИРОВАНИЕ БЛОКА МАРШРУТА (обновлено)
   // ============================================
 
   formatSingleRouteBlock(route, bestResult, analytics, checkStats) {
@@ -386,7 +383,7 @@ class NotificationService {
 
     if (!currentPrice) {
       const routeName = airportResolver.formatRoute(route.origin, route.destination);
-      let text = `📊 ${routeName}\n`;
+      let text = `<b>${routeName}</b>\n`;
       text += `❌ Цены не найдены\n`;
       text += `Ваш бюджет: ${Formatters.formatPrice(userBudget)}\n`;
 
@@ -401,102 +398,103 @@ class NotificationService {
       return { text, searchLink: null };
     }
 
-    const diff = userBudget - currentPrice;
     const routeName = airportResolver.formatRoute(route.origin, route.destination);
 
-    // Эмодзи заголовка
-    let emoji;
-    if (diff > 0 && diff / userBudget > 0.2) {
-      emoji = '🎉';
-    } else if (diff >= 0) {
-      emoji = '✅';
-    } else if (analytics && analytics.avgPrice && currentPrice < analytics.avgPrice) {
-      emoji = '📉';
+    // Первая строка: маршрут и даты
+    const depDate = bestResult.departure_date ? this._formatShortDateForProgressBar(bestResult.departure_date) : null;
+    const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
+    let text = `<b>${routeName}</b>`;
+    if (depDate && retDate) {
+      text += ` • ${depDate}–${retDate}`;
+    } else if (depDate) {
+      text += ` • ${depDate}`;
+    }
+    text += '\n';
+
+    // Вторая строка: пассажиры, пересадки, багаж, авиакомпания
+    const adults = route.adults || 1;
+    const children = route.children || 0;
+    let paramsLine = `👥 ${adults}`;
+    if (children > 0) paramsLine += `+${children}`;
+
+    if (route.max_stops === 0) {
+      paramsLine += ' • Прямой';
+    } else if (route.max_stops === 1) {
+      paramsLine += ' • 1 пересадка';
+    } else if (route.max_stops && route.max_stops < 99) {
+      paramsLine += ` • до ${route.max_stops} пересад.`;
     } else {
-      emoji = '📊';
+      paramsLine += ' • Любое кол-во пересадок';
     }
 
-    let text = `${emoji} ${routeName}\n`;
-    text += `💰 ${Formatters.formatPrice(currentPrice)}`;
+    if (route.baggage) paramsLine += ' • 🧳';
 
-    // Контекст бюджета
-    if (diff > 0) {
-      text += ` — на ${Formatters.formatPrice(diff)} ниже бюджета!\n`;
-    } else if (diff === 0) {
-      text += ` — точно в бюджете!\n`;
-    } else {
-      text += ` — превышение на ${Formatters.formatPrice(Math.abs(diff))}, продолжаем искать\n`;
+    const airlineName = Formatters.getAirlineName(route.airline);
+    if (airlineName && airlineName !== 'Любая') {
+      paramsLine += ` • ${airlineName}`;
     }
 
-    text += `\nВаш бюджет: ${Formatters.formatPrice(userBudget)}\n`;
+    text += paramsLine + '\n\n';
+
+    // Бюджет с прогресс-баром
+    const BAR_LENGTH = 15;
+    const budgetPercent = (currentPrice / userBudget) * 100;
+    const budgetDiff = currentPrice - userBudget;
+    const budgetDiffPercent = Math.round((budgetDiff / userBudget) * 100);
+    const budgetSign = budgetDiff >= 0 ? '+' : '';
+
+    let budgetBar;
+    if (budgetPercent > 100) {
+      const overflowPercent = budgetPercent - 100;
+      const overflowChars = Math.min(Math.round((overflowPercent / 50) * 15), 15);
+      budgetBar = '█'.repeat(BAR_LENGTH) + '▓'.repeat(overflowChars);
+    } else {
+      const filled = Math.round((budgetPercent / 100) * BAR_LENGTH);
+      const empty = BAR_LENGTH - filled;
+      budgetBar = '█'.repeat(filled) + '░'.repeat(empty);
+    }
+
+    text += `${currentPrice > userBudget ? "🔴" : "🟢" } <b>Бюджет:</b> ${Formatters.formatPrice(userBudget)}\n`;
+    text += `<code>[${budgetBar}]</code>\n`;
+    text += `<b>Цена: ${Formatters.formatPrice(currentPrice)}</b> • ${budgetSign}${Formatters.formatPrice(Math.abs(budgetDiff))} (${budgetSign}${budgetDiffPercent}%)\n\n`;
 
     // Средняя цена (только при >= 5 data points)
     if (analytics && analytics.dataPoints >= 5 && analytics.avgPrice) {
-      const savingsFromAvg = analytics.avgPrice - currentPrice;
-      if (savingsFromAvg > 0) {
-        const savingsPct = Math.round((savingsFromAvg / analytics.avgPrice) * 100);
-        text += `Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)} • Экономия: ${Formatters.formatPrice(savingsFromAvg)} (${savingsPct}%)\n`;
-      } else {
-        text += `Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
-      }
+      const avgPercent = (currentPrice / analytics.avgPrice) * 100;
+      const filledAvg = Math.round((avgPercent / 100) * BAR_LENGTH);
+      const emptyAvg = BAR_LENGTH - filledAvg;
+      const avgBar = '█'.repeat(filledAvg) + '░'.repeat(emptyAvg);
+
+      const avgDiff = currentPrice - analytics.avgPrice;
+      const avgDiffPercent = Math.round((avgDiff / analytics.avgPrice) * 100);
+      const avgSign = avgDiff >= 0 ? '+' : '';
+
+      text += `${currentPrice > analytics.avgPrice ? "🔴" : "🟢"} <b>Средняя:</b> ${Formatters.formatPrice(analytics.avgPrice)}\n`;
+      text += `<code>[${avgBar}]</code>\n`;
+      text += `<b>Цена: ${Formatters.formatPrice(currentPrice)}</b> • ${avgSign}${Formatters.formatPrice(Math.abs(avgDiff))} (${avgSign}${avgDiffPercent}%)\n\n`;
     }
 
-    // Исторический минимум
-    if (analytics && analytics.minPrice && currentPrice <= analytics.minPrice) {
-      text += `🔥 Исторический минимум за всё время!\n`;
+    // Время проверки
+    const now = new Date();
+    const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Yekaterinburg' });
+    text += `<i>Проверено в ${time}</i>`;
+
+    // ДОБАВЛЯЕМ ССЫЛКУ ПРЯМО В БЛОК
+    if (bestResult?.search_link) {
+      text += `\n\n🔗 <a href="${bestResult.search_link}">Купить билет →</a>`;
     }
 
-    // Детали билета
-    text += '\n';
-    if (bestResult) {
-      const depDate = bestResult.departure_date ? this._formatShortDateRu(bestResult.departure_date) : null;
-      const retDate = bestResult.return_date ? this._formatShortDateRu(bestResult.return_date) : null;
-
-      let detailsLine = '📅 ';
-      if (depDate && retDate) {
-        detailsLine += `${depDate}–${retDate}`;
-      } else if (depDate) {
-        detailsLine += depDate;
-      }
-
-      // Авиакомпания
-      const airlineName = Formatters.getAirlineName(route.airline);
-      if (airlineName && airlineName !== 'Любая') {
-        detailsLine += ` • ${airlineName}`;
-      }
-      text += detailsLine + '\n';
-
-      // Пассажиры, багаж, пересадки
-      let paramsLine = '';
-      const adults = route.adults || 1;
-      const children = route.children || 0;
-      paramsLine += `${adults} взр`;
-      if (children > 0) paramsLine += ` + ${children} реб`;
-
-      if (route.baggage) paramsLine += ' • Багаж';
-
-      if (route.max_stops === 0) {
-        paramsLine += ' • Прямой';
-      } else if (route.max_stops !== null && route.max_stops !== undefined) {
-        paramsLine += ` • до ${route.max_stops} пересад.`;
-      }
-
-      text += paramsLine + '\n';
-    }
-
-    // Статистика проверок
-    if (checkStats) {
-      text += '\n';
-      if (route.is_flexible) {
-        text += `Сейчас выполнено ${checkStats.current.successful_checks + checkStats.current.failed_checks} проверок. Всего проверок ${checkStats.totalAllCombinations}`;
-      } else if (checkStats.totalAllCombinations > 0) {
-        text += `Всего выполнено ${checkStats.totalAllCombinations} проверок`;
-      }
-    }
-
-    const searchLink = bestResult?.search_link || null;
-    return { text, searchLink };
+    return { text, searchLink: null }; // searchLink больше не нужен
   }
+
+  _formatShortDateForProgressBar(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const day = date.getDate();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}.${month}`;
+  }
+
 
   _formatShortDateRu(dateStr) {
     if (!dateStr) return '';
@@ -506,7 +504,7 @@ class NotificationService {
   }
 
   // ============================================
-  // СВОДНЫЙ ОТЧЕТ
+  // СВОДНЫЙ ОТЧЕТ (обновлено - без кнопок)
   // ============================================
 
   async sendConsolidatedReport(chatId, routeBlocks, timezone, disableNotification = true) {
@@ -515,44 +513,34 @@ class NotificationService {
 
       const time = this._formatTimeForUser(new Date(), timezone);
       const hasCritical = routeBlocks.some(b => b.priority === 'CRITICAL');
-      const hasFinds = routeBlocks.some(b => b.block.searchLink);
+      const hasFinds = routeBlocks.some(b => b.block.searchLink !== null || b.block.text.includes('Купить билет'));
 
       const header = hasCritical ? `🚨 Отличные новости! • ${time}` : `📊 Проверка завершена • ${time}`;
-      const footer = hasFinds ? '\nОтличные цены! Не упусти 🎯' : '\nПродолжаю мониторинг 🔍';
-      const separator = '\n━━━━━━━━━━━━━━━━━━━━━━━\n';
+      const footer = hasFinds ? '\n\nОтличные цены! Не упусти 🎯' : '\n\nПродолжаю мониторинг 🔍';
+      const separator = '\n\n━━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
       // Собираем сообщение
       let message = header + '\n\n';
-      const inlineButtons = [];
 
       for (let i = 0; i < routeBlocks.length; i++) {
-        const { block, route } = routeBlocks[i];
+        const { block } = routeBlocks[i];
         if (i > 0) message += separator;
         message += block.text;
-
-        if (block.searchLink) {
-          const routeName = airportResolver.formatRoute(route.origin, route.destination);
-          inlineButtons.push([
-            { text: `🔗 ${routeName} — Смотреть →`, url: block.searchLink }
-          ]);
-        }
       }
 
       message += footer;
+
+      console.log('message->', message);
 
       // Разбиваем если > 4000 символов
       const chunks = this._splitMessage(message, 4000);
 
       for (let i = 0; i < chunks.length; i++) {
         const opts = {
-          parse_mode: 'Markdown',
-          disable_notification: disableNotification
+          parse_mode: 'HTML',
+          disable_notification: disableNotification,
+          disable_web_page_preview: true // Отключаем превью ссылок
         };
-
-        // Кнопки только к последнему чанку
-        if (i === chunks.length - 1 && inlineButtons.length > 0) {
-          opts.reply_markup = { inline_keyboard: inlineButtons.slice(0, 10) };
-        }
 
         await this.bot.sendMessage(chatId, chunks[i], opts);
       }
