@@ -39,14 +39,18 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 // 🔥 ИСПРАВЛЕННЫЕ настройки сессий
 app.use(session({
+  name: 'flyalert.sid', // Уникальное имя cookie
   secret: process.env.SESSION_SECRET || 'aviasales-bot-secret-2026',
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 24 часа
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production' ? false : false // Для HTTP оставляем false
-  }
+    secure: false, // Для HTTP (если используете HTTPS через nginx/proxy - оставьте false)
+    sameSite: 'lax', // Защита от CSRF, но позволяет переходы
+    path: '/' // Путь для cookie
+  },
+  rolling: true // Обновлять cookie при каждом запросе
 }));
 
 app.set('view engine', 'ejs');
@@ -67,12 +71,15 @@ function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
+  console.log(`[AUTH] Path: ${req.path}, Session exists: ${!!req.session}, isAdmin: ${req.session?.isAdmin}`);
+
   if (req.session && req.session.isAdmin) {
     return next();
   }
 
   // Если это API запрос - вернуть JSON
   if (req.path.startsWith('/admin/api/')) {
+    console.log(`[AUTH] API request without auth: ${req.path}`);
     return res.status(401).json({
       error: 'Unauthorized',
       message: 'Требуется авторизация'
@@ -80,6 +87,7 @@ function requireAdmin(req, res, next) {
   }
 
   // Иначе - редирект на логин
+  console.log(`[AUTH] Redirecting to /admin/login from ${req.path}`);
   res.redirect('/admin/login');
 }
 
@@ -200,11 +208,28 @@ app.get('/admin/check-auth', (req, res) => {
   }
 });
 
+// DEBUG: Тестовый endpoint для проверки сессий
+app.get('/admin/debug-session', (req, res) => {
+  res.json({
+    sessionExists: !!req.session,
+    sessionID: req.sessionID,
+    isAdmin: req.session?.isAdmin,
+    loginTime: req.session?.loginTime,
+    cookies: req.headers.cookie,
+    NODE_ENV: process.env.NODE_ENV
+  });
+});
+
 // Страница логина (GET)
 app.get('/admin/login', (req, res) => {
+  console.log(`[LOGIN PAGE] Session exists: ${!!req.session}, isAdmin: ${req.session?.isAdmin}`);
+
   if (req.session && req.session.isAdmin) {
+    console.log(`[LOGIN PAGE] Already authenticated, redirecting to /admin`);
     return res.redirect('/admin');
   }
+
+  console.log(`[LOGIN PAGE] Showing login form`);
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -212,6 +237,7 @@ app.get('/admin/login', (req, res) => {
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    console.log(`[LOGIN] Попытка входа: ${username}`);
 
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
       req.session.isAdmin = true;
@@ -227,11 +253,12 @@ app.post('/admin/login', async (req, res) => {
           });
         }
 
-        console.log('🔐 Админ вошел в систему');
+        console.log(`🔐 Админ вошел в систему. Session ID: ${req.sessionID}`);
+        console.log(`[SESSION] isAdmin: ${req.session.isAdmin}`);
         res.json({ success: true });
       });
     } else {
-      console.log('❌ Неверная попытка входа в админку');
+      console.log(`❌ Неверная попытка входа в админку: ${username}`);
       res.status(401).json({
         success: false,
         error: 'Неверный логин или пароль'
