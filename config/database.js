@@ -343,6 +343,15 @@ db.serialize(() => {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_payments_yookassa_id ON payments(yookassa_payment_id)`);
 
+  // Добавляем поле для отслеживания отправленных уведомлений
+  db.run(`ALTER TABLE payments ADD COLUMN notification_sent INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления notification_sent:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка notification_sent в payments');
+    }
+  });
+
   console.log('✅ Таблица payments готова');
 
   // ============================================

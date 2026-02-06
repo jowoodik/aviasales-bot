@@ -22,11 +22,24 @@ bot.startPolling({
   }
 });
 
-// Передаем бота в веб-сервер для обработки webhook ЮКассы
-if (process.env.ENABLE_WEB === 'true') {
-    const { setBotInstance } = require('./web/server');
-    setBotInstance(bot);
-}
+// ПРИМЕЧАНИЕ: setBotInstance НЕ используется, т.к. web/server.js
+// запускается отдельным процессом в pm2 (flyalert-web)
+// Webhook ЮКассы сохраняет данные в БД, а бот проверяет и отправляет уведомления
+
+// Периодическая проверка новых платежей и отправка уведомлений
+const PaymentNotificationService = require('./services/PaymentNotificationService');
+const paymentNotifier = new PaymentNotificationService(bot);
+
+// Проверяем каждую минуту
+setInterval(async () => {
+    await paymentNotifier.checkAndNotify();
+}, 60 * 1000); // 1 минута
+
+// Проверяем сразу при старте (через 5 секунд)
+setTimeout(async () => {
+    console.log('🔍 Проверка необработанных платежей...');
+    await paymentNotifier.checkAndNotify();
+}, 5000);
 
 // Состояния пользователей
 const userStates = {};

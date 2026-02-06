@@ -8,14 +8,6 @@ const ActivityService = require('../services/ActivityService');
 const airportResolver = require('../utils/AirportCodeResolver');
 const YooKassaService = require('../services/YooKassaService');
 
-// Инстанс бота для отправки уведомлений из webhook
-let botInstance = null;
-
-function setBotInstance(bot) {
-    botInstance = bot;
-    console.log('✅ Bot instance set for YooKassa webhook');
-}
-
 const app = express();
 const PORT = process.env.WEB_PORT || 3000;
 const ADMIN_USERNAME = 'admin';
@@ -24,43 +16,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'tg-bot-2026';
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Удаляем старый cookie connect.sid перед инициализацией сессии
-app.use((req, res, next) => {
-  // Удаляем старый cookie если он есть
-  if (req.headers.cookie && req.headers.cookie.includes('connect.sid')) {
-    res.clearCookie('connect.sid', { path: '/' });
-    console.log('[CLEANUP] Удалён старый cookie connect.sid');
-  }
-  next();
-});
-
-// 🔥 СЕССИИ ДОЛЖНЫ БЫТЬ ДО СТАТИКИ!
-app.use(session({
-  name: 'flyalert.sid', // Уникальное имя cookie
-  secret: process.env.SESSION_SECRET || 'aviasales-bot-secret-2026',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    maxAge: 24 * 60 * 60 * 1000, // 24 часа
-    httpOnly: true,
-    secure: false, // Для HTTP (если используете HTTPS через nginx/proxy - оставьте false)
-    sameSite: 'lax', // Защита от CSRF, но позволяет переходы
-    path: '/' // Путь для cookie
-  },
-  rolling: true // Обновлять cookie при каждом запросе
-}));
-
-// Блокируем прямой доступ к защищённым HTML файлам
-app.use((req, res, next) => {
-  const blockedFiles = ['/admin.html', '/login.html'];
-  if (blockedFiles.includes(req.path)) {
-    return res.status(404).send('Not Found');
-  }
-  next();
-});
-
-// Статические файлы ПОСЛЕ сессий и блокировки
+// Отключаем кэширование для разработки
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 0,
   etag: false,
@@ -69,6 +25,19 @@ app.use(express.static(path.join(__dirname, 'public'), {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+  }
+}));
+
+
+// 🔥 ИСПРАВЛЕННЫЕ настройки сессий
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'aviasales-bot-secret-2026',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 24 * 60 * 60 * 1000, // 24 часа
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production' ? false : false // Для HTTP оставляем false
   }
 }));
 
@@ -90,15 +59,12 @@ function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  console.log(`[AUTH] Path: ${req.path}, Session exists: ${!!req.session}, isAdmin: ${req.session?.isAdmin}`);
-
   if (req.session && req.session.isAdmin) {
     return next();
   }
 
   // Если это API запрос - вернуть JSON
   if (req.path.startsWith('/admin/api/')) {
-    console.log(`[AUTH] API request without auth: ${req.path}`);
     return res.status(401).json({
       error: 'Unauthorized',
       message: 'Требуется авторизация'
@@ -106,7 +72,6 @@ function requireAdmin(req, res, next) {
   }
 
   // Иначе - редирект на логин
-  console.log(`[AUTH] Redirecting to /admin/login from ${req.path}`);
   res.redirect('/admin/login');
 }
 
@@ -213,6 +178,11 @@ async function getAdminStats() {
 // АДМИНКА - РОУТЫ
 // ============================================
 
+// Страница логина
+app.get('/admin', requireAdmin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
 // Проверка авторизации (для клиента)
 app.get('/admin/check-auth', (req, res) => {
   if (req.session && req.session.isAdmin) {
@@ -222,28 +192,11 @@ app.get('/admin/check-auth', (req, res) => {
   }
 });
 
-// DEBUG: Тестовый endpoint для проверки сессий
-app.get('/admin/debug-session', (req, res) => {
-  res.json({
-    sessionExists: !!req.session,
-    sessionID: req.sessionID,
-    isAdmin: req.session?.isAdmin,
-    loginTime: req.session?.loginTime,
-    cookies: req.headers.cookie,
-    NODE_ENV: process.env.NODE_ENV
-  });
-});
-
 // Страница логина (GET)
 app.get('/admin/login', (req, res) => {
-  console.log(`[LOGIN PAGE] Session exists: ${!!req.session}, isAdmin: ${req.session?.isAdmin}`);
-
   if (req.session && req.session.isAdmin) {
-    console.log(`[LOGIN PAGE] Already authenticated, redirecting to /admin`);
     return res.redirect('/admin');
   }
-
-  console.log(`[LOGIN PAGE] Showing login form`);
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
@@ -251,7 +204,6 @@ app.get('/admin/login', (req, res) => {
 app.post('/admin/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log(`[LOGIN] Попытка входа: ${username}`);
 
     if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
       req.session.isAdmin = true;
@@ -267,12 +219,11 @@ app.post('/admin/login', async (req, res) => {
           });
         }
 
-        console.log(`🔐 Админ вошел в систему. Session ID: ${req.sessionID}`);
-        console.log(`[SESSION] isAdmin: ${req.session.isAdmin}`);
+        console.log('🔐 Админ вошел в систему');
         res.json({ success: true });
       });
     } else {
-      console.log(`❌ Неверная попытка входа в админку: ${username}`);
+      console.log('❌ Неверная попытка входа в админку');
       res.status(401).json({
         success: false,
         error: 'Неверный логин или пароль'
@@ -3156,25 +3107,39 @@ app.post('/webhook/yookassa', async (req, res) => {
                 return res.status(200).json({ status: 'ignored' });
             }
 
-            // Проверяем наличие бота
-            if (!botInstance) {
-                console.error('❌ Bot instance not set, cannot process payment');
-                return res.status(200).json({ status: 'bot_not_ready' });
+            // Обрабатываем платеж БЕЗ botInstance (он запущен в отдельном процессе)
+            // Активируем подписку напрямую через SubscriptionService
+            const SubscriptionService = require('../services/SubscriptionService');
+
+            const chatId = parseInt(verifiedPayment.metadata?.chat_id);
+            const yookassaPaymentId = verifiedPayment.id;
+
+            if (!chatId) {
+                console.error('❌ chat_id не найден в metadata');
+                return res.status(200).json({ status: 'missing_chat_id' });
             }
 
-            // Создаем обработчик и обрабатываем платеж
-            const SubscriptionHandlers = require('../handlers/subscriptionHandlers');
-            const subscriptionHandlers = new SubscriptionHandlers(botInstance, {});
+            // Обновляем статус платежа в БД
+            await new Promise((resolve, reject) => {
+                db.run(`
+                    UPDATE payments
+                    SET status = 'completed',
+                        webhook_received_at = datetime('now'),
+                        completed_at = datetime('now')
+                    WHERE yookassa_payment_id = ?
+                `, [yookassaPaymentId], (err) => {
+                    if (err) reject(err);
+                    else resolve();
+                });
+            });
 
-            const success = await subscriptionHandlers.handleYooKassaPaymentSuccess(verifiedPayment);
+            // Активируем подписку
+            await SubscriptionService.updateSubscription(chatId, 'plus');
 
-            if (success) {
-                console.log(`✅ Webhook обработан успешно для платежа ${paymentData.id}`);
-                res.status(200).json({ status: 'ok' });
-            } else {
-                console.warn(`⚠️ Webhook обработан с ошибкой для платежа ${paymentData.id}`);
-                res.status(200).json({ status: 'processed_with_errors' });
-            }
+            console.log(`✅ Подписка активирована для пользователя ${chatId}, платеж ${yookassaPaymentId}`);
+            console.log(`   ℹ️ Уведомление пользователю будет отправлено ботом автоматически`);
+
+            res.status(200).json({ status: 'ok', chat_id: chatId });
 
         } else if (notification.event === 'payment.canceled') {
             // Платеж отменен - можно логировать, но активных действий не требуется
@@ -3215,7 +3180,5 @@ console.log('✅ YooKassa webhook endpoint registered: POST /webhook/yookassa');
   });
 })();
 
-// Экспорт (обратно совместимый)
+// Экспорт
 module.exports = app;
-module.exports.app = app;
-module.exports.setBotInstance = setBotInstance;
