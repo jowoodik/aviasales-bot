@@ -12,6 +12,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production'
             },
+            env_file: './.env', // Подключаем .env файл
             error_file: './logs/bot-error.log',
             out_file: './logs/bot-out.log',
             log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -31,6 +32,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production'
             },
+            env_file: './.env', // Подключаем .env файл
             error_file: './logs/scheduler-error.log',
             out_file: './logs/scheduler-out.log',
             log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -50,6 +52,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production'
             },
+            env_file: './.env', // Подключаем .env файл
             error_file: './logs/broadcast-error.log',
             out_file: './logs/broadcast-out.log',
             log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
@@ -69,6 +72,7 @@ module.exports = {
             env: {
                 NODE_ENV: 'production'
             },
+            env_file: './.env', // Подключаем .env файл
             error_file: './logs/bot-web-error.log',
             out_file: './logs/bot-web-out.log',
             log_date_format: 'YYYY-MM-DD HH:mm:ss Z',

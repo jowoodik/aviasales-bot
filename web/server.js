@@ -213,11 +213,6 @@ async function getAdminStats() {
 // АДМИНКА - РОУТЫ
 // ============================================
 
-// Страница логина
-app.get('/admin', requireAdmin, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-
 // Проверка авторизации (для клиента)
 app.get('/admin/check-auth', (req, res) => {
   if (req.session && req.session.isAdmin) {
