@@ -24,20 +24,8 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'tg-bot-2026';
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// Отключаем кэширование для разработки
-app.use(express.static(path.join(__dirname, 'public'), {
-  maxAge: 0,
-  etag: false,
-  lastModified: false,
-  setHeaders: (res, path) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-  }
-}));
 
-
-// 🔥 ИСПРАВЛЕННЫЕ настройки сессий
+// 🔥 СЕССИИ ДОЛЖНЫ БЫТЬ ДО СТАТИКИ!
 app.use(session({
   name: 'flyalert.sid', // Уникальное имя cookie
   secret: process.env.SESSION_SECRET || 'aviasales-bot-secret-2026',
@@ -51,6 +39,27 @@ app.use(session({
     path: '/' // Путь для cookie
   },
   rolling: true // Обновлять cookie при каждом запросе
+}));
+
+// Блокируем прямой доступ к защищённым HTML файлам
+app.use((req, res, next) => {
+  const blockedFiles = ['/admin.html', '/login.html'];
+  if (blockedFiles.includes(req.path)) {
+    return res.status(404).send('Not Found');
+  }
+  next();
+});
+
+// Статические файлы ПОСЛЕ сессий и блокировки
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: 0,
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, path) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
 }));
 
 app.set('view engine', 'ejs');
