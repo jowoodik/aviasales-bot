@@ -333,6 +333,7 @@ ${fullBroadcast.message_text}
                       <th>Chat ID</th>
                       <th>Timezone</th>
                       <th>Время отправки</th>
+                      <th>Статус</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -341,6 +342,7 @@ ${fullBroadcast.message_text}
                         <td>${u.chat_id}</td>
                         <td>${u.timezone || 'N/A'}</td>
                         <td>${formatDateTime(u.sent_at)}</td>
+                        <td class="${u.status === 'success' ? 'text-success' : 'text-danger'}">${u.status}</td>
                       </tr>
                     `).join('')}
                   </tbody>

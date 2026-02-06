@@ -108,11 +108,11 @@ class BroadcastService {
     /**
      * Записать лог отправки пользователю
      */
-    static async logBroadcastSent(broadcastId, chatId) {
+    static async logBroadcastSent(broadcastId, chatId, status) {
         return new Promise((resolve, reject) => {
             db.run(
-                'INSERT OR IGNORE INTO broadcast_log (broadcast_id, chat_id) VALUES (?, ?)',
-                [broadcastId, chatId],
+                'INSERT OR IGNORE INTO broadcast_log (broadcast_id, chat_id, status) VALUES (?, ?, ?)',
+                [broadcastId, chatId, status],
                 (err) => {
                     if (err) reject(err);
                     else resolve();

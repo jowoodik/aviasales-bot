@@ -739,15 +739,13 @@ class NotificationService {
             parse_mode: 'HTML',
             disable_web_page_preview: false
           });
-          await BroadcastService.logBroadcastSent(broadcastId, chatId);
+          await BroadcastService.logBroadcastSent(broadcastId, chatId, 'success');
           sent++;
           return { success: true, chatId };
         } catch (error) {
           console.error(`❌ Ошибка отправки broadcast пользователю ${chatId}:`, error.message);
+          await BroadcastService.logBroadcastSent(broadcastId, chatId, 'error: '+ error.message);
           failed++;
-          if (error.response && (error.response.body.error_code === 403 || error.response.body.error_code === 400)) {
-            await BroadcastService.logBroadcastSent(broadcastId, chatId);
-          }
           return { success: false, chatId, error: error.message };
         }
       });
@@ -758,7 +756,7 @@ class NotificationService {
       const delay = Math.max(0, 1000 - elapsed);
 
       if (i + batchSize < chatIds.length && delay > 0) {
-        console.log(`⏳ Отправлено ${sent + failed}/${chatIds.length}, пауза ${delay}ms...`);
+        console.log(`⏳ Отправлено успешно ${sent} | отправлено с ошибкой ${failed} | всего${chatIds.length}, пауза ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }

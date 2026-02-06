@@ -393,6 +393,15 @@ db.serialize(() => {
     }
   });
 
+  // Добавляем status в broadcast_log (если её нет)
+  db.run(`ALTER TABLE broadcast_log ADD COLUMN status TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления status:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка status в broadcast_log');
+    }
+  });
+
   // ============================================
   // ТАБЛИЦА ЛОГОВ УВЕДОМЛЕНИЙ
   // ============================================

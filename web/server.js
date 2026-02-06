@@ -549,7 +549,7 @@ app.get('/admin/api/broadcasts/:id', requireAdmin, async (req, res) => {
     // Получаем статистику отправки
     const sentUsers = await new Promise((resolve, reject) => {
       db.all(`
-        SELECT bl.chat_id, bl.sent_at, us.timezone
+        SELECT bl.chat_id, bl.sent_at, us.timezone, bl.status
         FROM broadcast_log bl
         LEFT JOIN user_settings us ON bl.chat_id = us.chat_id
         WHERE bl.broadcast_id = ?
