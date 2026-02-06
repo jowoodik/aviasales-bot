@@ -3174,4 +3174,7 @@ console.log('✅ YooKassa webhook endpoint registered: POST /webhook/yookassa');
   });
 })();
 
-module.exports = { app, setBotInstance };
+// Экспорт (обратно совместимый)
+module.exports = app;
+module.exports.app = app;
+module.exports.setBotInstance = setBotInstance;
