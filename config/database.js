@@ -316,6 +316,33 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_payments_payload ON payments(payload)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)`);
 
+  // Миграции для ЮКасса API (прямая интеграция)
+  db.run(`ALTER TABLE payments ADD COLUMN yookassa_payment_id TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления yookassa_payment_id:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка yookassa_payment_id в payments');
+    }
+  });
+
+  db.run(`ALTER TABLE payments ADD COLUMN confirmation_url TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления confirmation_url:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка confirmation_url в payments');
+    }
+  });
+
+  db.run(`ALTER TABLE payments ADD COLUMN webhook_received_at DATETIME`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления webhook_received_at:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка webhook_received_at в payments');
+    }
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_payments_yookassa_id ON payments(yookassa_payment_id)`);
+
   console.log('✅ Таблица payments готова');
 
   // ============================================

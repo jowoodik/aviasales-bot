@@ -6,7 +6,15 @@ const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
 const ActivityService = require('../services/ActivityService');
 const airportResolver = require('../utils/AirportCodeResolver');
+const YooKassaService = require('../services/YooKassaService');
 
+// Инстанс бота для отправки уведомлений из webhook
+let botInstance = null;
+
+function setBotInstance(bot) {
+    botInstance = bot;
+    console.log('✅ Bot instance set for YooKassa webhook');
+}
 
 const app = express();
 const PORT = process.env.WEB_PORT || 3000;
@@ -3071,6 +3079,81 @@ app.delete('/admin/api/digest-queue/:id', requireAdmin, async (req, res) => {
 
 console.log('✅ All admin API endpoints loaded');
 
+// ============================================
+// YOOKASSA WEBHOOK
+// ============================================
+
+app.post('/webhook/yookassa', async (req, res) => {
+    console.log('📥 YooKassa webhook received');
+
+    try {
+        const notification = req.body;
+
+        // Логируем для отладки
+        console.log('   Event:', notification.event);
+        console.log('   Object ID:', notification.object?.id);
+
+        // Проверяем тип события
+        if (notification.event === 'payment.succeeded') {
+            const paymentData = notification.object;
+
+            // Верифицируем платеж через API ЮКассы
+            console.log(`🔍 Верификация платежа ${paymentData.id}...`);
+
+            let verifiedPayment;
+            try {
+                verifiedPayment = await YooKassaService.getPayment(paymentData.id);
+            } catch (verifyError) {
+                console.error('❌ Ошибка верификации платежа:', verifyError.message);
+                // Даже если верификация не удалась, возвращаем 200, чтобы ЮКасса не повторяла запрос
+                return res.status(200).json({ status: 'verification_failed' });
+            }
+
+            // Проверяем статус платежа
+            if (verifiedPayment.status !== 'succeeded') {
+                console.warn(`⚠️ Платеж ${paymentData.id} не в статусе succeeded: ${verifiedPayment.status}`);
+                return res.status(200).json({ status: 'ignored' });
+            }
+
+            // Проверяем наличие бота
+            if (!botInstance) {
+                console.error('❌ Bot instance not set, cannot process payment');
+                return res.status(200).json({ status: 'bot_not_ready' });
+            }
+
+            // Создаем обработчик и обрабатываем платеж
+            const SubscriptionHandlers = require('../handlers/subscriptionHandlers');
+            const subscriptionHandlers = new SubscriptionHandlers(botInstance, {});
+
+            const success = await subscriptionHandlers.handleYooKassaPaymentSuccess(verifiedPayment);
+
+            if (success) {
+                console.log(`✅ Webhook обработан успешно для платежа ${paymentData.id}`);
+                res.status(200).json({ status: 'ok' });
+            } else {
+                console.warn(`⚠️ Webhook обработан с ошибкой для платежа ${paymentData.id}`);
+                res.status(200).json({ status: 'processed_with_errors' });
+            }
+
+        } else if (notification.event === 'payment.canceled') {
+            // Платеж отменен - можно логировать, но активных действий не требуется
+            console.log(`📛 Платеж отменен: ${notification.object?.id}`);
+            res.status(200).json({ status: 'canceled_acknowledged' });
+
+        } else {
+            // Неизвестное событие
+            console.log(`❓ Неизвестное событие: ${notification.event}`);
+            res.status(200).json({ status: 'unknown_event' });
+        }
+
+    } catch (error) {
+        console.error('❌ Ошибка обработки YooKassa webhook:', error);
+        // Всегда возвращаем 200, чтобы ЮКасса не повторяла запрос
+        res.status(200).json({ status: 'error', message: error.message });
+    }
+});
+
+console.log('✅ YooKassa webhook endpoint registered: POST /webhook/yookassa');
 
 // ===== КОНЕЦ API ENDPOINTS =====
 
@@ -3091,4 +3174,4 @@ console.log('✅ All admin API endpoints loaded');
   });
 })();
 
-module.exports = app;
+module.exports = { app, setBotInstance };

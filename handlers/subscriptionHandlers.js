@@ -1,15 +1,13 @@
 const SubscriptionService = require('../services/SubscriptionService');
 const ActivityService = require('../services/ActivityService');
+const YooKassaService = require('../services/YooKassaService');
 const db = require('../config/database');
-
-// Токен провайдера платежей (ЮKassa)
-const PAYMENT_TOKEN = process.env.PAYMENT_TOKEN;
 
 // Конфигурация подписки Plus
 const PLUS_SUBSCRIPTION = {
     title: 'Plus подписка',
     description: 'Расширенные возможности мониторинга на 1 месяц',
-    price: 19900,  // копейки (199 рублей)
+    price: 199,  // рублей
     currency: 'RUB'
 };
 
@@ -18,10 +16,12 @@ class SubscriptionHandlers {
         this.bot = bot;
         this.userStates = userStates;
 
-        // Проверка токена при инициализации
-        const tokenType = PAYMENT_TOKEN.includes('TEST') ? '🧪 TEST' : '💳 LIVE';
-        console.log(`💰 Payment provider: ${tokenType}`);
-        console.log(`   Token: ${PAYMENT_TOKEN.substring(0, 20)}...`);
+        // Проверка конфигурации ЮКассы
+        if (YooKassaService.isConfigured()) {
+            console.log('💰 YooKassa API: ✅ Configured');
+        } else {
+            console.warn('⚠️ YooKassa API: Not configured (missing YOOKASSA_SHOP_ID or YOOKASSA_API_KEY)');
+        }
     }
 
     /**
@@ -131,16 +131,25 @@ class SubscriptionHandlers {
     }
 
     /**
-     * Обработка нажатия на кнопку оплаты - отправка счёта через Telegram Payments
+     * Обработка нажатия на кнопку оплаты - создание платежа через ЮКасса API
      */
     async handlePaymentCallback(chatId, callbackQueryId) {
         // Логируем попытку апгрейда
         ActivityService.logEvent(chatId, 'upgrade_attempt').catch(err => console.error('Activity log error:', err));
 
         try {
+            // Проверяем, настроена ли ЮКасса
+            if (!YooKassaService.isConfigured()) {
+                this.bot.answerCallbackQuery(callbackQueryId, {
+                    text: '❌ Платежная система временно недоступна',
+                    show_alert: true
+                });
+                return;
+            }
+
             // Отвечаем на callback query
             this.bot.answerCallbackQuery(callbackQueryId, {
-                text: '💳 Создаю счёт для оплаты...',
+                text: '💳 Создаю ссылку на оплату...',
                 show_alert: false
             });
 
@@ -149,113 +158,98 @@ class SubscriptionHandlers {
             const random = Math.random().toString(36).substring(2, 8);
             const payload = `plus_${chatId}_${timestamp}_${random}`;
 
-            // Сохраняем запись о платеже в БД
-            await this._createPaymentRecord(chatId, payload, 'plus', PLUS_SUBSCRIPTION.price);
+            // Формируем return_url (URL возврата после оплаты)
+            const botUsername = process.env.BOT_USERNAME || 'aviasales_monitor_bot';
+            const returnUrl = `https://t.me/${botUsername}`;
 
-            // Отправляем счёт через Telegram Payments
-            await this.bot.sendInvoice(
+            // Создаем платеж в ЮКассе
+            const payment = await YooKassaService.createPayment({
+                amount: PLUS_SUBSCRIPTION.price,
+                chatId: chatId,
+                subscriptionType: 'plus',
+                returnUrl: returnUrl
+            });
+
+            // Сохраняем запись о платеже в БД
+            await this._createPaymentRecord(chatId, payload, 'plus', PLUS_SUBSCRIPTION.price * 100, payment.id, payment.confirmationUrl);
+
+            // Отправляем пользователю кнопку с URL оплаты
+            const keyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '💳 Оплатить 199 ₽', url: payment.confirmationUrl }],
+                        [{ text: '❓ Помощь по оплате', callback_data: 'payment_help' }]
+                    ]
+                }
+            };
+
+            await this.bot.sendMessage(
                 chatId,
-                PLUS_SUBSCRIPTION.title,                    // title
-                PLUS_SUBSCRIPTION.description,              // description
-                payload,                                    // payload (уникальный идентификатор)
-                PAYMENT_TOKEN,                              // provider_token
-                PLUS_SUBSCRIPTION.currency,                 // currency
-                [{ label: 'Plus подписка (30 дней)', amount: PLUS_SUBSCRIPTION.price }]  // prices
+                '💰 ОПЛАТА ПОДПИСКИ PLUS\n\n' +
+                '📌 Сумма: 199 ₽\n' +
+                '📌 Срок: 30 дней\n\n' +
+                '🔐 Оплата через ЮKassa — безопасно и удобно.\n' +
+                '💳 Доступны: карты, СБП, ЮMoney и другие способы.\n\n' +
+                'Нажмите кнопку ниже для перехода к оплате:',
+                keyboard
             );
 
-            console.log(`📤 Отправлен счёт для ${chatId}, payload: ${payload}`);
+            console.log(`📤 Создана ссылка на оплату для ${chatId}, yookassa_id: ${payment.id}`);
 
         } catch (error) {
-            console.error('Ошибка отправки счёта:', error);
-            this.bot.sendMessage(chatId, '❌ Ошибка создания счёта. Попробуйте позже.');
+            console.error('Ошибка создания платежа:', error);
+            this.bot.sendMessage(chatId, '❌ Ошибка создания платежа. Попробуйте позже.');
         }
     }
-    async handlePreCheckoutQuery(query) {
-        const chatId = query.from.id;
-        const payload = query.invoice_payload;
-        console.log(`📥 Pre-checkout от ${chatId}, payload: ${payload}`);
 
-        try {
-            const payment = await this._getPaymentByPayload(payload);
-
-            if (!payment) {
-                console.error(`❌ Платёж не найден: ${payload}`);
-                await this.bot.answerPreCheckoutQuery(query.id, false, {
-                    error_message: 'Счёт не найден. Пожалуйста, создайте новый счёт.'
-                });
-                return;
-            }
-
-            // ✅ ИЗМЕНЕНИЕ: Разрешаем повторные попытки, если платёж ещё не завершён
-            if (payment.status === 'completed') {
-                console.error(`❌ Платёж уже завершён: ${payment.status}`);
-                await this.bot.answerPreCheckoutQuery(query.id, false, {
-                    error_message: 'Этот счёт уже оплачен. Создайте новый счёт для повторной оплаты.'
-                });
-                return;
-            }
-
-            // Обновляем статус на pre_checkout (можно делать несколько раз)
-            await this._updatePaymentStatus(payload, 'pre_checkout');
-
-            // Подтверждаем pre-checkout
-            await this.bot.answerPreCheckoutQuery(query.id, true);
-            console.log(`✅ Pre-checkout подтверждён для ${chatId}`);
-
-        } catch (error) {
-            console.error('Ошибка обработки pre_checkout:', error);
-            await this.bot.answerPreCheckoutQuery(query.id, false, {
-                error_message: 'Ошибка обработки платежа. Попробуйте позже.'
-            });
-        }
-    }
     /**
-     * Обработка successful_payment - успешная оплата
+     * Обработка успешного платежа из webhook ЮКассы
+     * @param {Object} paymentData - Данные платежа из webhook
      */
-    async handleSuccessfulPayment(message) {
-        const chatId = message.chat.id;
-        const payment = message.successful_payment;
-        const payload = payment.invoice_payload;
-        const telegramChargeId = payment.telegram_payment_charge_id;
-        const providerChargeId = payment.provider_payment_charge_id;
+    async handleYooKassaPaymentSuccess(paymentData) {
+        const yookassaPaymentId = paymentData.id;
+        const metadata = paymentData.metadata || {};
+        const chatId = parseInt(metadata.chat_id);
 
-        console.log(`💰 Успешная оплата от ${chatId}:`);
-        console.log(`   Payload: ${payload}`);
-        console.log(`   Telegram charge ID: ${telegramChargeId}`);
-        console.log(`   Provider charge ID: ${providerChargeId}`);
-        console.log(`   Сумма: ${payment.total_amount} ${payment.currency}`);
+        console.log(`💰 Обработка успешного платежа ЮКасса:`);
+        console.log(`   Payment ID: ${yookassaPaymentId}`);
+        console.log(`   Chat ID: ${chatId}`);
+        console.log(`   Сумма: ${paymentData.amount.value} ${paymentData.amount.currency}`);
 
         try {
-            // Получаем запись о платеже
-            const paymentRecord = await this._getPaymentByPayload(payload);
+            // Получаем запись о платеже из БД
+            const paymentRecord = await this._getPaymentByYookassaId(yookassaPaymentId);
 
             if (!paymentRecord) {
-                console.error(`❌ Запись о платеже не найдена: ${payload}`);
-                this.bot.sendMessage(chatId,
-                    '⚠️ Оплата получена, но произошла ошибка при обработке.\n' +
-                    'Пожалуйста, свяжитесь с поддержкой: @jowoodik'
-                );
-                return;
+                console.error(`❌ Запись о платеже не найдена: ${yookassaPaymentId}`);
+                return false;
             }
 
-            // Обновляем статус платежа на completed
-            await this._updatePaymentStatus(payload, 'completed', telegramChargeId, providerChargeId);
+            // Проверяем, не был ли платеж уже обработан
+            if (paymentRecord.status === 'completed') {
+                console.log(`⚠️ Платеж ${yookassaPaymentId} уже обработан`);
+                return true;
+            }
+
+            // Обновляем статус платежа
+            await this._updatePaymentStatusByYookassaId(yookassaPaymentId, 'completed');
 
             // Активируем подписку
-            await SubscriptionService.updateSubscription(chatId, paymentRecord.subscription_type);
+            await SubscriptionService.updateSubscription(paymentRecord.chat_id, paymentRecord.subscription_type);
 
             // Логируем успешную оплату
-            ActivityService.logEvent(chatId, 'payment_success', {
+            ActivityService.logEvent(paymentRecord.chat_id, 'payment_success', {
                 subscription_type: paymentRecord.subscription_type,
-                amount: payment.total_amount,
-                currency: payment.currency
+                amount: paymentData.amount.value,
+                currency: paymentData.amount.currency,
+                payment_method: paymentData.payment_method?.type || 'unknown'
             }).catch(err => console.error('Activity log error:', err));
 
-            // Отправляем подтверждение
+            // Отправляем подтверждение пользователю
             const validTo = new Date();
             validTo.setMonth(validTo.getMonth() + 1);
 
-            this.bot.sendMessage(chatId,
+            await this.bot.sendMessage(paymentRecord.chat_id,
                 '🎉 Оплата успешно получена!\n\n' +
                 '💎 Подписка Plus активирована!\n\n' +
                 `📅 Действует до: ${validTo.toLocaleDateString('ru-RU')}\n\n` +
@@ -267,14 +261,20 @@ class SubscriptionHandlers {
                 'Спасибо за поддержку проекта! 🙏'
             );
 
-            console.log(`✅ Подписка Plus активирована для ${chatId}`);
+            console.log(`✅ Подписка Plus активирована для ${paymentRecord.chat_id}`);
+            return true;
 
         } catch (error) {
-            console.error('Ошибка обработки successful_payment:', error);
-            this.bot.sendMessage(chatId,
-                '⚠️ Оплата получена, но произошла ошибка при активации подписки.\n' +
-                'Пожалуйста, свяжитесь с поддержкой: @jowoodik'
-            );
+            console.error('Ошибка обработки платежа ЮКасса:', error);
+
+            // Пытаемся уведомить пользователя об ошибке
+            if (chatId) {
+                this.bot.sendMessage(chatId,
+                    '⚠️ Оплата получена, но произошла ошибка при активации подписки.\n' +
+                    'Пожалуйста, свяжитесь с поддержкой: @jowoodik'
+                ).catch(err => console.error('Failed to send error message:', err));
+            }
+            return false;
         }
     }
 
@@ -287,14 +287,17 @@ class SubscriptionHandlers {
         this.bot.sendMessage(
             chatId,
             '❓ ПОМОЩЬ ПО ОПЛАТЕ\n\n' +
-            '💳 Оплата происходит через Telegram Payments с провайдером ЮKassa.\n\n' +
+            '💳 Оплата происходит через ЮKassa — надежный платежный сервис.\n\n' +
             '📝 Инструкция:\n' +
             '1️⃣ Нажмите кнопку "Оплатить 199 ₽"\n' +
-            '2️⃣ В открывшемся окне выберите способ оплаты\n' +
-            '3️⃣ Введите данные карты\n' +
-            '4️⃣ Подтвердите оплату\n\n' +
-            '✅ Подписка активируется автоматически сразу после оплаты!\n\n' +
-            '🔒 Оплата безопасна - данные карты не сохраняются.\n\n' +
+            '2️⃣ Выберите удобный способ оплаты:\n' +
+            '   • Банковская карта\n' +
+            '   • СБП (Система быстрых платежей)\n' +
+            '   • ЮMoney\n' +
+            '   • И другие\n' +
+            '3️⃣ Подтвердите оплату\n\n' +
+            '✅ Подписка активируется автоматически после оплаты!\n\n' +
+            '🔒 Оплата безопасна — данные карты не сохраняются.\n\n' +
             '❗️ Если возникли проблемы, напишите в поддержку: @jowoodik'
         );
     }
@@ -336,12 +339,12 @@ class SubscriptionHandlers {
     /**
      * Создать запись о платеже
      */
-    _createPaymentRecord(chatId, payload, subscriptionType, amount) {
+    _createPaymentRecord(chatId, payload, subscriptionType, amount, yookassaPaymentId = null, confirmationUrl = null) {
         return new Promise((resolve, reject) => {
             db.run(`
-                INSERT INTO payments (chat_id, payload, subscription_type, amount, status, created_at)
-                VALUES (?, ?, ?, ?, 'pending', datetime('now'))
-            `, [chatId, payload, subscriptionType, amount], function(err) {
+                INSERT INTO payments (chat_id, payload, subscription_type, amount, status, yookassa_payment_id, confirmation_url, created_at)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, datetime('now'))
+            `, [chatId, payload, subscriptionType, amount, yookassaPaymentId, confirmationUrl], function(err) {
                 if (err) reject(err);
                 else resolve(this.lastID);
             });
@@ -349,22 +352,24 @@ class SubscriptionHandlers {
     }
 
     /**
-     * Обновить статус платежа
+     * Получить запись о платеже по yookassa_payment_id
      */
-    _updatePaymentStatus(payload, status, telegramChargeId = null, providerChargeId = null) {
+    _getPaymentByYookassaId(yookassaPaymentId) {
         return new Promise((resolve, reject) => {
-            let sql, params;
+            db.get(`SELECT * FROM payments WHERE yookassa_payment_id = ?`, [yookassaPaymentId], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    }
 
-            if (status === 'pre_checkout') {
-                sql = `UPDATE payments SET status = ?, pre_checkout_at = datetime('now') WHERE payload = ?`;
-                params = [status, payload];
-            } else if (status === 'completed') {
-                sql = `UPDATE payments SET status = ?, telegram_payment_charge_id = ?, provider_payment_charge_id = ?, completed_at = datetime('now') WHERE payload = ?`;
-                params = [status, telegramChargeId, providerChargeId, payload];
-            } else {
-                sql = `UPDATE payments SET status = ? WHERE payload = ?`;
-                params = [status, payload];
-            }
+    /**
+     * Обновить статус платежа по yookassa_payment_id
+     */
+    _updatePaymentStatusByYookassaId(yookassaPaymentId, status) {
+        return new Promise((resolve, reject) => {
+            const sql = `UPDATE payments SET status = ?, webhook_received_at = datetime('now'), completed_at = datetime('now') WHERE yookassa_payment_id = ?`;
+            const params = [status, yookassaPaymentId];
 
             db.run(sql, params, (err) => {
                 if (err) reject(err);
@@ -374,7 +379,7 @@ class SubscriptionHandlers {
     }
 
     /**
-     * Получить запись о платеже по payload
+     * Получить запись о платеже по payload (для совместимости)
      */
     _getPaymentByPayload(payload) {
         return new Promise((resolve, reject) => {
