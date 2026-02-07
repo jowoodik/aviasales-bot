@@ -51,11 +51,35 @@ class UnifiedRoute {
     /**
      * Найти маршрут по ID
      */
+    static findNonArchivedById(id) {
+        return new Promise((resolve, reject) => {
+            db.get('SELECT * FROM unified_routes WHERE id = ? AND is_archived = 0 AND is_paused = 0', [id], (err, row) => {
+                if (err) reject(err);
+                else resolve(row);
+            });
+        });
+    }
+
+    /**
+     * Найти маршрут по ID
+     */
     static findById(id) {
         return new Promise((resolve, reject) => {
             db.get('SELECT * FROM unified_routes WHERE id = ?', [id], (err, row) => {
                 if (err) reject(err);
                 else resolve(row);
+            });
+        });
+    }
+
+    /**
+     * Найти все маршруты пользователя
+     */
+    static findNonArchivedByChatId(chatId) {
+        return new Promise((resolve, reject) => {
+            db.all('SELECT * FROM unified_routes WHERE chat_id = ? AND is_archived = 0 ORDER BY created_at DESC', [chatId], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows || []);
             });
         });
     }
@@ -77,7 +101,7 @@ class UnifiedRoute {
      */
     static getAllActive() {
         return new Promise((resolve, reject) => {
-            db.all('SELECT * FROM unified_routes WHERE is_paused = 0', (err, rows) => {
+            db.all('SELECT * FROM unified_routes WHERE is_paused = 0  AND is_archived = 0 ', (err, rows) => {
                 if (err) reject(err);
                 else resolve(rows || []);
             });
@@ -129,6 +153,18 @@ class UnifiedRoute {
     static delete(id) {
         return new Promise((resolve, reject) => {
             db.run('DELETE FROM unified_routes WHERE id = ?', [id], (err) => {
+                if (err) reject(err);
+                else resolve();
+            });
+        });
+    }
+
+    /**
+     * Удалить маршрут
+     */
+    static setAsArchived(id) {
+        return new Promise((resolve, reject) => {
+            db.run('UPDATE unified_routes SET is_archived = 1 WHERE id = ?', [id], (err) => {
                 if (err) reject(err);
                 else resolve();
             });

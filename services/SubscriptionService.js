@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const Formatters = require("../utils/formatters");
+const UnifiedRoute = require('../models/UnifiedRoute');
 
 class SubscriptionService {
     /**
@@ -51,7 +52,7 @@ class SubscriptionService {
      */
     static async checkUserLimits(chatId, isFlexible, combinationsCount = 0) {
         const subscription = await this.getUserSubscription(chatId);
-        const routes = await this._getUserRoutes(chatId);
+        const routes = await UnifiedRoute.findByChatId(chatId);
 
         const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;
@@ -101,7 +102,7 @@ class SubscriptionService {
      */
     static async getSubscriptionStats(chatId) {
         const subscription = await this.getUserSubscription(chatId);
-        const routes = await this._getUserRoutes(chatId);
+        const routes = await UnifiedRoute.findByChatId(chatId);
 
         const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;
@@ -136,18 +137,6 @@ class SubscriptionService {
             `, [subscriptionType, validTo, chatId], (err) => {
                 if (err) reject(err);
                 else resolve();
-            });
-        });
-    }
-
-    /**
-     * Вспомогательный метод: получить маршруты пользователя
-     */
-    static _getUserRoutes(chatId) {
-        return new Promise((resolve, reject) => {
-            db.all(`SELECT * FROM unified_routes WHERE chat_id = ? AND is_paused = 0`, [chatId], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows || []);
             });
         });
     }

@@ -243,36 +243,6 @@ class UnifiedMonitor {
     }
 
     /**
-     * Получение неудачных проверок для маршрута
-     */
-    async getFailedCombinations(routeId, limit = 10) {
-        return new Promise((resolve, reject) => {
-            db.all(`
-                SELECT
-                    departure_date,
-                    return_date,
-                    days_in_country,
-                    status,
-                    error_reason,
-                    check_timestamp
-                FROM combination_check_results
-                WHERE route_id = ?
-                  AND status IN ('not_found', 'error')
-                  AND check_timestamp = (
-                    SELECT MAX(check_timestamp)
-                    FROM combination_check_results
-                    WHERE route_id = ?
-                )
-                ORDER BY departure_date
-                    LIMIT ?
-            `, [routeId, routeId, limit], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows || []);
-            });
-        });
-    }
-
-    /**
      * Сохранение в price_analytics (для графиков ChartGenerator)
      */
     async saveToPriceAnalytics(route, price, combination) {
@@ -322,57 +292,6 @@ class UnifiedMonitor {
         if (month >= 6 && month <= 8) return 'summer';
         if (month >= 9 && month <= 11) return 'autumn';
         return 'winter';
-    }
-
-    /**
-     * Проверка конкретного маршрута (для команды /check_ID)
-     */
-    async checkRoute(routeId) {
-        try {
-            const route = await UnifiedRoute.findById(routeId);
-
-            if (!route) {
-                throw new Error('Маршрут не найден');
-            }
-
-            return await this.checkSingleRoute(route);
-        } catch (error) {
-            console.error('Ошибка проверки маршрута:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Отчет для админа
-     */
-    async sendReport(chatId) {
-        try {
-            const routes = await UnifiedRoute.findByChatId(chatId);
-            let report = '📊 *ОТЧЕТ О ПРОВЕРКЕ*\n\n';
-
-            for (const route of routes) {
-                const bestPrice = await RouteResult.getBestPrice(route.id);
-
-                report += `✈️ ${route.origin} → ${route.destination}\n`;
-
-                if (bestPrice) {
-                    report += `💰 Лучшая цена: ${bestPrice.toLocaleString('ru-RU')} ₽\n`;
-                    report += `📊 Порог: ${route.threshold_price.toLocaleString('ru-RU')} ₽\n`;
-
-                    if (bestPrice <= route.threshold_price) {
-                        report += `🔥 Найдена цена ниже порога!\n`;
-                    }
-                } else {
-                    report += `❌ Цены не найдены\n`;
-                }
-
-                report += '\n';
-            }
-
-            await this.bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('Ошибка отправки отчета:', error);
-        }
     }
 }
 

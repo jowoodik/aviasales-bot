@@ -506,6 +506,14 @@ db.serialize(() => {
     }
   });
 
+  db.run(`ALTER TABLE unified_routes ADD COLUMN is_archived INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления is_archived:', err.message);
+    } else if (!err) {
+      console.log('✅ Добавлена колонка is_archived в unified_routes');
+    }
+  });
+
   console.log('✅ База данных инициализирована и мигрирована');
   console.log('🔥 Новые таблицы для статистики проверок готовы');
 });

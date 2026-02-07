@@ -2,15 +2,12 @@ const db = require('../config/database');
 const RouteResult = require('../models/RouteResult');
 const Formatters = require('../utils/formatters');
 const airportResolver = require('../utils/AirportCodeResolver');
+const UnifiedRoute = require('../models/UnifiedRoute');
 
 class NotificationService {
   constructor(bot) {
     this.bot = bot;
   }
-
-  // ============================================
-  // ПРИОРИТЕТЫ
-  // ============================================
 
   classifyPriority(routeData) {
     const { currentPrice, userBudget, avgPrice, historicalMin, priceDropPercent } = routeData;
@@ -78,10 +75,6 @@ class NotificationService {
     return { priority: 'LOW', reasons: ['Обычная проверка'] };
   }
 
-  // ============================================
-  // АНАЛИТИКА МАРШРУТОВ
-  // ============================================
-
   getRouteAnalytics(routeId) {
     return new Promise((resolve, reject) => {
       db.get(
@@ -143,135 +136,6 @@ class NotificationService {
       );
     });
   }
-
-  // ============================================
-  // МАРШРУТИЗАЦИЯ УВЕДОМЛЕНИЙ
-  // ============================================
-
-  _checkPriorityCooldown(chatId, routeId, priority, hours) {
-    return new Promise((resolve, reject) => {
-      db.get(
-        `SELECT COUNT(*) as cnt FROM notification_log
-         WHERE chat_id = ? AND route_id = ? AND priority = ?
-           AND sent_at > datetime('now', '-' || ? || ' hours')`,
-        [chatId, routeId, priority, hours],
-        (err, row) => {
-          if (err) return reject(err);
-          resolve((row?.cnt || 0) > 0);
-        }
-      );
-    });
-  }
-
-  _getCriticalCountToday(chatId) {
-    return new Promise((resolve, reject) => {
-      db.get(
-        `SELECT COUNT(*) as cnt FROM notification_log
-         WHERE chat_id = ? AND priority = 'CRITICAL'
-           AND sent_at > datetime('now', 'start of day')`,
-        [chatId],
-        (err, row) => {
-          if (err) return reject(err);
-          resolve(row?.cnt || 0);
-        }
-      );
-    });
-  }
-
-  _logNotification(chatId, routeId, priority, price, messageType, silent) {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, disable_notification)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [chatId, routeId, priority, price, messageType, silent ? 1 : 0],
-        (err) => {
-          if (err) {
-            console.error('Ошибка записи notification_log:', err);
-            reject(err);
-          } else {
-            resolve();
-          }
-        }
-      );
-    });
-  }
-
-  _addToDigestQueue(chatId, routeId, priority, price, analytics, bestResultId) {
-    return new Promise((resolve, reject) => {
-      db.run(
-        `INSERT INTO daily_digest_queue (chat_id, route_id, priority, price, avg_price, historical_min, best_result_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [chatId, routeId, priority, price, analytics?.avgPrice || null, analytics?.minPrice || null, bestResultId || null],
-        (err) => {
-          if (err) {
-            console.error('Ошибка записи в digest queue:', err);
-            reject(err);
-          } else {
-            resolve();
-          }
-        }
-      );
-    });
-  }
-
-  _isNightTime(timezone, settings) {
-    if (!settings || !settings.night_mode) return false;
-
-    const tz = timezone || 'Asia/Yekaterinburg';
-    const now = new Date();
-    const userLocalTime = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      hour: 'numeric',
-      hour12: false
-    }).format(now);
-    const currentHour = parseInt(userLocalTime);
-
-    // Ночь: 23:00 - 08:00
-    return currentHour >= 23 || currentHour < 8;
-  }
-
-  async _getUserTimezone(chatId) {
-    return new Promise((resolve) => {
-      db.get(
-        'SELECT timezone FROM user_settings WHERE chat_id = ?',
-        [chatId],
-        (err, row) => {
-          if (err) return resolve('Asia/Yekaterinburg');
-          resolve(row?.timezone || 'Asia/Yekaterinburg');
-        }
-      );
-    });
-  }
-
-  _formatDateTimeForUser(date, timezone) {
-    return new Intl.DateTimeFormat('ru-RU', {
-      timeZone: timezone,
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }).format(date);
-  }
-
-  _formatTimeForUser(date, timezone) {
-    return new Intl.DateTimeFormat('ru-RU', {
-      timeZone: timezone,
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
-  }
-
-  _pluralizeDays(days) {
-    if (days % 10 === 1 && days % 100 !== 11) return 'день';
-    if ([2, 3, 4].includes(days % 10) && ![12, 13, 14].includes(days % 100)) return 'дня';
-    return 'дней';
-  }
-
-  // ============================================
-  // ЦЕНТРАЛЬНЫЙ РОУТЕР УВЕДОМЛЕНИЙ
-  // ============================================
 
   async processAndRouteNotification({ chatId, routeId, route, priority, reasons, currentPrice, analytics, bestResult, checkStats, userSettings, subscriptionType }) {
     const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
@@ -346,57 +210,6 @@ class NotificationService {
     return { action: 'silent', priority };
   }
 
-  // ============================================
-  // ОТПРАВКА АЛЕРТА С INLINE-КНОПКАМИ
-  // ============================================
-
-  async _sendInstantAlert(chatId, routeId, block, priority, price, timezone, silent) {
-    try {
-      const time = this._formatTimeForUser(new Date(), timezone);
-      let header, footer;
-
-      if (priority === 'CRITICAL') {
-        header = `🔥🔥🔥 <b>СУПЕР ЦЕНА!</b> 🔥🔥🔥\n\n`;
-        footer = '\n\n⚡️ <b>Цена может вырасти в ближайшие часы</b>';
-      } else if (priority === 'HIGH') {
-        header = `📊 <b>Хорошая цена найдена</b> • ${time}\n\n`;
-        footer = '\n\n💡 Продолжаю искать варианты в бюджете';
-      } else {
-        header = `📊 <b>Проверка завершена</b> • ${time}\n\n`;
-        footer = '\n\nПродолжаю мониторинг 🔍';
-      }
-
-      const message = `${header}${block.text}${footer}`;
-
-      const sendOpts = {
-        parse_mode: 'HTML',
-        disable_notification: silent,
-        disable_web_page_preview: true
-      };
-
-      // Добавляем inline-кнопку если есть ссылка
-      if (block.searchLink) {
-        const buttonText = priority === 'CRITICAL' ? '🎫 КУПИТЬ СЕЙЧАС' : '🎫 Посмотреть билет';
-        sendOpts.reply_markup = {
-          inline_keyboard: [[
-            { text: buttonText, url: block.searchLink }
-          ]]
-        };
-      }
-
-      await this.bot.sendMessage(chatId, message, sendOpts);
-      await this._logNotification(chatId, routeId, priority, price, 'instant', silent);
-
-      console.log(`${silent ? '🔕' : '🔔'} Алерт [${priority}] отправлен пользователю ${chatId}`);
-    } catch (error) {
-      console.error(`Ошибка отправки алерта [${priority}]:`, error.message);
-    }
-  }
-
-  // ============================================
-  // ФОРМАТИРОВАНИЕ БЛОКА МАРШРУТА (ОБНОВЛЕНО)
-  // ============================================
-
   async formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority = 'MEDIUM') {
     await airportResolver.load();
 
@@ -429,7 +242,7 @@ class NotificationService {
       const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
       // Главное - цена крупно
-      let text = `💎 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n`;
+      let text = `💎 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n\n`;
       text += `<b>${routeName}</b>\n\n`;
 
       // Даты
@@ -446,9 +259,8 @@ class NotificationService {
       const adults = route.adults || 1;
       const children = route.children || 0;
       if (adults > 1 || children > 0) {
-        text += `👥 ${adults} ${adults === 1 ? 'взрослый' : 'взрослых'}`;
-        if (children > 0) text += ` + ${children} ${children === 1 ? 'ребенок' : 'детей'}`;
-        text += '\n';
+        text += `👥 ${adults}`;
+        if (children > 0) text += ` + ${children}`;
       }
 
       // Детали рейса
@@ -468,7 +280,12 @@ class NotificationService {
         text += ' • 🧳';
       }
 
-      text += '\n';
+      text += '\n\n';
+
+      // Средняя цена
+      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
+        text += `📊 Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
+      }
 
       // Экономия (если есть средняя цена)
       if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
@@ -480,11 +297,6 @@ class NotificationService {
         }
       }
 
-      // Средняя цена
-      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
-        text += `📊 Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
-      }
-
       // Сравнение с бюджетом
       if (currentPrice <= userBudget) {
         text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} ✅\n`;
@@ -493,8 +305,6 @@ class NotificationService {
         const overPercent = Math.round((over / userBudget) * 100);
         text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} (+${overPercent}%)\n`;
       }
-
-      text += '\n';
 
       return { text, searchLink: bestResult?.search_link || null };
     }
@@ -535,7 +345,7 @@ class NotificationService {
       // Авиакомпания
       const airlineName = Formatters.getAirlineName(route.airline);
       if (airlineName && airlineName !== 'Любая') {
-        text += `✈️ ${airlineName}`;
+        text += `• ✈️ ${airlineName}`;
       }
 
       text += '\n\n';
@@ -571,7 +381,7 @@ class NotificationService {
     const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
     // Цена
-    let text = `Цена: ${Formatters.formatPrice(currentPrice)}\n`;
+    let text = `${priority === "MEDIUM" ? "🟠" : "🔴"} Цена: ${Formatters.formatPrice(currentPrice)}\n`;
     text += `<b>${routeName}</b>\n\n`;
 
     if (depDate && retDate) {
@@ -616,25 +426,6 @@ class NotificationService {
 
     return { text, searchLink: bestResult?.search_link || null };
   }
-
-  _formatShortDateForProgressBar(dateStr) {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const day = date.getDate();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    return `${day}.${month}`;
-  }
-
-  _formatShortDateRu(dateStr) {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-    return `${date.getDate()} ${months[date.getMonth()]}`;
-  }
-
-  // ============================================
-  // СВОДНЫЙ ОТЧЕТ С INLINE-КНОПКАМИ
-  // ============================================
 
   async sendConsolidatedReport(chatId, routeBlocks, timezone, disableNotification = true) {
     try {
@@ -717,32 +508,6 @@ class NotificationService {
     }
   }
 
-  _splitMessage(text, maxLength) {
-    if (text.length <= maxLength) return [text];
-
-    const chunks = [];
-    const separator = '───────── ✈ ─────────';
-    const parts = text.split(separator);
-
-    let current = '';
-    for (const part of parts) {
-      const addition = current ? separator + part : part;
-      if ((current + addition).length > maxLength && current) {
-        chunks.push(current.trim());
-        current = part;
-      } else {
-        current += addition;
-      }
-    }
-    if (current.trim()) chunks.push(current.trim());
-
-    return chunks.length > 0 ? chunks : [text.substring(0, maxLength)];
-  }
-
-  // ============================================
-  // ДАЙДЖЕСТ
-  // ============================================
-
   async sendDigestForUser(chatId) {
     try {
       const items = await this._getPendingDigestItems(chatId);
@@ -753,7 +518,7 @@ class NotificationService {
       const routeBlocks = [];
 
       for (const item of items) {
-        const route = await this._getRouteById(item.route_id);
+        const route = await UnifiedRoute.findNonArchivedByChatId(chatId);
         if (!route) continue;
 
         const bestResults = await RouteResult.getTopResults(item.route_id, 1);
@@ -776,53 +541,6 @@ class NotificationService {
     }
   }
 
-  _getPendingDigestItems(chatId) {
-    return new Promise((resolve, reject) => {
-      db.all(
-          `SELECT * FROM daily_digest_queue
-           WHERE chat_id = ? AND processed = 0
-           ORDER BY
-             CASE priority
-               WHEN 'CRITICAL' THEN 1
-               WHEN 'HIGH' THEN 2
-               WHEN 'MEDIUM' THEN 3
-               WHEN 'LOW' THEN 4
-               END, created_at DESC`,
-          [chatId],
-          (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows || []);
-          }
-      );
-    });
-  }
-
-  _markDigestProcessed(chatId) {
-    return new Promise((resolve, reject) => {
-      db.run(
-          'UPDATE daily_digest_queue SET processed = 1 WHERE chat_id = ? AND processed = 0',
-          [chatId],
-          (err) => {
-            if (err) return reject(err);
-            resolve();
-          }
-      );
-    });
-  }
-
-  _getRouteById(routeId) {
-    return new Promise((resolve, reject) => {
-      db.get('SELECT * FROM unified_routes WHERE id = ?', [routeId], (err, row) => {
-        if (err) return reject(err);
-        resolve(row || null);
-      });
-    });
-  }
-
-  // ============================================
-  // ПОЛУЧЕНИЕ СТАТИСТИКИ
-  // ============================================
-
   async getUserRoutesStats(chatId) {
     return new Promise((resolve, reject) => {
       db.all(`
@@ -840,7 +558,7 @@ class NotificationService {
           (SELECT check_timestamp FROM route_check_stats WHERE route_id = r.id ORDER BY check_timestamp DESC LIMIT 1) as lastCheckTime
         FROM unified_routes r
           LEFT JOIN route_results rr ON r.id = rr.route_id
-        WHERE r.chat_id = ? AND r.is_paused = 0
+        WHERE r.chat_id = ? AND r.is_paused = 0 AND r.is_archived = 0
         GROUP BY r.id
         ORDER BY r.id
       `, [chatId], async (err, rows) => {
@@ -867,10 +585,6 @@ class NotificationService {
       });
     });
   }
-
-  // ============================================
-  // BROADCAST
-  // ============================================
 
   async sendBroadcastMessages(chatIds, messageText, broadcastId, batchSize = 25) {
     const BroadcastService = require('./BroadcastService');
@@ -916,6 +630,230 @@ class NotificationService {
     await BroadcastService.checkAndMarkComplete(broadcastId);
     return { sent, failed };
   }
+
+  async _sendInstantAlert(chatId, routeId, block, priority, price, timezone, silent) {
+    try {
+      const time = this._formatTimeForUser(new Date(), timezone);
+      let header, footer;
+
+      if (priority === 'CRITICAL') {
+        header = `🔥 <b>СУПЕР ЦЕНА!</b> 🔥\n\n`;
+        footer = '\n\n⚡️ <b>Цена может вырасти в ближайшие часы</b>';
+      } else if (priority === 'HIGH') {
+        header = `📊 <b>Хорошая цена найдена</b> • ${time}\n\n`;
+        footer = '\n\n💡 Продолжаю искать варианты в бюджете';
+      } else {
+        header = `📊 <b>Проверка завершена</b> • ${time}\n\n`;
+        footer = '\n\nПродолжаю мониторинг 🔍';
+      }
+
+      const message = `${header}${block.text}${footer}`;
+
+      const sendOpts = {
+        parse_mode: 'HTML',
+        disable_notification: silent,
+        disable_web_page_preview: true
+      };
+
+      // Добавляем inline-кнопку если есть ссылка
+      if (block.searchLink) {
+        const buttonText = priority === 'CRITICAL' ? '🎫 КУПИТЬ СЕЙЧАС' : '🎫 Посмотреть билет';
+        sendOpts.reply_markup = {
+          inline_keyboard: [[
+            { text: buttonText, url: block.searchLink }
+          ]]
+        };
+      }
+
+      await this.bot.sendMessage(chatId, message, sendOpts);
+      await this._logNotification(chatId, routeId, priority, price, 'instant', silent);
+
+      console.log(`${silent ? '🔕' : '🔔'} Алерт [${priority}] отправлен пользователю ${chatId}`);
+    } catch (error) {
+      console.error(`Ошибка отправки алерта [${priority}]:`, error.message);
+    }
+  }
+
+  async _getUserTimezone(chatId) {
+    return new Promise((resolve) => {
+      db.get(
+          'SELECT timezone FROM user_settings WHERE chat_id = ?',
+          [chatId],
+          (err, row) => {
+            if (err) return resolve('Asia/Yekaterinburg');
+            resolve(row?.timezone || 'Asia/Yekaterinburg');
+          }
+      );
+    });
+  }
+
+  _getPendingDigestItems(chatId) {
+    return new Promise((resolve, reject) => {
+      db.all(
+          `SELECT * FROM daily_digest_queue
+           WHERE chat_id = ? AND processed = 0
+           ORDER BY
+             CASE priority
+               WHEN 'CRITICAL' THEN 1
+               WHEN 'HIGH' THEN 2
+               WHEN 'MEDIUM' THEN 3
+               WHEN 'LOW' THEN 4
+               END, created_at DESC`,
+          [chatId],
+          (err, rows) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+          }
+      );
+    });
+  }
+
+  _markDigestProcessed(chatId) {
+    return new Promise((resolve, reject) => {
+      db.run(
+          'UPDATE daily_digest_queue SET processed = 1 WHERE chat_id = ? AND processed = 0',
+          [chatId],
+          (err) => {
+            if (err) return reject(err);
+            resolve();
+          }
+      );
+    });
+  }
+
+  _splitMessage(text, maxLength) {
+    if (text.length <= maxLength) return [text];
+
+    const chunks = [];
+    const separator = '───────── ✈ ─────────';
+    const parts = text.split(separator);
+
+    let current = '';
+    for (const part of parts) {
+      const addition = current ? separator + part : part;
+      if ((current + addition).length > maxLength && current) {
+        chunks.push(current.trim());
+        current = part;
+      } else {
+        current += addition;
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+
+    return chunks.length > 0 ? chunks : [text.substring(0, maxLength)];
+  }
+
+  _formatShortDateForProgressBar(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const day = date.getDate();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${day}.${month}`;
+  }
+
+  _formatShortDateRu(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+    return `${date.getDate()} ${months[date.getMonth()]}`;
+  }
+
+  _formatTimeForUser(date, timezone) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+  }
+
+  _pluralizeDays(days) {
+    if (days % 10 === 1 && days % 100 !== 11) return 'день';
+    if ([2, 3, 4].includes(days % 10) && ![12, 13, 14].includes(days % 100)) return 'дня';
+    return 'дней';
+  }
+
+  _checkPriorityCooldown(chatId, routeId, priority, hours) {
+    return new Promise((resolve, reject) => {
+      db.get(
+          `SELECT COUNT(*) as cnt FROM notification_log
+         WHERE chat_id = ? AND route_id = ? AND priority = ?
+           AND sent_at > datetime('now', '-' || ? || ' hours')`,
+          [chatId, routeId, priority, hours],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve((row?.cnt || 0) > 0);
+          }
+      );
+    });
+  }
+
+  _getCriticalCountToday(chatId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+          `SELECT COUNT(*) as cnt FROM notification_log
+         WHERE chat_id = ? AND priority = 'CRITICAL'
+           AND sent_at > datetime('now', 'start of day')`,
+          [chatId],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve(row?.cnt || 0);
+          }
+      );
+    });
+  }
+
+  _logNotification(chatId, routeId, priority, price, messageType, silent) {
+    return new Promise((resolve, reject) => {
+      db.run(
+          `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, disable_notification)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+          [chatId, routeId, priority, price, messageType, silent ? 1 : 0],
+          (err) => {
+            if (err) {
+              console.error('Ошибка записи notification_log:', err);
+              reject(err);
+            } else {
+              resolve();
+            }
+          }
+      );
+    });
+  }
+
+  _addToDigestQueue(chatId, routeId, priority, price, analytics, bestResultId) {
+    return new Promise((resolve, reject) => {
+      db.run(
+          `INSERT INTO daily_digest_queue (chat_id, route_id, priority, price, avg_price, historical_min, best_result_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [chatId, routeId, priority, price, analytics?.avgPrice || null, analytics?.minPrice || null, bestResultId || null],
+          (err) => {
+            if (err) {
+              console.error('Ошибка записи в digest queue:', err);
+              reject(err);
+            } else {
+              resolve();
+            }
+          }
+      );
+    });
+  }
+
+  _isNightTime(timezone, settings) {
+    if (!settings || !settings.night_mode) return false;
+
+    const tz = timezone || 'Asia/Yekaterinburg';
+    const now = new Date();
+    const userLocalTime = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: 'numeric',
+      hour12: false
+    }).format(now);
+    const currentHour = parseInt(userLocalTime);
+
+    // Ночь: 23:00 - 08:00
+    return currentHour >= 23 || currentHour < 8;
+  }
+
 }
 
 module.exports = NotificationService;

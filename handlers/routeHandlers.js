@@ -63,7 +63,7 @@ class RouteHandlers {
 
         try {
             await airportResolver.load();
-            const routes = await UnifiedRoute.findByChatId(chatId);
+            const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
 
             if (!routes || routes.length === 0) {
                 const keyboard = {
@@ -382,12 +382,26 @@ class RouteHandlers {
         };
 
         // Получаем популярные аэропорты для России
-        const popularAirports = await this.airportService.getPopularAirports('russia', 6);
+        const popularAirports = await this.airportService.getPopularOriginAirports(chatId, 6);
+
+        // Формируем кнопки по 2 в ряду
+        const airportButtons = [];
+        for (let i = 0; i < popularAirports.length; i += 2) {
+            const row = [];
+            row.push(AirportFormatter.formatButtonText(popularAirports[i]));
+
+            // Добавляем второй аэропорт в ряд, если он есть
+            if (i + 1 < popularAirports.length) {
+                row.push(AirportFormatter.formatButtonText(popularAirports[i + 1]));
+            }
+
+            airportButtons.push(row);
+        }
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ...airportButtons,
                     ['🔍 Поиск аэропорта'],
                     ['🔙 Отмена']
                 ],
@@ -527,12 +541,26 @@ class RouteHandlers {
      */
     async _showOriginStep(chatId) {
         // Получаем популярные аэропорты для России
-        const popularAirports = await this.airportService.getPopularAirports('russia', 6);
+        const popularAirports = await this.airportService.getPopularOriginAirports(chatId, 6);
+
+        // Формируем кнопки по 2 в ряду
+        const airportButtons = [];
+        for (let i = 0; i < popularAirports.length; i += 2) {
+            const row = [];
+            row.push(AirportFormatter.formatButtonText(popularAirports[i]));
+
+            // Добавляем второй аэропорт в ряд, если он есть
+            if (i + 1 < popularAirports.length) {
+                row.push(AirportFormatter.formatButtonText(popularAirports[i + 1]));
+            }
+
+            airportButtons.push(row);
+        }
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ...airportButtons,
                     ['🔍 Поиск аэропорта'],
                     ['🔙 Отмена']
                 ],
@@ -913,12 +941,26 @@ class RouteHandlers {
         const originCity = state.routeData.origin_city || state.routeData.origin;
 
         // Получаем популярные аэропорты для международных направлений
-        const popularAirports = await this.airportService.getPopularAirports('international', 6);
+        const popularAirports = await this.airportService.getPopularDestinationAirports(chatId, 6);
+
+        // Формируем кнопки по 2 в ряду
+        const airportButtons = [];
+        for (let i = 0; i < popularAirports.length; i += 2) {
+            const row = [];
+            row.push(AirportFormatter.formatButtonText(popularAirports[i]));
+
+            // Добавляем второй аэропорт в ряд, если он есть
+            if (i + 1 < popularAirports.length) {
+                row.push(AirportFormatter.formatButtonText(popularAirports[i + 1]));
+            }
+
+            airportButtons.push(row);
+        }
 
         const keyboard = {
             reply_markup: {
                 keyboard: [
-                    ...popularAirports.map(airport => [AirportFormatter.formatButtonText(airport)]),
+                    ...airportButtons,
                     ['🔍 Поиск аэропорта'],
                     ['🔙 Назад']
                 ],
@@ -2437,7 +2479,7 @@ class RouteHandlers {
             // Логируем удаление маршрута
             ActivityService.logEvent(chatId, 'delete_route', { routeId: state.route.id }).catch(err => console.error('Activity log error:', err));
 
-            await UnifiedRoute.delete(state.route.id);
+            await UnifiedRoute.setAsArchived(state.route.id);
             this.bot.sendMessage(
                 chatId,
                 '✅ Маршрут удалён',

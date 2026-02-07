@@ -154,7 +154,11 @@ bot.on('message', async (msg) => {
         bot.sendMessage(
             chatId,
             'Отлично! Вы всегда можете изменить таймзону в разделе Настройки.\n\nНачнем работу! 🚀',
-            getMainMenuKeyboard(chatId)
+            {reply_markup: {
+                keyboard: [['➕ Создать маршрут']],
+                resize_keyboard: true,
+                persistent: true
+              }}
         );
         delete userStates[chatId];
         return;

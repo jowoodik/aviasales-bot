@@ -67,25 +67,39 @@ function getIntervalsFromDB() {
 }
 
 /**
- * Создание cron-задачи для типа подписки
- * @param {string} type - тип подписки
- * @param {number} hours - интервал в часах
+ * Последовательная проверка всех типов подписок по приоритету
  */
-function createSubscriptionJob(type, hours) {
-  const cronExpression = hoursToCron(hours);
-  const job = cron.schedule(cronExpression, async () => {
+async function checkAllSubscriptionsSequentially() {
+  const priorityOrder = ['admin', 'plus', 'free'];
+
+  console.log(`\n🔄 [${formatTimestamp()}] Начало последовательной проверки всех подписок`);
+  const globalStart = new Date();
+
+  for (const type of priorityOrder) {
+    // Проверяем, есть ли этот тип в активных интервалах
+    if (!currentIntervals[type]) {
+      console.log(`  ⏭️  Пропускаем ${type} (не настроен)`);
+      continue;
+    }
+
     const emoji = type === 'admin' ? '🔴' : type === 'plus' ? '🟠' : '🟢';
     const startTime = new Date();
-    console.log(`\n${emoji} [${formatTimestamp(startTime)}] ⚡ CRON TRIGGER: ${type.toUpperCase()} подписка`);
+    console.log(`\n${emoji} [${formatTimestamp(startTime)}] ⚡ СТАРТ: ${type.toUpperCase()} подписка`);
 
-    await checkRoutesBySubscription(type);
+    try {
+      await checkRoutesBySubscription(type);
+    } catch (error) {
+      console.error(`${emoji} ❌ Ошибка при проверке ${type}:`, error);
+    }
 
     const endTime = new Date();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
-    console.log(`${emoji} [${formatTimestamp(endTime)}] ✅ CRON COMPLETE: ${type.toUpperCase()} (${duration}s)`);
-  });
-  activeJobs.set(type, job);
-  console.log(`  • ${type.toUpperCase()} подписка: ${cronExpression} (каждые ${hours} ч.)`);
+    console.log(`${emoji} [${formatTimestamp(endTime)}] ✅ ЗАВЕРШЕНО: ${type.toUpperCase()} (${duration}s)`);
+  }
+
+  const globalEnd = new Date();
+  const totalDuration = ((globalEnd - globalStart) / 1000).toFixed(2);
+  console.log(`\n🏁 [${formatTimestamp(globalEnd)}] Все проверки завершены (общее время: ${totalDuration}s)`);
 }
 
 /**
@@ -142,11 +156,20 @@ async function updateSchedulerJobs() {
     }
     activeJobs.clear();
 
-    // Создаем новые задачи
+    // Находим минимальный интервал для общего крона
+    const intervals = Object.values(newIntervals);
+    const minInterval = Math.min(...intervals);
+
+    // Создаем новый общий cron-job
     console.log('\n📅 Перезапуск планировщика с новыми интервалами:');
-    for (const [type, hours] of Object.entries(newIntervals)) {
-      createSubscriptionJob(type, hours);
-    }
+    console.log(`  • Общий cron: ${hoursToCron(minInterval)} (каждые ${minInterval} ч.)`);
+    console.log(`  • Порядок проверки: admin → plus → free (последовательно)`);
+
+    const mainJob = cron.schedule(hoursToCron(minInterval), async () => {
+      await checkAllSubscriptionsSequentially();
+    });
+
+    activeJobs.set('main', mainJob);
 
     currentIntervals = newIntervals;
   } catch (error) {
@@ -169,13 +192,20 @@ async function initializeScheduler() {
       currentIntervals = { free: 4, plus: 2, admin: 1 };
     }
 
-    // Создаем cron-задачи
-    console.log('✅ Планировщик настроен:');
-    for (const [type, hours] of Object.entries(currentIntervals)) {
-      createSubscriptionJob(type, hours);
-    }
+    // Находим минимальный интервал для общего крона
+    const intervals = Object.values(currentIntervals);
+    const minInterval = Math.min(...intervals);
 
-    console.log(`  • Очистка данных: 0 3 * * * (3:00 ночи)`);
+    console.log('✅ Планировщик настроен:');
+    console.log(`  • Общий cron: ${hoursToCron(minInterval)} (каждые ${minInterval} ч.)`);
+    console.log(`  • Порядок проверки: admin → plus → free (последовательно)`);
+
+    // Создаем один общий cron-job, который запускает последовательную проверку
+    const mainJob = cron.schedule(hoursToCron(minInterval), async () => {
+      await checkAllSubscriptionsSequentially();
+    });
+
+    activeJobs.set('main', mainJob);
 
     // Запускаем периодическую проверку изменений
     setInterval(updateSchedulerJobs, CONFIG_CHECK_INTERVAL);
@@ -186,9 +216,11 @@ async function initializeScheduler() {
     // Fallback на статические интервалы
     console.log('⚠️  Используем fallback интервалы...');
     currentIntervals = { free: 4, plus: 2, admin: 1 };
-    for (const [type, hours] of Object.entries(currentIntervals)) {
-      createSubscriptionJob(type, hours);
-    }
+
+    const mainJob = cron.schedule(hoursToCron(1), async () => {
+      await checkAllSubscriptionsSequentially();
+    });
+    activeJobs.set('main', mainJob);
   }
 }
 

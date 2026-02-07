@@ -205,6 +205,155 @@ class AirportService {
             });
         });
     }
+    /**
+     * Получить популярные аэропорты отправления на основе статистики
+     * @param {number} chatId - ID пользователя
+     * @param {number} limit - количество результатов (по умолчанию 6)
+     * @returns {Promise<Array>}
+     */
+    getPopularOriginAirports(chatId, limit = 6) {
+        return new Promise((resolve, reject) => {
+            const sql = `
+                WITH user_airports AS (
+                    -- Аэропорты текущего пользователя
+                    SELECT DISTINCT
+                        ur.origin as iata_code,
+                        a.airport_name,
+                        a.city_name,
+                        a.city_name_en,
+                        a.country_name,
+                        a.country_code,
+                        a.is_international,
+                        a.airport_type,
+                        a.region,
+                        1 as is_user_airport,
+                        999999 as route_count -- высокий приоритет для сортировки
+                    FROM unified_routes ur
+                             LEFT JOIN airports a ON ur.origin = a.iata_code
+                    WHERE ur.chat_id = ? AND ur.is_paused = 0
+                ),
+                     global_airports AS (
+                         -- Популярные аэропорты всех пользователей
+                         SELECT
+                             ur.origin as iata_code,
+                             a.airport_name,
+                             a.city_name,
+                             a.city_name_en,
+                             a.country_name,
+                             a.country_code,
+                             a.is_international,
+                             a.airport_type,
+                             a.region,
+                             0 as is_user_airport,
+                             COUNT(*) as route_count
+                         FROM unified_routes ur
+                                  LEFT JOIN airports a ON ur.origin = a.iata_code
+                         WHERE ur.is_paused = 0
+                         GROUP BY ur.origin
+                     )
+                SELECT DISTINCT
+                    iata_code,
+                    airport_name,
+                    city_name,
+                    city_name_en,
+                    country_name,
+                    country_code,
+                    is_international,
+                    airport_type,
+                    region,
+                    MAX(is_user_airport) as is_user_airport,
+                    MAX(route_count) as route_count
+                FROM (
+                         SELECT * FROM user_airports
+                         UNION ALL
+                         SELECT * FROM global_airports
+                     )
+                GROUP BY iata_code
+                ORDER BY is_user_airport DESC, route_count DESC, city_name ASC
+                    LIMIT ?
+            `;
+
+            db.all(sql, [chatId, limit], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows || []);
+            });
+        });
+    }
+
+    /**
+     * Получить популярные аэропорты назначения на основе статистики
+     * @param {number} chatId - ID пользователя
+     * @param {number} limit - количество результатов (по умолчанию 6)
+     * @returns {Promise<Array>}
+     */
+    getPopularDestinationAirports(chatId, limit = 6) {
+        return new Promise((resolve, reject) => {
+            const sql = `
+                WITH user_airports AS (
+                    -- Аэропорты текущего пользователя
+                    SELECT DISTINCT
+                        ur.destination as iata_code,
+                        a.airport_name,
+                        a.city_name,
+                        a.city_name_en,
+                        a.country_name,
+                        a.country_code,
+                        a.is_international,
+                        a.airport_type,
+                        a.region,
+                        1 as is_user_airport,
+                        999999 as route_count -- высокий приоритет для сортировки
+                    FROM unified_routes ur
+                             LEFT JOIN airports a ON ur.destination = a.iata_code
+                    WHERE ur.chat_id = ? AND ur.is_paused = 0
+                ),
+                     global_airports AS (
+                         -- Популярные аэропорты всех пользователей
+                         SELECT
+                             ur.destination as iata_code,
+                             a.airport_name,
+                             a.city_name,
+                             a.city_name_en,
+                             a.country_name,
+                             a.country_code,
+                             a.is_international,
+                             a.airport_type,
+                             a.region,
+                             0 as is_user_airport,
+                             COUNT(*) as route_count
+                         FROM unified_routes ur
+                                  LEFT JOIN airports a ON ur.destination = a.iata_code
+                         WHERE ur.is_paused = 0
+                         GROUP BY ur.destination
+                     )
+                SELECT DISTINCT
+                    iata_code,
+                    airport_name,
+                    city_name,
+                    city_name_en,
+                    country_name,
+                    country_code,
+                    is_international,
+                    airport_type,
+                    region,
+                    MAX(is_user_airport) as is_user_airport,
+                    MAX(route_count) as route_count
+                FROM (
+                         SELECT * FROM user_airports
+                         UNION ALL
+                         SELECT * FROM global_airports
+                     )
+                GROUP BY iata_code
+                ORDER BY is_user_airport DESC, route_count DESC, city_name ASC
+                    LIMIT ?
+            `;
+
+            db.all(sql, [chatId, limit], (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows || []);
+            });
+        });
+    }
 
     /**
      * Получить аэропорт или город по IATA коду
