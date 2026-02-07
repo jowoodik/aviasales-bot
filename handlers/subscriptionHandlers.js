@@ -33,7 +33,8 @@ class SubscriptionHandlers {
 
         try {
             const stats = await SubscriptionService.getSubscriptionStats(chatId);
-            let message = `📊 ВАША ПОДПИСКА: ${stats.subscription}\n\n`;
+
+            let message = `📊 *ВАША ПОДПИСКА: ${stats.subscription}*\n\n`;
 
             if (stats.validTo) {
                 const date = new Date(stats.validTo);
@@ -44,10 +45,46 @@ class SubscriptionHandlers {
 
             message += `💰 Стоимость: ${stats.price}\n`;
             message += `⏱ Частота проверок: каждые ${stats.checkInterval} ${this._pluralize(stats.checkInterval, 'час', 'часа', 'часов')}\n\n`;
-            message += `📈 ЛИМИТЫ:\n`;
+
+            message += `📈 *ЛИМИТЫ:*\n`;
             message += `• Фиксированные маршруты: ${stats.currentFixed}/${stats.maxFixed} (осталось ${stats.remainingFixed})\n`;
             message += `• Гибкие маршруты: ${stats.currentFlexible}/${stats.maxFlexible} (осталось ${stats.remainingFlexible})\n`;
             message += `• Макс. комбинаций в гибком: ${stats.maxCombinations}\n\n`;
+
+            // Добавляем информацию об уведомлениях
+            message += `🔔 *СИСТЕМА УВЕДОМЛЕНИЙ:*\n\n`;
+
+            if (stats.subscription === 'Бесплатная') {
+                message += `*Критические находки (🔥):*\n`;
+                message += `• Цена в рамках бюджета\n`;
+                message += `• Исторический минимум\n`;
+                message += `• Супер-скидка 50%+\n`;
+                message += `→ До 3 в день со звуком, остальные в дайджест\n\n`;
+
+                message += `*Хорошие цены (📊):*\n`;
+                message += `• Превышение бюджета до 15%\n`;
+                message += `• Скидка 30-49%\n`;
+                message += `→ Только в дайджесте (10:00)\n\n`;
+
+                message += `*Дайджест:*\n`;
+                message += `• 1 раз в день в 10:00\n`;
+                message += `• Сводка по всем маршрутам\n\n`;
+            } else if (stats.subscription === 'Plus') {
+                message += `*Критические находки (🔥):*\n`;
+                message += `• Мгновенно, без лимитов\n`;
+                message += `• Днём — со звуком\n`;
+                message += `• Ночью (23:00-08:00) — беззвучно\n\n`;
+
+                message += `*Хорошие цены (📊):*\n`;
+                message += `• Раз в 3 часа (беззвучно)\n`;
+                message += `• Ночью в дайджест\n\n`;
+
+                message += `*Дайджест:*\n`;
+                message += `• 2 раза в день: 10:00 и 18:00\n`;
+                message += `• Сводка по всем маршрутам\n\n`;
+            }
+
+            message += `_Настроить уведомления можно в разделе ⚙️ Настройки_\n\n`;
 
             const keyboard = {
                 reply_markup: {
@@ -56,11 +93,13 @@ class SubscriptionHandlers {
             };
 
             if (stats.subscription === 'Бесплатная') {
-                message += `💎 ПОДПИСКА PLUS:\n`;
+                message += `💎 *ПОДПИСКА PLUS:*\n`;
                 message += `• 5 фиксированных маршрутов\n`;
                 message += `• 3 гибких маршрута\n`;
                 message += `• До 50 комбинаций в гибком\n`;
                 message += `• Проверка каждые 2 часа\n`;
+                message += `• Неограниченные критические алерты\n`;
+                message += `• Дайджест 2 раза в день\n`;
                 message += `• Приоритетная поддержка\n`;
                 message += `• Стоимость: 199 ₽/мес\n\n`;
                 message += `Хотите улучшить подписку?`;
@@ -70,7 +109,11 @@ class SubscriptionHandlers {
                 ]);
             }
 
-            this.bot.sendMessage(chatId, message, keyboard.reply_markup.inline_keyboard.length > 0 ? keyboard : {});
+            this.bot.sendMessage(chatId, message, {
+                parse_mode: 'Markdown',
+                ...(keyboard.reply_markup.inline_keyboard.length > 0 ? keyboard : {})
+            });
+
         } catch (error) {
             console.error('Ошибка получения информации о подписке:', error);
             this.bot.sendMessage(chatId, '❌ Ошибка получения информации о подписке');

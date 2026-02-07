@@ -238,7 +238,7 @@ bot.on('message', async (msg) => {
         await routeHandlers.handleShowChart(chatId, state.route);
         return;
       }
-      if (text === '🗺️ Heatmap') {
+      if (text === '🗺️ Тепловая карта цен') {
         await routeHandlers.handleShowHeatmap(chatId, state.route);
         return;
       }
@@ -426,12 +426,12 @@ async function handleHelp(chatId) {
   // Загружаем тарифы из БД
   const subscriptionTypes = await new Promise((resolve, reject) => {
     db.all(
-      'SELECT * FROM subscription_types WHERE is_active = 1 AND name != "admin" ORDER BY price_per_month ASC',
-      [],
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
+        'SELECT * FROM subscription_types WHERE is_active = 1 AND name != "admin" ORDER BY price_per_month ASC',
+        [],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
     );
   });
 
@@ -440,13 +440,22 @@ async function handleHelp(chatId) {
   subscriptionTypes.forEach((sub, index) => {
     const price = sub.price_per_month > 0 ? `${sub.price_per_month} ₽/мес` : 'бесплатно';
     const isDefault = sub.name === 'free' ? ' (по умолчанию)' : '';
-    subscriptionsText += `
-${index + 1}. ${sub.display_name}${isDefault} — ${price}:
-   • ${sub.max_fixed_routes} фиксированных маршрутов
-   • ${sub.max_flexible_routes} гибких маршрутов
-   • До ${sub.max_combinations} комбинаций в гибком маршруте
-   • Проверка каждые ${sub.check_interval_hours} ч.
-`;
+    subscriptionsText += `\n${index + 1}. *${sub.display_name}${isDefault}* — ${price}:\n`;
+    subscriptionsText += `• ${sub.max_fixed_routes} фиксированных + ${sub.max_flexible_routes} гибких маршрутов\n`;
+    subscriptionsText += `• До ${sub.max_combinations} комбинаций\n`;
+    subscriptionsText += `• Проверка каждые ${sub.check_interval_hours} ч.\n`;
+
+    // Добавляем информацию об уведомлениях
+    if (sub.name === 'free') {
+      subscriptionsText += `• 🔥 Критические: до 3/день, остальные в дайджест\n`;
+      subscriptionsText += `• 📊 Хорошие: только в дайджесте\n`;
+      subscriptionsText += `• 📬 Дайджест: 1 раз/день (10:00)\n`;
+    } else if (sub.name === 'plus') {
+      subscriptionsText += `• 🔥 Критические: неограниченно\n`;
+      subscriptionsText += `• 📊 Хорошие: раз в 3 часа\n`;
+      subscriptionsText += `• 📬 Дайджест: 2 раза/день (10:00, 18:00)\n`;
+    }
+    subscriptionsText += `\n`;
   });
 
   const helpText = `
@@ -469,27 +478,34 @@ ${index + 1}. ${sub.display_name}${isDefault} — ${price}:
 *3. Автоматический мониторинг 24/7*
 Создайте маршрут → бот проверяет его каждые 2-4 часа → присылает уведомление, когда цена упала.
 
+*4. Умная система уведомлений*
+🔥 Критические находки — мгновенно
+📊 Хорошие цены — регулярно
+📬 Дайджесты — сводки по всем маршрутам
+🌙 Ночной режим — беззвучные уведомления
+
 *💎 УНИКАЛЬНЫЕ ФИЧИ:*
 
 📊 *График цен* — динамика изменения за всё время мониторинга
 🗺️ *Heatmap* — лучшее время для покупки на основе статистики
 🔔 *Кнопка "Купить"* — переход на Aviasales для покупки
+🎯 *Система приоритетов* — важные находки не потеряются
 
 *💰 ТАРИФЫ:*
 ${subscriptionsText}
+
 ⚠️ *Бот в экспериментальном режиме* — возможны мелкие баги. Буду рад обратной связи!
 
-💳 *Оплата Plus:* напишите @jowoodik — скину реквизиты и активирую подписку.
+💳 *Оплата Plus:* /upgrade или напишите @jowoodik
 
 📞 *Поддержка:* @jowoodik
-`;
+    `;
 
   bot.sendMessage(chatId, helpText, {
     ...getMainMenuKeyboard(chatId),
     parse_mode: 'Markdown'
   });
 }
-
 
 /**
  * ПРОВЕРКА СЕЙЧАС (только для админа)

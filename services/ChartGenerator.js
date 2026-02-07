@@ -1,6 +1,7 @@
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 const DateUtils = require('../utils/dateUtils');
 const { createCanvas, loadImage } = require('canvas');
+const airportResolver = require('../utils/AirportCodeResolver');
 
 class ChartGenerator {
   // constructor() {
@@ -45,6 +46,8 @@ class ChartGenerator {
   async generateHeatmapChart(route, chatId, routeType = 'regular') {
     try {
       console.log(`🔥 Генерация тепловой карты для маршрута #${route.id}`);
+
+      await airportResolver.load();
 
       const priceHistory = routeType === 'regular'
         ? await this.getRegularRoutePriceHistory(route.id, chatId)
@@ -103,7 +106,8 @@ class ChartGenerator {
       ctx.fillStyle = '#000';
       ctx.font = 'bold 32px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText(`Тепловая карта цен: ${route.origin} → ${route.destination}`,
+      const routeName = airportResolver.formatRoute(route.origin, route.destination);
+      ctx.fillText(`Тепловая карта цен: ${routeName}`,
         this.width / 2, margin.top - 80);
 
       ctx.font = '16px Arial';
@@ -371,6 +375,8 @@ class ChartGenerator {
     try {
       console.log(`📊 Генерация графика для маршрута #${route.id}`);
 
+      await airportResolver.load();
+
       const priceHistory = await this.getRegularRoutePriceHistory(route.id, chatId);
 
       if (!priceHistory || priceHistory.length === 0) {
@@ -388,6 +394,7 @@ class ChartGenerator {
 
       const minPrices = Object.values(groupedData).map(g => g.min);
       const maxPrices = Object.values(groupedData).map(g => g.max);
+      const routeName = airportResolver.formatRoute(route.origin, route.destination);
 
       const configuration = {
         type: 'line',
@@ -395,7 +402,7 @@ class ChartGenerator {
           labels: labels,
           datasets: [
             {
-              label: `Мин. цена: ${route.origin} → ${route.destination}`,
+              label: `Мин. цена: ${routeName}`,
               data: minPrices,
               borderColor: 'rgb(34, 139, 34)',
               backgroundColor: 'rgba(34, 139, 34, 0.1)',

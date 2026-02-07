@@ -14,9 +14,18 @@ const bot = new TelegramBot(TOKEN, { polling: false });
 console.log('📅 Планировщик запущен');
 
 // Динамическое управление cron-задачами
-const activeJobs = new Map();           // хранение cron-задач по типу подписки
-let currentIntervals = {};              // текущие интервалы из БД (type -> hours)
-const CONFIG_CHECK_INTERVAL = 60000;    // проверка изменений каждые 60 сек
+const activeJobs = new Map(); // хранение cron-задач по типу подписки
+let currentIntervals = {}; // текущие интервалы из БД (type -> hours)
+const CONFIG_CHECK_INTERVAL = 60000; // проверка изменений каждые 60 сек
+
+// Вспомогательная функция для форматирования времени
+function formatTimestamp(date = new Date()) {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const millis = String(date.getMilliseconds()).padStart(3, '0');
+  return `${hours}:${minutes}:${seconds}.${millis}`;
+}
 
 /**
  * Преобразование часов в cron-выражение
@@ -36,7 +45,7 @@ function hoursToCron(hours) {
 
 /**
  * Загрузка интервалов из таблицы subscription_types
- * @returns {Promise<Object>} объект { type: hours }
+ * @returns {Promise} объект { type: hours }
  */
 function getIntervalsFromDB() {
   return new Promise((resolve, reject) => {
@@ -64,15 +73,19 @@ function getIntervalsFromDB() {
  */
 function createSubscriptionJob(type, hours) {
   const cronExpression = hoursToCron(hours);
-
   const job = cron.schedule(cronExpression, async () => {
     const emoji = type === 'admin' ? '🔴' : type === 'plus' ? '🟠' : '🟢';
-    console.log(`\n${emoji} Запуск проверки для ${type.toUpperCase()} подписки...`);
-    await checkRoutesBySubscription(type);
-  });
+    const startTime = new Date();
+    console.log(`\n${emoji} [${formatTimestamp(startTime)}] ⚡ CRON TRIGGER: ${type.toUpperCase()} подписка`);
 
+    await checkRoutesBySubscription(type);
+
+    const endTime = new Date();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    console.log(`${emoji} [${formatTimestamp(endTime)}] ✅ CRON COMPLETE: ${type.toUpperCase()} (${duration}s)`);
+  });
   activeJobs.set(type, job);
-  console.log(`   • ${type.toUpperCase()} подписка: ${cronExpression} (каждые ${hours} ч.)`);
+  console.log(`  • ${type.toUpperCase()} подписка: ${cronExpression} (каждые ${hours} ч.)`);
 }
 
 /**
@@ -115,11 +128,11 @@ async function updateSchedulerJobs() {
     console.log('\n🔄 Обнаружены изменения интервалов проверки:');
     for (const change of changes) {
       if (change.newHours === null) {
-        console.log(`   • ${change.type}: удален`);
+        console.log(`  • ${change.type}: удален`);
       } else if (change.oldHours === undefined) {
-        console.log(`   • ${change.type}: добавлен (${change.newHours} ч.)`);
+        console.log(`  • ${change.type}: добавлен (${change.newHours} ч.)`);
       } else {
-        console.log(`   • ${change.type}: ${change.oldHours} ч. → ${change.newHours} ч.`);
+        console.log(`  • ${change.type}: ${change.oldHours} ч. → ${change.newHours} ч.`);
       }
     }
 
@@ -136,7 +149,6 @@ async function updateSchedulerJobs() {
     }
 
     currentIntervals = newIntervals;
-
   } catch (error) {
     console.error('❌ Ошибка при обновлении интервалов:', error);
   }
@@ -153,7 +165,7 @@ async function initializeScheduler() {
     currentIntervals = await getIntervalsFromDB();
 
     if (Object.keys(currentIntervals).length === 0) {
-      console.log('⚠️ Не найдено активных типов подписок в БД, используем значения по умолчанию');
+      console.log('⚠️  Не найдено активных типов подписок в БД, используем значения по умолчанию');
       currentIntervals = { free: 4, plus: 2, admin: 1 };
     }
 
@@ -162,7 +174,8 @@ async function initializeScheduler() {
     for (const [type, hours] of Object.entries(currentIntervals)) {
       createSubscriptionJob(type, hours);
     }
-    console.log(`   • Очистка данных: 0 3 * * * (3:00 ночи)`);
+
+    console.log(`  • Очистка данных: 0 3 * * * (3:00 ночи)`);
 
     // Запускаем периодическую проверку изменений
     setInterval(updateSchedulerJobs, CONFIG_CHECK_INTERVAL);
@@ -170,9 +183,8 @@ async function initializeScheduler() {
 
   } catch (error) {
     console.error('❌ Ошибка инициализации планировщика:', error);
-
     // Fallback на статические интервалы
-    console.log('⚠️ Используем fallback интервалы...');
+    console.log('⚠️  Используем fallback интервалы...');
     currentIntervals = { free: 4, plus: 2, admin: 1 };
     for (const [type, hours] of Object.entries(currentIntervals)) {
       createSubscriptionJob(type, hours);
@@ -184,7 +196,8 @@ async function initializeScheduler() {
  * Проверить маршруты для определенного типа подписки
  */
 async function checkRoutesBySubscription(subscriptionType) {
-  console.log(`\n⏰ Запуск проверки для подписки ${subscriptionType}...`);
+  const startTime = new Date();
+  console.log(`\n⏰ [${formatTimestamp(startTime)}] → НАЧАЛО проверки для подписки ${subscriptionType.toUpperCase()}`);
 
   const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
   const notificationService = new NotificationService(bot);
@@ -194,25 +207,29 @@ async function checkRoutesBySubscription(subscriptionType) {
     const users = await getUsersBySubscription(subscriptionType);
 
     if (users.length === 0) {
-      console.log(`Нет активных пользователей с подпиской ${subscriptionType}`);
+      console.log(`  ℹ️  Нет активных пользователей с подпиской ${subscriptionType}`);
       return;
     }
 
-    console.log(`Найдено ${users.length} пользователей с подпиской ${subscriptionType}`);
+    console.log(`  📊 Найдено ${users.length} пользователей с подпиской ${subscriptionType}`);
 
     // Для каждого пользователя проверяем его маршруты
     for (const user of users) {
       try {
         await checkUserRoutes(user.chat_id, monitor, notificationService, subscriptionType);
       } catch (error) {
-        console.error(`Ошибка проверки пользователя ${user.chat_id}:`, error);
+        console.error(`  ❌ Ошибка проверки пользователя ${user.chat_id}:`, error);
       }
     }
 
-    console.log(`✅ Проверка для подписки ${subscriptionType} завершена`);
+    const endTime = new Date();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    console.log(`✅ [${formatTimestamp(endTime)}] ← КОНЕЦ проверки для подписки ${subscriptionType.toUpperCase()} (${duration}s)`);
 
   } catch (error) {
-    console.error(`❌ Ошибка при проверке для подписки ${subscriptionType}:`, error);
+    const endTime = new Date();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    console.error(`❌ [${formatTimestamp(endTime)}] Ошибка при проверке для подписки ${subscriptionType} (${duration}s):`, error);
   }
 }
 
@@ -220,17 +237,21 @@ async function checkRoutesBySubscription(subscriptionType) {
  * Проверить маршруты конкретного пользователя (новый flow с приоритетами)
  */
 async function checkUserRoutes(chatId, monitor, notificationService, subscriptionType) {
+  const userStartTime = new Date();
+  console.log(`    👤 [${formatTimestamp(userStartTime)}] Начало проверки пользователя ${chatId}`);
+
   try {
     await airportResolver.load();
 
     const userRoutes = await getUserActiveRoutes(chatId);
+
     if (userRoutes.length === 0) {
-      console.log(`Пользователь ${chatId}: нет активных маршрутов`);
+      console.log(`    ℹ️  Пользователь ${chatId}: нет активных маршрутов`);
       return;
     }
 
     const userSettings = await getUserSettings(chatId);
-    console.log(`Проверяем ${userRoutes.length} маршрутов для пользователя ${chatId}`);
+    console.log(`    📋 Проверяем ${userRoutes.length} маршрутов для пользователя ${chatId}`);
 
     const routeBlocks = [];
     let sentCriticalOrHigh = 0;
@@ -283,87 +304,58 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
           subscriptionType
         });
 
-        if (routeResult.action === 'sent' || routeResult.action === 'sent_silent') {
+        // 7. Формируем блок для сводного отчета. В отчет попадают только те что не отправили
+        if (routeResult.action !== 'sent' && routeResult.action !== 'sent_silent') {
+          const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
+          routeBlocks.push({ block, route, priority });
+        } else {
           sentCriticalOrHigh++;
         }
 
-        // 7. Формируем блок для сводного отчета
-        const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
-        routeBlocks.push({ block, route, priority });
-
         await updateRouteLastCheck(route.id);
+
       } catch (error) {
-        console.error(`Ошибка проверки маршрута ${route.id}:`, error);
+        console.error(`    ❌ Ошибка проверки маршрута ${route.id}:`, error);
       }
     }
 
-    // Сводный отчет: отправляем если уведомления включены, не ночь, и не все уже отправлены как CRITICAL/HIGH
+    // Сводный отчет: отправляем если уведомления включены, не ночь, и есть что отправлять
     const notificationsEnabled = userSettings?.notifications_enabled !== 0;
     const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
     const isNight = notificationService._isNightTime(timezone, userSettings);
 
-    if (notificationsEnabled && !isNight && sentCriticalOrHigh < routeBlocks.length) {
+    if (routeBlocks.length > 0 && notificationsEnabled && !isNight) {
       try {
         await notificationService.sendConsolidatedReport(chatId, routeBlocks, timezone, true);
       } catch (error) {
-        console.error(`Ошибка отправки сводного отчета пользователю ${chatId}:`, error);
+        console.error(`    ❌ Ошибка отправки сводного отчета пользователю ${chatId}:`, error);
       }
     }
 
-    console.log(`✅ Проверка завершена для пользователя ${chatId}: ${userRoutes.length} маршрутов, ${sentCriticalOrHigh} срочных алертов`);
+    const userEndTime = new Date();
+    const userDuration = ((userEndTime - userStartTime) / 1000).toFixed(2);
+    console.log(`    ✅ [${formatTimestamp(userEndTime)}] Завершено для ${chatId}: ${userRoutes.length} маршрутов, ${sentCriticalOrHigh} срочных алертов (${userDuration}s)`);
 
   } catch (error) {
-    console.error(`❌ Ошибка при проверке пользователя ${chatId}:`, error);
+    const userEndTime = new Date();
+    const userDuration = ((userEndTime - userStartTime) / 1000).toFixed(2);
+    console.error(`    ❌ [${formatTimestamp(userEndTime)}] Ошибка для пользователя ${chatId} (${userDuration}s):`, error);
   }
 }
 
 // ========================================
 // CRON ЗАДАЧИ УПРАВЛЯЮТСЯ ДИНАМИЧЕСКИ
 // ========================================
-// Задачи для подписок создаются в initializeScheduler()
-// и обновляются автоматически при изменении в БД
-
-// ========================================
-// ДОПОЛНИТЕЛЬНЫЕ CRON ЗАДАЧИ
-// ========================================
-
-// Ежедневная полная проверка всех маршрутов в 9 утра
-// cron.schedule('0 9 * * *', async () => {
-//   console.log('\n🌅 Ежедневная полная проверка всех маршрутов...');
-//
-//   try {
-//     const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
-//     const notificationService = new NotificationService(bot);
-//
-//     await monitor.checkAllRoutes();
-//
-//     // Отправляем отчеты пользователям с включенными уведомлениями
-//     const usersWithNotifications = await getUsersWithNotificationOn();
-//
-//     for (const user of usersWithNotifications) {
-//       try {
-//         const userRoutes = await notificationService.getUserRoutesStats(user.chat_id);
-//         await notificationService.sendCheckReport(user.chat_id, userRoutes);
-//       } catch (error) {
-//         console.error(`Ошибка отправки отчета пользователю ${user.chat_id}:`, error);
-//       }
-//     }
-//
-//     console.log('✅ Ежедневная проверка завершена');
-//   } catch (error) {
-//     console.error('❌ Ошибка при ежедневной проверке:', error);
-//   }
-// });
 
 // Очистка старых данных раз в день в 3 ночи
 cron.schedule('0 3 * * *', async () => {
-  console.log('\n🧹 Очистка старых данных...');
+  console.log(`\n🧹 [${formatTimestamp()}] Очистка старых данных...`);
   await cleanupOldData();
 });
 
 // Дайджест: каждый час проверяем, кому пора отправить
 cron.schedule('0 * * * *', async () => {
-  console.log('\n📬 Проверка дайджестов...');
+  console.log(`\n📬 [${formatTimestamp()}] Проверка дайджестов...`);
   await sendDigestsForCurrentHour();
 });
 
@@ -379,7 +371,7 @@ function getUsersBySubscription(subscriptionType) {
     db.all(`
       SELECT DISTINCT us.chat_id
       FROM user_subscriptions us
-      WHERE us.subscription_type = ? 
+      WHERE us.subscription_type = ?
         AND us.is_active = 1
         AND (us.valid_to IS NULL OR us.valid_to > datetime('now'))
     `, [subscriptionType], (err, rows) => {
@@ -395,7 +387,7 @@ function getUsersBySubscription(subscriptionType) {
 function getUserActiveRoutes(chatId) {
   return new Promise((resolve, reject) => {
     db.all(`
-      SELECT * FROM unified_routes 
+      SELECT * FROM unified_routes
       WHERE chat_id = ? AND is_paused = 0
       ORDER BY created_at DESC
     `, [chatId], (err, rows) => {
@@ -411,7 +403,7 @@ function getUserActiveRoutes(chatId) {
 function getUserSettings(chatId) {
   return new Promise((resolve, reject) => {
     db.get(`
-      SELECT * FROM user_settings 
+      SELECT * FROM user_settings
       WHERE chat_id = ?
     `, [chatId], (err, row) => {
       if (err) reject(err);
@@ -474,11 +466,11 @@ function getSubscriptionForUser(chatId) {
 function getUsersWithPendingDigest() {
   return new Promise((resolve, reject) => {
     db.all(
-      'SELECT DISTINCT chat_id FROM daily_digest_queue WHERE processed = 0',
-      (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows || []);
-      }
+        'SELECT DISTINCT chat_id FROM daily_digest_queue WHERE processed = 0',
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
     );
   });
 }
@@ -492,7 +484,7 @@ async function sendDigestsForCurrentHour() {
     const users = await getUsersWithPendingDigest();
 
     if (users.length === 0) {
-      console.log('📬 Нет пользователей с ожидающим дайджестом');
+      console.log('  ℹ️  Нет пользователей с ожидающим дайджестом');
       return;
     }
 
@@ -523,12 +515,14 @@ async function sendDigestsForCurrentHour() {
         if (shouldSend) {
           await notificationService.sendDigestForUser(user.chat_id);
         }
+
       } catch (error) {
-        console.error(`Ошибка дайджеста для пользователя ${user.chat_id}:`, error);
+        console.error(`  ❌ Ошибка дайджеста для пользователя ${user.chat_id}:`, error);
       }
     }
 
-    console.log(`📬 Проверка дайджестов завершена (${users.length} пользователей)`);
+    console.log(`  ✅ Проверка дайджестов завершена (${users.length} пользователей)`);
+
   } catch (error) {
     console.error('❌ Ошибка при отправке дайджестов:', error);
   }
@@ -543,37 +537,37 @@ async function cleanupOldData() {
 
     // Удаляем результаты проверок старше 30 дней
     db.run(`
-      DELETE FROM route_results 
+      DELETE FROM route_results
       WHERE found_at < datetime('now', '-30 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки route_results:', err);
+        console.error('  ❌ Ошибка очистки route_results:', err);
       } else {
-        console.log('✅ Очищены старые route_results');
+        console.log('  ✅ Очищены старые route_results');
       }
     });
 
     // Удаляем аналитику старше 90 дней
     db.run(`
-      DELETE FROM price_analytics 
+      DELETE FROM price_analytics
       WHERE found_at < datetime('now', '-90 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки price_analytics:', err);
+        console.error('  ❌ Ошибка очистки price_analytics:', err);
       } else {
-        console.log('✅ Очищены старые price_analytics');
+        console.log('  ✅ Очищены старые price_analytics');
       }
     });
 
     // Удаляем статистику проверок старше 7 дней
     db.run(`
-      DELETE FROM route_check_stats 
+      DELETE FROM route_check_stats
       WHERE check_timestamp < datetime('now', '-7 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки route_check_stats:', err);
+        console.error('  ❌ Ошибка очистки route_check_stats:', err);
       } else {
-        console.log('✅ Очищены старые route_check_stats');
+        console.log('  ✅ Очищены старые route_check_stats');
       }
     });
 
@@ -583,9 +577,9 @@ async function cleanupOldData() {
       WHERE check_timestamp < datetime('now', '-7 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки combination_check_results:', err);
+        console.error('  ❌ Ошибка очистки combination_check_results:', err);
       } else {
-        console.log('✅ Очищены старые combination_check_results');
+        console.log('  ✅ Очищены старые combination_check_results');
       }
     });
 
@@ -595,9 +589,9 @@ async function cleanupOldData() {
       WHERE sent_at < datetime('now', '-30 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки notification_log:', err);
+        console.error('  ❌ Ошибка очистки notification_log:', err);
       } else {
-        console.log('✅ Очищены старые notification_log');
+        console.log('  ✅ Очищены старые notification_log');
       }
     });
 
@@ -607,14 +601,14 @@ async function cleanupOldData() {
       WHERE processed = 1 AND created_at < datetime('now', '-7 days')
     `, (err) => {
       if (err) {
-        console.error('Ошибка очистки daily_digest_queue:', err);
+        console.error('  ❌ Ошибка очистки daily_digest_queue:', err);
       } else {
-        console.log('✅ Очищены старые daily_digest_queue');
+        console.log('  ✅ Очищены старые daily_digest_queue');
       }
     });
 
   } catch (error) {
-    console.error('Ошибка при очистке данных:', error);
+    console.error('❌ Ошибка при очистке данных:', error);
   }
 }
 
@@ -627,7 +621,7 @@ initializeScheduler();
 
 // Функция для ручного запуска проверки
 async function runManualCheck(subscriptionType) {
-  console.log(`\n🔧 Ручной запуск проверки для подписки ${subscriptionType}...`);
+  console.log(`\n🔧 [${formatTimestamp()}] Ручной запуск проверки для подписки ${subscriptionType}...`);
   await checkRoutesBySubscription(subscriptionType);
 }
 
@@ -635,13 +629,13 @@ async function runManualCheck(subscriptionType) {
 module.exports = {
   runManualCheck,
   checkRoutesBySubscription,
-  updateSchedulerJobs,      // для принудительного обновления интервалов
-  getIntervalsFromDB,       // для диагностики
-  activeJobs                // для мониторинга активных задач
+  updateSchedulerJobs, // для принудительного обновления интервалов
+  getIntervalsFromDB, // для диагностики
+  activeJobs // для мониторинга активных задач
 };
 
 // Держим процесс активным
 process.on('SIGINT', () => {
-  console.log('\n⚠️ Остановка планировщика...');
+  console.log('\n⚠️  Остановка планировщика...');
   process.exit(0);
 });

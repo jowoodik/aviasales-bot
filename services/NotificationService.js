@@ -397,7 +397,8 @@ class NotificationService {
   // ФОРМАТИРОВАНИЕ БЛОКА МАРШРУТА (ОБНОВЛЕНО)
   // ============================================
 
-  formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority = 'MEDIUM') {
+  async formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority = 'MEDIUM') {
+    await airportResolver.load();
     const currentPrice = bestResult?.total_price;
     const userBudget = route.threshold_price;
 
@@ -426,7 +427,9 @@ class NotificationService {
       const depDate = bestResult.departure_date ? this._formatShortDateForProgressBar(bestResult.departure_date) : null;
       const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
-      let text = `<b>${routeName}</b>\n`;
+      // Главное - цена крупно
+      let text = `💎 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n`;
+      text += `<b>${routeName}</b>\n\n`;
 
       // Даты
       if (depDate && retDate) {
@@ -447,37 +450,6 @@ class NotificationService {
         text += '\n';
       }
 
-      text += '\n';
-
-      // Главное - цена крупно
-      text += `💎 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n\n`;
-
-      // Экономия (если есть средняя цена)
-      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
-        const savings = analytics.avgPrice - currentPrice;
-        const savingsPercent = Math.round((savings / analytics.avgPrice) * 100);
-
-        if (savings > 0) {
-          text += `<b>💰 Экономия ${Formatters.formatPrice(savings)} (-${savingsPercent}%)</b>\n`;
-        }
-      }
-
-      // Сравнение с бюджетом
-      if (currentPrice <= userBudget) {
-        text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} ✅\n`;
-      } else {
-        const over = currentPrice - userBudget;
-        const overPercent = Math.round((over / userBudget) * 100);
-        text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} (+${overPercent}%)\n`;
-      }
-
-      // Средняя цена
-      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
-        text += `📊 Обычная цена: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
-      }
-
-      text += '\n';
-
       // Детали рейса
       const airlineName = Formatters.getAirlineName(route.airline);
       text += '✈️ ';
@@ -495,6 +467,34 @@ class NotificationService {
         text += ' • 🧳';
       }
 
+      text += '\n';
+
+      // Экономия (если есть средняя цена)
+      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
+        const savings = analytics.avgPrice - currentPrice;
+        const savingsPercent = Math.round((savings / analytics.avgPrice) * 100);
+
+        if (savings > 0) {
+          text += `<b>💰 Экономия ${Formatters.formatPrice(savings)} (-${savingsPercent}% к средней цене)</b>\n`;
+        }
+      }
+
+      // Средняя цена
+      if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
+        text += `📊 Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
+      }
+
+      // Сравнение с бюджетом
+      if (currentPrice <= userBudget) {
+        text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} ✅\n`;
+      } else {
+        const over = currentPrice - userBudget;
+        const overPercent = Math.round((over / userBudget) * 100);
+        text += `🎯 Ваш бюджет: ${Formatters.formatPrice(userBudget)} (+${overPercent}%)\n`;
+      }
+
+      text += '\n';
+
       return { text, searchLink: bestResult?.search_link || null };
     }
 
@@ -503,7 +503,9 @@ class NotificationService {
       const depDate = bestResult.departure_date ? this._formatShortDateForProgressBar(bestResult.departure_date) : null;
       const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
-      let text = `<b>${routeName}</b>\n`;
+      // Цена
+      let text = `💰 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n`;
+      text += `<b>${routeName}</b>\n\n`;
 
       // Даты
       if (depDate && retDate) {
@@ -528,10 +530,14 @@ class NotificationService {
         text += ' • 1 пересадка';
       }
       if (route.baggage) text += ' • 🧳';
-      text += '\n\n';
 
-      // Цена
-      text += `💰 <b>${Formatters.formatPrice(currentPrice)}</b> за всех\n\n`;
+      // Авиакомпания
+      const airlineName = Formatters.getAirlineName(route.airline);
+      if (airlineName && airlineName !== 'Любая') {
+        text += `✈️ ${airlineName}`;
+      }
+
+      text += '\n\n';
 
       // Сравнения
       const budgetDiff = currentPrice - userBudget;
@@ -556,12 +562,6 @@ class NotificationService {
 
       text += '\n';
 
-      // Авиакомпания
-      const airlineName = Formatters.getAirlineName(route.airline);
-      if (airlineName && airlineName !== 'Любая') {
-        text += `✈️ ${airlineName}`;
-      }
-
       return { text, searchLink: bestResult?.search_link || null };
     }
 
@@ -569,7 +569,9 @@ class NotificationService {
     const depDate = bestResult.departure_date ? this._formatShortDateForProgressBar(bestResult.departure_date) : null;
     const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
-    let text = `<b>${routeName}</b>\n`;
+    // Цена
+    let text = `Цена: ${Formatters.formatPrice(currentPrice)}\n`;
+    text += `<b>${routeName}</b>\n\n`;
 
     if (depDate && retDate) {
       text += `📅 ${depDate}–${retDate}\n`;
@@ -582,9 +584,6 @@ class NotificationService {
     text += `👥 ${adults}`;
     if (children > 0) text += `+${children}`;
     text += '\n\n';
-
-    // Цена
-    text += `Цена: ${Formatters.formatPrice(currentPrice)}\n`;
 
     // Сравнение с бюджетом
     const budgetDiff = currentPrice - userBudget;

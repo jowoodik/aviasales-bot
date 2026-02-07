@@ -7,6 +7,7 @@ const AirportService = require('../services/AirportService');
 const AirportFormatter = require('../utils/airportFormatter');
 const SubscriptionService = require('../services/SubscriptionService');
 const ActivityService = require('../services/ActivityService');
+const airportResolver = require('../utils/AirportCodeResolver');
 
 class RouteHandlers {
     constructor(bot, userStates) {
@@ -61,6 +62,7 @@ class RouteHandlers {
         ActivityService.logEvent(chatId, 'view_routes').catch(err => console.error('Activity log error:', err));
 
         try {
+            await airportResolver.load();
             const routes = await UnifiedRoute.findByChatId(chatId);
 
             if (!routes || routes.length === 0) {
@@ -147,7 +149,8 @@ class RouteHandlers {
                     bestPriceText = 'Нет данных';
                 }
 
-                message += `${statusIcon} ${i + 1}. ✈️ ${r.origin} → ${r.destination}\n`;
+                const routeName = airportResolver.formatRoute(r.origin, r.destination);
+                message += `${statusIcon} ${i + 1}. ✈️ ${routeName}\n`;
                 message += `   📅 ${dateStr}\n`;
                 message += `   🏢 ${airlineName} | 👥 ${passengers}\n`;
                 message += `   ${baggageIcon} ${baggageText} | 🔄 ${stopsText}\n`;
@@ -160,17 +163,17 @@ class RouteHandlers {
                     const end = DateUtils.formatDateDisplay(r.departure_end).substring(0, 5);
                     const airline = r.airline || 'Все';
                     const passCount = r.children > 0 ? `${r.adults}+${r.children}` : `${r.adults}`;
-                    buttonText = `${i + 1}. ${r.origin}→${r.destination} ${start}-${end} ${airline} ${passCount} ${baggageIcon}`;
+                    buttonText = `${i + 1}. ${routeName} ${start}-${end} ${airline} ${passCount} ${baggageIcon}`;
                 } else if (r.has_return) {
                     const dep = DateUtils.formatDateDisplay(r.departure_date).substring(0, 5);
                     const ret = DateUtils.formatDateDisplay(r.return_date).substring(0, 5);
                     const airline = r.airline || 'Все';
                     const passCount = r.children > 0 ? `${r.adults}+${r.children}` : `${r.adults}`;
-                    buttonText = `${i + 1}. ${r.origin}→${r.destination} ${dep}-${ret} ${airline} ${passCount} ${baggageIcon}`;
+                    buttonText = `${i + 1}. ${routeName} ${dep}-${ret} ${airline} ${passCount} ${baggageIcon}`;
                 } else {
                     const dep = DateUtils.formatDateDisplay(r.departure_date).substring(0, 5);
                     const airline = r.airline || 'Все';
-                    buttonText = `${i + 1}. ${r.origin}→${r.destination} ${dep}→ ${airline} ${r.adults} ${baggageIcon}`;
+                    buttonText = `${i + 1}. ${routeName} ${dep}→ ${airline} ${r.adults} ${baggageIcon}`;
                 }
 
                 if (r.is_paused) {
@@ -227,6 +230,7 @@ class RouteHandlers {
         ActivityService.logEvent(chatId, 'view_route_detail', { routeIndex }).catch(err => console.error('Activity log error:', err));
 
         try {
+            await airportResolver.load();
             const state = this.userStates[chatId];
 
             // Поддержка возврата из графика/heatmap - используем state.route напрямую
@@ -241,7 +245,8 @@ class RouteHandlers {
             }
 
             // Формируем детальную информацию
-            let message = `✈️ ${route.origin} → ${route.destination}\n\n`;
+            const routeName = airportResolver.formatRoute(route.origin, route.destination);
+            let message = `✈️ <b>${routeName}</b>\n\n`;
 
             // Даты
             if (route.is_flexible) {
@@ -285,26 +290,29 @@ class RouteHandlers {
                 message += '\n⏸️ Маршрут на паузе\n';
             }
 
-            message += '\n🏆 ЛУЧШИЕ 3 ЦЕНЫ:\n\n';
+            // Отправляем основное сообщение
+            await this.bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
 
             // Получаем топ-3 результата
             const topResults = await RouteResult.getTopResults(route.id, 3);
 
             if (topResults.length === 0) {
-                message += 'Пока нет данных о ценах.\nБот начнет проверку автоматически.';
-                await this.bot.sendMessage(chatId, message);
+                await this.bot.sendMessage(
+                    chatId,
+                    '📊 <b>ЛУЧШИЕ ПРЕДЛОЖЕНИЯ:</b>\n\nПока нет данных о ценах.\nБот начнет проверку автоматически.',
+                    { parse_mode: 'HTML' }
+                );
             } else {
-                // Отправляем основное сообщение с деталями маршрута
-                await this.bot.sendMessage(chatId, message);
+                // Отправляем заголовок
+                await this.bot.sendMessage(chatId, '📊 <b>ЛУЧШИЕ 3 ПРЕДЛОЖЕНИЯ:</b>', { parse_mode: 'HTML', disable_notification: true });
 
-                // Отправляем каждое предложение отдельным сообщением с улучшенной информацией
+                // Отправляем каждое предложение отдельным сообщением в формате отчёта
                 for (let i = 0; i < topResults.length; i++) {
                     const result = topResults[i];
                     const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
                     const timeAgo = result.found_at ? Formatters.formatTimeAgo(result.found_at) : 'недавно';
-                    const airlineName = result.airline ? Formatters.getAirlineName(result.airline) : 'Любая';
 
-                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, route.currency)}* - ${airlineName}\n`;
+                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, route.currency)}*\n`;
                     resultMessage += `📅 ${DateUtils.formatDateDisplay(result.departure_date)}`;
 
                     if (result.return_date) {
@@ -318,19 +326,20 @@ class RouteHandlers {
 
                     if (result.total_price <= route.threshold_price) {
                         const savings = route.threshold_price - result.total_price;
-                        resultMessage += `\n🔥 *НИЖЕ ПОРОГА!* Экономия: ${Formatters.formatPrice(savings, route.currency)}`;
+                        resultMessage += `\n\n🔥 *НИЖЕ ПОРОГА!* Экономия: ${Formatters.formatPrice(savings, route.currency)}`;
                     }
 
+                    const isBelowThreshold = result.total_price <= route.threshold_price;
                     const linkKeyboard = {
                         inline_keyboard: [[
-                            { text: '🔗 Купить билет', url: result.search_link }
+                            { text: i === 0 && isBelowThreshold ? '🎫 КУПИТЬ СЕЙЧАС' : '🎫 Посмотреть билет', url: result.search_link }
                         ]]
                     };
 
                     await this.bot.sendMessage(
                         chatId,
                         resultMessage,
-                        { parse_mode: 'Markdown', reply_markup: linkKeyboard }
+                        { parse_mode: 'Markdown', reply_markup: linkKeyboard, disable_notification: true }
                     );
 
                     await new Promise(resolve => setTimeout(resolve, 300));
@@ -342,7 +351,7 @@ class RouteHandlers {
                 reply_markup: {
                     keyboard: [
                         ['✏️ Редактировать'],
-                        ['📊 График цен', '🗺️ Heatmap'],
+                        ['📊 График цен', '🗺️ Тепловая карта цен'],
                         ['🗑️ Удалить'],
                         ['◀️ Назад к маршрутам']
                     ],
@@ -512,7 +521,6 @@ class RouteHandlers {
             keyboard
         );
     }
-
 
     /**
      * ПОКАЗАТЬ ШАГ ВЫБОРА АЭРОПОРТА ВЫЛЕТА (повторно)
@@ -1035,7 +1043,6 @@ class RouteHandlers {
 
         return true;
     }
-
 
     async _handleDepartureDateStep(chatId, text, state) {
         if (text === '🔙 Назад') {
@@ -2079,7 +2086,7 @@ class RouteHandlers {
         this.bot.sendMessage(
             chatId,
             `📍 Шаг ${totalSteps}/${totalSteps}: Ваш бюджет\n\n` +
-            `Если найдутся билеты ниже вашего бюджета вы получите уведомление\n` +
+            `Вы получите уведомление если найдутся билеты ниже вашего бюджета\n` +
             `Например: 50000`,
             keyboard
         );
@@ -2457,7 +2464,7 @@ class RouteHandlers {
             const keyboard = {
                 reply_markup: {
                     keyboard: [
-                        ['📊 График цен', '🗺️ Heatmap'],
+                        ['📊 График цен', '🗺️ Тепловая карта цен'],
                         ['◀️ Назад к маршруту']
                     ],
                     resize_keyboard: true,
@@ -2505,7 +2512,7 @@ class RouteHandlers {
             const keyboard = {
                 reply_markup: {
                     keyboard: [
-                        ['📊 График цен', '🗺️ Heatmap'],
+                        ['📊 График цен', '🗺️ Тепловая карта цен'],
                         ['◀️ Назад к маршруту']
                     ],
                     resize_keyboard: true,
@@ -2553,6 +2560,14 @@ class RouteHandlers {
             return two;
         }
         return five;
+    }
+
+    _formatShortDate(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        const day = date.getDate();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        return `${day}.${month}`;
     }
 }
 
