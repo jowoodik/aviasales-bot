@@ -33,7 +33,7 @@ const paymentNotifier = new PaymentNotificationService(bot);
 // Проверяем каждую минуту
 setInterval(async () => {
     await paymentNotifier.checkAndNotify();
-}, 60 * 1000); // 1 минута
+}, 5 * 1000); // 5 cекунд
 
 // Проверяем сразу при старте (через 5 секунд)
 setTimeout(async () => {
