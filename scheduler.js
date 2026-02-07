@@ -306,7 +306,7 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
 
         // 7. Формируем блок для сводного отчета. В отчет попадают только те что не отправили
         if (routeResult.action !== 'sent' && routeResult.action !== 'sent_silent') {
-          const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
+          const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
           routeBlocks.push({ block, route, priority });
         } else {
           sentCriticalOrHigh++;

@@ -535,7 +535,7 @@ async function handleCheckNow(chatId) {
       const bestResult = bestResults[0] || null;
       const analytics = await notificationService.getRouteAnalytics(stat.routeId);
       const checkStats = await notificationService.getRouteCheckStats(stat.routeId);
-      const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
+      const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
       routeBlocks.push({ block, route, priority: stat.foundCheaper ? 'CRITICAL' : 'LOW' });
     }
 

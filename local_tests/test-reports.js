@@ -189,7 +189,7 @@ async function testUserReport(chatId) {
     }
 
     // Формируем блок
-    const block = notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
+    const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
     routeBlocks.push({ block, route, priority });
   }
 

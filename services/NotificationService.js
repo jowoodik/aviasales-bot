@@ -284,7 +284,7 @@ class NotificationService {
     if (priority === 'CRITICAL') {
       if (isNight) {
         // Ночью CRITICAL приходит беззвучно
-        const block = this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
+        const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
         await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, true);
         return { action: 'sent_silent', priority };
       }
@@ -297,7 +297,7 @@ class NotificationService {
         }
       }
 
-      const block = this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
+      const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
       await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, false);
       return { action: 'sent', priority };
     }
@@ -324,7 +324,7 @@ class NotificationService {
         return { action: 'digest', priority };
       }
 
-      const block = this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
+      const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
       await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, true);
       return { action: 'sent_silent', priority };
     }
@@ -399,6 +399,7 @@ class NotificationService {
 
   async formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority = 'MEDIUM') {
     await airportResolver.load();
+
     const currentPrice = bestResult?.total_price;
     const userBudget = route.threshold_price;
 
@@ -760,7 +761,7 @@ class NotificationService {
         const analytics = { avgPrice: item.avg_price, minPrice: item.historical_min, dataPoints: 5 };
         const checkStats = await this.getRouteCheckStats(item.route_id);
 
-        const block = this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, item.priority);
+        const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, item.priority);
         routeBlocks.push({ block, route, priority: item.priority });
       }
 
