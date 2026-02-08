@@ -1380,6 +1380,114 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
   }
 });
 
+// API: Статистика монетизации (клики по партнерским ссылкам)
+app.get('/admin/api/monetization-stats', requireAdmin, async (req, res) => {
+  try {
+    const period = req.query.period || '30'; // дней
+
+    // Общее количество кликов
+    const totalClicks = await new Promise((resolve) => {
+      db.get(`
+        SELECT COUNT(*) as count
+        FROM user_activity_log
+        WHERE event_type = 'affiliate_click'
+          AND created_at >= datetime('now', '-${period} days')
+      `, (err, row) => {
+        resolve(row?.count || 0);
+      });
+    });
+
+    // Клики на пользователя
+    const clicksPerUser = await new Promise((resolve) => {
+      db.get(`
+        SELECT
+          COUNT(DISTINCT chat_id) as users,
+          COUNT(*) as clicks
+        FROM user_activity_log
+        WHERE event_type = 'affiliate_click'
+          AND created_at >= datetime('now', '-${period} days')
+      `, (err, row) => {
+        if (!row || row.users === 0) return resolve(0);
+        resolve((row.clicks / row.users).toFixed(2));
+      });
+    });
+
+    // Топ направления по кликам
+    const topRoutesByClicks = await new Promise((resolve) => {
+      db.all(`
+        SELECT
+          JSON_EXTRACT(event_data, '$.origin') as origin,
+          JSON_EXTRACT(event_data, '$.destination') as destination,
+          COUNT(*) as clicks,
+          AVG(CAST(JSON_EXTRACT(event_data, '$.price') AS REAL)) as avgPrice
+        FROM user_activity_log
+        WHERE event_type = 'affiliate_click'
+          AND created_at >= datetime('now', '-${period} days')
+          AND event_data IS NOT NULL
+        GROUP BY origin, destination
+        ORDER BY clicks DESC
+        LIMIT 10
+      `, (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    // CTR (клики / уведомления)
+    const ctr = await new Promise((resolve) => {
+      db.get(`
+        SELECT
+          (SELECT COUNT(*) FROM user_activity_log
+           WHERE event_type = 'affiliate_click'
+           AND created_at >= datetime('now', '-${period} days')) * 100.0 /
+          NULLIF((SELECT COUNT(*) FROM notification_log
+           WHERE created_at >= datetime('now', '-${period} days')), 0) as ctr
+      `, (err, row) => {
+        resolve(row?.ctr ? parseFloat(row.ctr.toFixed(2)) : 0);
+      });
+    });
+
+    // Клики по дням (для графика)
+    const clicksByDay = await new Promise((resolve) => {
+      db.all(`
+        SELECT
+          DATE(created_at) as date,
+          COUNT(*) as clicks
+        FROM user_activity_log
+        WHERE event_type = 'affiliate_click'
+          AND created_at >= datetime('now', '-${period} days')
+        GROUP BY DATE(created_at)
+        ORDER BY date ASC
+      `, (err, rows) => {
+        resolve(rows || []);
+      });
+    });
+
+    // Количество уведомлений (для расчета CTR)
+    const totalNotifications = await new Promise((resolve) => {
+      db.get(`
+        SELECT COUNT(*) as count
+        FROM notification_log
+        WHERE created_at >= datetime('now', '-${period} days')
+      `, (err, row) => {
+        resolve(row?.count || 0);
+      });
+    });
+
+    res.json({
+      totalClicks,
+      clicksPerUser: parseFloat(clicksPerUser),
+      ctr,
+      topRoutesByClicks,
+      clicksByDay,
+      totalNotifications,
+      period: parseInt(period)
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки статистики монетизации:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Детали пользователя
 app.get('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
   try {

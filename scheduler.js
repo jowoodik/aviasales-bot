@@ -466,21 +466,6 @@ function getUserSettings(chatId) {
 }
 
 /**
- * Получить пользователей с включенными уведомлениями о проверках
- */
-function getUsersWithNotificationOn() {
-  return new Promise((resolve, reject) => {
-    db.all(
-        'SELECT chat_id FROM user_settings WHERE notify_on_check = 1',
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-    );
-  });
-}
-
-/**
  * Обновить время последней проверки маршрута
  */
 function updateRouteLastCheck(routeId) {
@@ -493,23 +478,6 @@ function updateRouteLastCheck(routeId) {
           else resolve();
         }
     );
-  });
-}
-
-/**
- * Получить тип подписки пользователя
- */
-function getSubscriptionForUser(chatId) {
-  return new Promise((resolve, reject) => {
-    db.get(`
-      SELECT us.subscription_type
-      FROM user_subscriptions us
-      WHERE us.chat_id = ? AND us.is_active = 1
-        AND (us.valid_to IS NULL OR us.valid_to > datetime('now'))
-    `, [chatId], (err, row) => {
-      if (err) reject(err);
-      else resolve(row?.subscription_type || 'free');
-    });
   });
 }
 

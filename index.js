@@ -188,11 +188,6 @@ bot.on('message', async (msg) => {
       return;
     }
 
-    if (text === '✅ Проверить сейчас' && chatId === 341508411) {
-      await handleCheckNow(chatId);
-      return;
-    }
-
     if (text === '🏠 Главное меню') {
       // Логируем возврат в главное меню
       ActivityService.logEvent(chatId, 'main_menu').catch(err => console.error('Activity log error:', err));
@@ -368,13 +363,6 @@ bot.onText(/\/upgrade/, (msg) => {
   subscriptionHandlers.handleUpgrade(chatId);
 });
 
-bot.onText(/\/admin_check/, (msg) => {
-  const chatId = msg.chat.id;
-  if (chatId === 341508411) {
-    handleCheckNow(chatId);
-  }
-});
-
 bot.on('message', (msg) => {
   console.log('[UPDATE] message:', msg.chat.id, msg.text);
 });
@@ -413,6 +401,63 @@ bot.on('callback_query', async (callbackQuery) => {
         await bot.deleteMessage(chatId, messageId);
         await subscriptionHandlers.handleSubscriptionInfo(chatId);
       }
+    }
+
+    // Обработка кликов по партнерским ссылкам Aviasales
+    else if (data.startsWith('aff:')) {
+      // Формат: aff:routeId:resultId:price
+      const parts = data.split(':');
+      const routeId = parseInt(parts[1]);
+      const resultId = parseInt(parts[2]);
+      const price = parseInt(parts[3]);
+
+      // Получаем ссылку и информацию о маршруте
+      db.get(
+        `SELECT rr.search_link, rr.departure_date, rr.return_date,
+                ur.origin, ur.destination
+         FROM route_results rr
+         JOIN unified_routes ur ON rr.route_id = ur.id
+         WHERE rr.id = ?`,
+        [resultId],
+        async (err, result) => {
+          if (err || !result) {
+            console.error('Ошибка получения search_link:', err);
+            await bot.answerCallbackQuery(callbackQuery.id, {
+              text: '❌ Ссылка не найдена'
+            });
+            return;
+          }
+
+          // Логируем клик с полной информацией
+          ActivityService.logEvent(chatId, 'affiliate_click', {
+            routeId,
+            resultId,
+            price,
+            origin: result.origin,
+            destination: result.destination,
+            departureDate: result.departure_date,
+            returnDate: result.return_date
+          }).catch(err => console.error('Activity log error:', err));
+
+          // Отвечаем на callback
+          await bot.answerCallbackQuery(callbackQuery.id, {
+            text: '✈️ Открываю Aviasales...'
+          });
+
+          // Отправляем сообщение с кликабельной ссылкой
+          const linkMessage = `🎫 <b>Ваша ссылка на билет готова!</b>\n\n` +
+            `<b>${result.origin} → ${result.destination}</b>\n` +
+            `💰 Цена: ${price.toLocaleString('ru-RU')} ₽\n\n` +
+            `👉 <a href="${result.search_link}">Открыть на Aviasales</a>`;
+
+          await bot.sendMessage(chatId, linkMessage, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+          });
+
+          console.log(`🔗 Партнерский клик: chatId=${chatId}, ${result.origin}→${result.destination}, ${price}₽`);
+        }
+      );
     }
 
   } catch (error) {
@@ -499,49 +544,6 @@ ${subscriptionsText}
     ...getMainMenuKeyboard(chatId),
     parse_mode: 'Markdown'
   });
-}
-
-/**
- * ПРОВЕРКА СЕЙЧАС (только для админа)
- */
-async function handleCheckNow(chatId) {
-  try {
-    bot.sendMessage(chatId, '🔍 Запускаю проверку всех маршрутов...\n⏳ Это может занять несколько минут.');
-
-    const UnifiedMonitor = require('./services/UnifiedMonitor');
-    const NotificationService = require('./services/NotificationService');
-    const RouteResult = require('./models/RouteResult');
-    const airportResolver = require('./utils/AirportCodeResolver');
-    const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
-    const notificationService = new NotificationService(bot);
-
-    await airportResolver.load();
-    await monitor.checkAllRoutes();
-
-    // Формируем сводный отчёт в новом формате
-    const stats = await notificationService.getUserRoutesStats(chatId);
-    const timezone = await notificationService._getUserTimezone(chatId);
-    const routeBlocks = [];
-
-    for (const stat of stats) {
-      const route = { id: stat.routeId, origin: stat.origin, destination: stat.destination, threshold_price: stat.thresholdPrice, is_flexible: stat.isFlexible };
-      const bestResults = await RouteResult.getTopResults(stat.routeId, 1);
-      const bestResult = bestResults[0] || null;
-      const analytics = await notificationService.getRouteAnalytics(stat.routeId);
-      const checkStats = await notificationService.getRouteCheckStats(stat.routeId);
-      const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
-      routeBlocks.push({ block, route, priority: stat.foundCheaper ? 'CRITICAL' : 'LOW' });
-    }
-
-    if (routeBlocks.length > 0) {
-      await notificationService.sendConsolidatedReport(chatId, routeBlocks, timezone, false);
-    }
-
-    bot.sendMessage(chatId, '✅ Проверка завершена!', getMainMenuKeyboard(chatId));
-  } catch (error) {
-    console.error('Ошибка проверки:', error);
-    bot.sendMessage(chatId, '❌ Ошибка при проверке: ' + error.message);
-  }
 }
 
 /**

@@ -330,9 +330,11 @@ class RouteHandlers {
                     }
 
                     const isBelowThreshold = result.total_price <= route.threshold_price;
+                    // Используем callback_data для отслеживания кликов
+                    const callbackData = `aff:${route.id}:${result.id}:${Math.round(result.total_price)}`;
                     const linkKeyboard = {
                         inline_keyboard: [[
-                            { text: i === 0 && isBelowThreshold ? '🎫 КУПИТЬ СЕЙЧАС' : '🎫 Посмотреть билет', url: result.search_link }
+                            { text: i === 0 && isBelowThreshold ? '🎫 КУПИТЬ СЕЙЧАС' : '🎫 Посмотреть билет', callback_data: callbackData }
                         ]]
                     };
 

@@ -18,21 +18,22 @@ class DashboardPage {
 
         try {
             // Fetch all required data
-            const [statsData, users, routes, checkStats] = await Promise.all([
+            const [statsData, users, routes, checkStats, monetizationStats] = await Promise.all([
                 api.get('/analytics-main'),
                 api.getUsers(),
                 api.getRoutes(),
-                api.getCheckStats()
+                api.getCheckStats(),
+                api.get('/monetization-stats?period=30')
             ]);
 
-            this.renderContent(statsData, users, routes, checkStats);
+            this.renderContent(statsData, users, routes, checkStats, monetizationStats);
         } catch (error) {
             console.error('Dashboard error:', error);
             showError(content, error);
         }
     }
 
-    renderContent(statsData, users, routes, checkStats) {
+    renderContent(statsData, users, routes, checkStats, monetizationStats) {
         const content = document.getElementById('main-content');
 
         // Статистика проверок из API
@@ -143,6 +144,9 @@ class DashboardPage {
                         </div>
                     </div>
                 </div>
+
+                <!-- Монетизация -->
+                ${this.renderMonetization(monetizationStats || {})}
 
                 <!-- Воронки конверсии -->
                 ${this.renderFunnels(statsData.funnels || {})}
@@ -589,6 +593,104 @@ class DashboardPage {
                         `).join('')}
                     </tbody>
                 </table>
+            </div>
+        `;
+    }
+
+    renderMonetization(monetizationStats) {
+        const totalClicks = monetizationStats.totalClicks || 0;
+        const clicksPerUser = monetizationStats.clicksPerUser || 0;
+        const ctr = monetizationStats.ctr || 0;
+        const topRoutes = monetizationStats.topRoutesByClicks || [];
+        const totalNotifications = monetizationStats.totalNotifications || 0;
+
+        // Конверсия: просмотр уведомления → клик
+        const conversionRate = totalNotifications > 0
+            ? ((totalClicks / totalNotifications) * 100).toFixed(1)
+            : 0;
+
+        return `
+            <div class="row g-4 mb-4">
+                <div class="col-12">
+                    <div class="card border-success">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0">💰 Монетизация - Клики по партнерским ссылкам (30 дней)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center mb-4">
+                                <div class="col-md-3">
+                                    <h2 class="text-success mb-0">${totalClicks}</h2>
+                                    <p class="text-muted mb-0">
+                                        Всего кликов
+                                        <span class="badge bg-light text-dark"
+                                              style="cursor: help; font-weight: normal;"
+                                              title="Количество кликов по кнопкам 'Купить билет' или 'Посмотреть билет' в уведомлениях и отчетах. Каждый клик отслеживается и может приносить партнерскую комиссию от Aviasales.">
+                                            ℹ️
+                                        </span>
+                                    </p>
+                                    <small class="text-muted">по ссылкам Aviasales</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h2 class="text-primary mb-0">${ctr}%</h2>
+                                    <p class="text-muted mb-0">
+                                        CTR
+                                        <span class="badge bg-light text-dark"
+                                              style="cursor: help; font-weight: normal;"
+                                              title="Click-Through Rate (CTR) — процент кликов по партнерским ссылкам от общего количества отправленных уведомлений. Показывает, насколько эффективно уведомления конвертируются в клики. Хороший CTR: 10-20%">
+                                            ℹ️
+                                        </span>
+                                    </p>
+                                    <small class="text-muted">клики / уведомления</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h2 class="text-info mb-0">${clicksPerUser}</h2>
+                                    <p class="text-muted mb-0">Кликов/пользователь</p>
+                                    <small class="text-muted">среднее значение</small>
+                                </div>
+                                <div class="col-md-3">
+                                    <h2 class="text-warning mb-0">${conversionRate}%</h2>
+                                    <p class="text-muted mb-0">Конверсия</p>
+                                    <small class="text-muted">уведомление → клик</small>
+                                </div>
+                            </div>
+
+                            ${topRoutes.length > 0 ? `
+                                <div class="row">
+                                    <div class="col-12">
+                                        <h6 class="text-muted mb-3">📍 Топ-5 направлений по кликам:</h6>
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-hover">
+                                                <thead>
+                                                    <tr>
+                                                        <th>#</th>
+                                                        <th>Направление</th>
+                                                        <th>Кликов</th>
+                                                        <th>Средняя цена</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${topRoutes.slice(0, 5).map((route, index) => `
+                                                        <tr>
+                                                            <td><span class="badge bg-success rounded-circle">${index + 1}</span></td>
+                                                            <td><strong>${route.origin || 'N/A'} → ${route.destination || 'N/A'}</strong></td>
+                                                            <td><span class="badge bg-primary">${route.clicks}</span></td>
+                                                            <td>${route.avgPrice ? Math.round(route.avgPrice).toLocaleString() + ' ₽' : 'N/A'}</td>
+                                                        </tr>
+                                                    `).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            ` : `
+                                <div class="alert alert-info mb-0">
+                                    <i class="bi bi-info-circle me-2"></i>
+                                    <strong>Пока нет данных о кликах.</strong> Статистика появится после первых кликов пользователей по партнерским ссылкам.
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     }
