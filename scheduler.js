@@ -283,10 +283,10 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
     }
 
     const userSettings = await getUserSettings(chatId);
+    const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
     console.log(`    📋 Проверяем ${userRoutes.length} маршрутов для пользователя ${chatId}`);
 
-    const routeBlocks = [];
-    let sentCriticalOrHigh = 0;
+    let sentCount = 0;
 
     for (const route of userRoutes) {
       try {
@@ -297,31 +297,62 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
         const bestResults = await RouteResult.getTopResults(route.id, 1);
         const bestResult = bestResults[0] || null;
 
-        // 3. Аналитика
-        const analytics = await notificationService.getRouteAnalytics(route.id);
+        // 3. Если нет результатов - обработка NO_RESULTS
+        if (!bestResult) {
+          const noResultsCheck = await notificationService.processNoResults(chatId, route.id);
 
-        // 4. Статистика комбинаций
-        const checkStats = await notificationService.getRouteCheckStats(route.id);
+          if (noResultsCheck.shouldSend) {
+            const analytics = await notificationService.getRouteAnalytics(route.id);
+            const checkStats = await notificationService.getRouteCheckStats(route.id);
+            const noResultsBlock = notificationService.formatNoResultsBlock(route, analytics, checkStats, timezone);
 
-        // 5. Классификация приоритета
-        const currentPrice = bestResult?.total_price;
-        let priority = 'LOW';
-        let reasons = ['Обычная проверка'];
+            await notificationService._sendInstantAlert(
+              chatId,
+              route.id,
+              noResultsBlock,
+              'NO_RESULTS',
+              null,
+              timezone,
+              true // всегда без звука
+            );
 
-        if (currentPrice) {
-          const priceDropPercent = await notificationService.getPriceDropPercent(route.id, currentPrice);
-          const classified = notificationService.classifyPriority({
-            currentPrice,
-            userBudget: route.threshold_price,
-            avgPrice: analytics.avgPrice,
-            historicalMin: analytics.minPrice,
-            priceDropPercent
-          });
-          priority = classified.priority;
-          reasons = classified.reasons;
+            // Логируем
+            await notificationService._logNotification(
+              chatId,
+              route.id,
+              'NO_RESULTS',
+              null,
+              'NO_RESULTS',
+              true
+            );
+
+            console.log(`    📭 NO_RESULTS уведомление отправлено для маршрута ${route.id}: ${noResultsCheck.reason}`);
+            sentCount++;
+          } else {
+            console.log(`    ⏭️  NO_RESULTS пропущено для маршрута ${route.id}: ${noResultsCheck.reason}`);
+          }
+
+          await updateRouteLastCheck(route.id);
+          continue;
         }
 
-        // 6. Маршрутизация уведомления
+        // 4. Аналитика
+        const analytics = await notificationService.getRouteAnalytics(route.id);
+
+        // 5. Статистика комбинаций
+        const checkStats = await notificationService.getRouteCheckStats(route.id);
+
+        // 6. Классификация приоритета
+        const currentPrice = bestResult.total_price;
+        const classified = notificationService.classifyPriority({
+          currentPrice,
+          userBudget: route.threshold_price,
+          historicalMin: analytics.minPrice
+        });
+        const priority = classified.priority;
+        const reasons = classified.reasons;
+
+        // 7. Маршрутизация уведомления
         const routeResult = await notificationService.processAndRouteNotification({
           chatId,
           routeId: route.id,
@@ -336,12 +367,21 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
           subscriptionType
         });
 
-        // 7. Формируем блок для сводного отчета. В отчет попадают только те что не отправили
-        if (routeResult.action !== 'sent' && routeResult.action !== 'sent_silent') {
-          const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats);
-          routeBlocks.push({ block, route, priority });
-        } else {
-          sentCriticalOrHigh++;
+        // 8. Если уведомление нужно отправить - отправляем сразу
+        if (routeResult.action === 'sent' || routeResult.action === 'sent_silent') {
+          const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
+
+          await notificationService._sendInstantAlert(
+            chatId,
+            route.id,
+            block,
+            priority,
+            currentPrice,
+            timezone,
+            routeResult.action === 'sent_silent'
+          );
+
+          sentCount++;
         }
 
         await updateRouteLastCheck(route.id);
@@ -351,22 +391,9 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
       }
     }
 
-    // Сводный отчет: отправляем если уведомления включены, не ночь, и есть что отправлять
-    const notificationsEnabled = userSettings?.notifications_enabled !== 0;
-    const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
-    const isNight = notificationService._isNightTime(timezone, userSettings);
-
-    if (routeBlocks.length > 0 && notificationsEnabled && !isNight) {
-      try {
-        await notificationService.sendConsolidatedReport(chatId, routeBlocks, timezone, true);
-      } catch (error) {
-        console.error(`    ❌ Ошибка отправки сводного отчета пользователю ${chatId}:`, error);
-      }
-    }
-
     const userEndTime = new Date();
     const userDuration = ((userEndTime - userStartTime) / 1000).toFixed(2);
-    console.log(`    ✅ [${formatTimestamp(userEndTime)}] Завершено для ${chatId}: ${userRoutes.length} маршрутов, ${sentCriticalOrHigh} срочных алертов (${userDuration}s)`);
+    console.log(`    ✅ [${formatTimestamp(userEndTime)}] Завершено для ${chatId}: ${userRoutes.length} маршрутов, ${sentCount} уведомлений отправлено (${userDuration}s)`);
 
   } catch (error) {
     const userEndTime = new Date();
@@ -383,12 +410,6 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
 cron.schedule('0 3 * * *', async () => {
   console.log(`\n🧹 [${formatTimestamp()}] Очистка старых данных...`);
   await cleanupOldData();
-});
-
-// Дайджест: каждый час проверяем, кому пора отправить
-cron.schedule('0 * * * *', async () => {
-  console.log(`\n📬 [${formatTimestamp()}] Проверка дайджестов...`);
-  await sendDigestsForCurrentHour();
 });
 
 // ========================================
@@ -490,74 +511,6 @@ function getSubscriptionForUser(chatId) {
       else resolve(row?.subscription_type || 'free');
     });
   });
-}
-
-/**
- * Получить пользователей с непустой очередью дайджеста
- */
-function getUsersWithPendingDigest() {
-  return new Promise((resolve, reject) => {
-    db.all(
-        'SELECT DISTINCT chat_id FROM daily_digest_queue WHERE processed = 0',
-        (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        }
-    );
-  });
-}
-
-/**
- * Отправка дайджестов для текущего часа
- */
-async function sendDigestsForCurrentHour() {
-  try {
-    const notificationService = new NotificationService(bot);
-    const users = await getUsersWithPendingDigest();
-
-    if (users.length === 0) {
-      console.log('  ℹ️  Нет пользователей с ожидающим дайджестом');
-      return;
-    }
-
-    for (const user of users) {
-      try {
-        const settings = await getUserSettings(user.chat_id);
-        const timezone = settings?.timezone || 'Asia/Yekaterinburg';
-        const subscriptionType = await getSubscriptionForUser(user.chat_id);
-
-        // Определяем текущий час в таймзоне пользователя
-        const now = new Date();
-        const userLocalTime = new Intl.DateTimeFormat('en-US', {
-          timeZone: timezone,
-          hour: 'numeric',
-          hour12: false
-        }).format(now);
-        const currentHour = parseInt(userLocalTime);
-
-        // Free: отправлять в 10:00 локальное
-        // Plus: отправлять в 10:00 и 18:00 локальное
-        let shouldSend = false;
-        if (currentHour === 10) {
-          shouldSend = true;
-        } else if (currentHour === 18 && subscriptionType !== 'free') {
-          shouldSend = true;
-        }
-
-        if (shouldSend) {
-          await notificationService.sendDigestForUser(user.chat_id);
-        }
-
-      } catch (error) {
-        console.error(`  ❌ Ошибка дайджеста для пользователя ${user.chat_id}:`, error);
-      }
-    }
-
-    console.log(`  ✅ Проверка дайджестов завершена (${users.length} пользователей)`);
-
-  } catch (error) {
-    console.error('❌ Ошибка при отправке дайджестов:', error);
-  }
 }
 
 /**

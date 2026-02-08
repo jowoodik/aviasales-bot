@@ -124,10 +124,6 @@ class UsersPage {
                                 <td>${user.night_mode ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
                             </tr>
                             <tr>
-                                <td><strong>Дайджест:</strong></td>
-                                <td>${user.digest_enabled ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
-                            </tr>
-                            <tr>
                                 <td><strong>Создан:</strong></td>
                                 <td>${new Date(user.created_at).toLocaleString('ru-RU')}</td>
                             </tr>
@@ -203,12 +199,6 @@ class UsersPage {
                     label: 'Ночной режим (23:00-08:00)',
                     type: 'checkbox',
                     value: user.night_mode ? true : false
-                },
-                {
-                    name: 'digest_enabled',
-                    label: 'Ежедневный дайджест',
-                    type: 'checkbox',
-                    value: user.digest_enabled ? true : false
                 }
             ]
         });
@@ -219,8 +209,7 @@ class UsersPage {
             const updateData = {
                 timezone: formData.timezone,
                 notifications_enabled: formData.notifications_enabled ? 1 : 0,
-                night_mode: formData.night_mode ? 1 : 0,
-                digest_enabled: formData.digest_enabled ? 1 : 0
+                night_mode: formData.night_mode ? 1 : 0
             };
 
             await api.updateUser(user.chat_id, updateData);

@@ -361,10 +361,6 @@ class RoutesPage {
                                 <td><strong>Ночной режим:</strong></td>
                                 <td>${userStats.night_mode ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
                             </tr>
-                            <tr>
-                                <td><strong>Дайджест:</strong></td>
-                                <td>${userStats.digest_enabled ? '<span class="badge bg-success">Вкл</span>' : '<span class="badge bg-secondary">Выкл</span>'}</td>
-                            </tr>
                         </table>
                     </div>
                     <div class="col-md-6">

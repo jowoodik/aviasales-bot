@@ -47,7 +47,6 @@ class SettingsHandlers {
             ['🌍 Таймзона'],
             ['🔔 Уведомления'],
             ['🌙 Ночной режим'],
-            ['📊 Дайджест'],
             ['🏠 Главное меню']
           ],
           resize_keyboard: true,
@@ -59,15 +58,13 @@ class SettingsHandlers {
       const offset = TimezoneUtils.getTimezoneOffset(timezone);
       const notifyStatus = settings.notifications_enabled !== 0 ? '✅ Включены' : '❌ Отключены';
       const nightModeStatus = settings.night_mode !== 0 ? '✅ Включен' : '❌ Отключен';
-      const digestStatus = settings.digest_enabled !== 0 ? '✅ Включен' : '❌ Отключен';
 
       this.bot.sendMessage(
           chatId,
           `⚙️ *НАСТРОЙКИ*\n\n` +
           `🌍 Таймзона: ${timezone} (UTC${offset >= 0 ? '+' : ''}${offset})\n` +
           `🔔 Уведомления: ${notifyStatus}\n` +
-          `🌙 Ночной режим: ${nightModeStatus}\n` +
-          `📊 Дайджест: ${digestStatus}\n\n` +
+          `🌙 Ночной режим: ${nightModeStatus}\n\n` +
           `Выберите раздел для настройки:`,
           { parse_mode: 'Markdown', ...keyboard }
       );
@@ -215,12 +212,10 @@ class SettingsHandlers {
         state?.step === 'timezone_menu' ||
         state?.step === 'timezone_input' ||
         state?.step === 'notifications_menu' ||
-        state?.step === 'night_mode_menu' ||
-        state?.step === 'digest_menu'
+        state?.step === 'night_mode_menu'
     )) {
       if (state.step === 'timezone_menu' ||
-          state.step === 'notifications_menu' || state.step === 'night_mode_menu' ||
-          state.step === 'digest_menu') {
+          state.step === 'notifications_menu' || state.step === 'night_mode_menu') {
         this.handleSettings(chatId);
       } else if (state.step === 'timezone_input') {
         await this.handleTimezone(chatId);
@@ -257,13 +252,6 @@ class SettingsHandlers {
     // Ночной режим
     if (text === '🌙 Ночной режим') {
       const newState = await this.handleNightMode(chatId);
-      if (newState) userStates[chatId] = newState;
-      return true;
-    }
-
-    // Дайджест
-    if (text === '📊 Дайджест') {
-      const newState = await this.handleDigest(chatId);
       if (newState) userStates[chatId] = newState;
       return true;
     }
@@ -308,16 +296,6 @@ class SettingsHandlers {
       }
     }
 
-    // Обработка действий в меню дайджеста
-    if (state?.step === 'digest_menu') {
-      const result = await this.handleDigestAction(chatId, text, state);
-      if (result) {
-        if (result.deleteState) delete userStates[chatId];
-        else if (result.newState) userStates[chatId] = result.newState;
-        return result.handled;
-      }
-    }
-
     return false;
   }
 
@@ -327,7 +305,6 @@ class SettingsHandlers {
   async handleNotifications(chatId) {
     try {
       const settings = await this._getUserSettings(chatId);
-      const subscription = await this._getUserSubscription(chatId);
 
       const keyboard = {
         reply_markup: {
@@ -348,37 +325,39 @@ class SettingsHandlers {
 
       message += `📬 *СИСТЕМА ПРИОРИТЕТОВ:*\n\n`;
 
-      message += `🔥 *КРИТИЧЕСКИЕ (всегда приходят):*\n`;
-      message += `• Цена в рамках вашего бюджета\n`;
-      message += `• Исторический минимум цены\n`;
-      message += `• Супер-скидка 50%+ от средней\n\n`;
+      message += `🚨 *КРИТИЧЕСКИЕ (раз в 6ч или при падении цены):*\n`;
+      message += `• Цена ниже вашего бюджета\n`;
+      message += `• Со звуком днём (08:00-23:00)\n`;
+      message += `• Беззвучно ночью\n\n`;
 
-      if (subscription === 'free') {
-        message += `→ Бесплатная: до 3 в день, остальные в дайджест\n\n`;
-      } else {
-        message += `→ Plus: неограниченно, со звуком\n\n`;
-      }
+      message += `🔥 *ВЫСОКИЕ (раз в 12ч):*\n`;
+      message += `• Цена ниже исторического минимума\n`;
+      message += `• Со звуком днём (08:00-23:00)\n`;
+      message += `• Беззвучно ночью\n\n`;
 
-      message += `📊 *ХОРОШИЕ ЦЕНЫ:*\n`;
-      message += `• Превышение бюджета до 15%\n`;
-      message += `• Скидка 30-49% от средней\n`;
-      message += `• Падение цены 15%+ за 24ч\n\n`;
+      message += `📊 *НИЗКИЕ (раз в 24ч):*\n`;
+      message += `• Остальные находки\n`;
+      message += `• Всегда без звука\n\n`;
 
-      if (subscription === 'free') {
-        message += `→ Бесплатная: только в дайджесте\n\n`;
-      } else {
-        message += `→ Plus: раз в 3 часа (беззвучно)\n\n`;
-      }
+      message += `❌ *НЕТ РЕЗУЛЬТАТОВ (раз в 48ч):*\n`;
+      message += `• Если цены не найдены\n`;
+      message += `• Всегда без звука\n\n`;
 
-      message += `📋 *СРЕДНИЕ И НИЗКИЕ:*\n`;
-      message += `• Превышение бюджета 15-30%\n`;
-      message += `• Небольшие скидки\n`;
-      message += `→ Только в дайджесте\n\n`;
+      message += `⚙️ *УПРАВЛЕНИЕ ЗВУКОМ:*\n\n`;
 
-      message += `⚠️ *ВАЖНО:*\n`;
-      message += `Даже при отключении уведомлений вы получите критические находки — они исчезают быстро, важно не упустить!\n\n`;
+      message += `✅ *Уведомления включены:*\n`;
+      message += `• КРИТИЧЕСКИЕ и ВЫСОКИЕ — со звуком днём\n`;
+      message += `• НИЗКИЕ — всегда без звука\n`;
+      message += `• Ночью (23:00-08:00) — все без звука\n\n`;
 
-      message += `_Дайджест и ночной режим настраиваются отдельно_`;
+      message += `🔕 *Уведомления отключены:*\n`;
+      message += `• Все уведомления приходят БЕЗ звука\n`;
+      message += `• Но вы всё равно получите их!\n\n`;
+
+      message += `💡 *СОВЕТ:*\n`;
+      message += `Оставьте уведомления включёнными — важные находки не пропустите, а ночью звук отключается автоматически.\n\n`;
+
+      message += `_Ночной режим настраивается отдельно_`;
 
       this.bot.sendMessage(
           chatId,
@@ -489,97 +468,6 @@ class SettingsHandlers {
       this.bot.sendMessage(
           chatId,
           `✅ Ночной режим ${status}.`,
-          this.getMainMenuKeyboard(chatId)
-      );
-      return { handled: true, deleteState: true };
-    }
-
-    return false;
-  }
-
-  /**
-   * ДАЙДЖЕСТ
-   */
-  async handleDigest(chatId) {
-    try {
-      const settings = await this._getUserSettings(chatId);
-      const subscription = await this._getUserSubscription(chatId);
-
-      const keyboard = {
-        reply_markup: {
-          keyboard: [
-            ['📊 Включить дайджест'],
-            ['🔕 Отключить дайджест'],
-            ['◀️ Назад']
-          ],
-          resize_keyboard: true,
-          one_time_keyboard: false
-        }
-      };
-
-      const status = settings.digest_enabled !== 0 ? '✅ Включен' : '❌ Отключен';
-
-      let message = `📊 *ДАЙДЖЕСТ*\n\n`;
-      message += `Текущий статус: ${status}\n\n`;
-
-      message += `📬 *ЧТО ТАКОЕ ДАЙДЖЕСТ?*\n`;
-      message += `Сводка по всем маршрутам с ценами, которые не требуют срочной реакции.\n\n`;
-
-      message += `⏰ *КОГДА ПРИХОДИТ:*\n`;
-      if (subscription === 'free') {
-        message += `• Бесплатная: 1 раз в день в 10:00\n\n`;
-      } else {
-        message += `• Plus: 2 раза в день (10:00 и 18:00)\n\n`;
-      }
-
-      message += `📋 *ЧТО ВКЛЮЧАЕТ:*\n`;
-      message += `• Хорошие цены (HIGH)\n`;
-      message += `• Средние цены (MEDIUM)\n`;
-      message += `• Критические находки ночью\n`;
-      message += `• Критические для Free после лимита 3/день\n\n`;
-
-      message += `🔕 *Звук:* Всегда беззвучно\n\n`;
-
-      message += `💡 *Совет:*\nНе отключайте дайджест — так вы не пропустите выгодные предложения!`;
-
-      this.bot.sendMessage(
-          chatId,
-          message,
-          { parse_mode: 'Markdown', ...keyboard }
-      );
-
-      return { step: 'digest_menu' };
-
-    } catch (error) {
-      console.error('Ошибка загрузки настроек:', error);
-      this.bot.sendMessage(chatId, '❌ Ошибка загрузки настроек');
-      return null;
-    }
-  }
-
-  async handleDigestAction(chatId, text, state) {
-    if (!state || state.step !== 'digest_menu') {
-      return false;
-    }
-
-    if (text === '◀️ Назад') {
-      this.handleSettings(chatId);
-      return { handled: true, deleteState: true };
-    }
-
-    let newValue = null;
-    if (text.includes('Включить дайджест')) {
-      newValue = 1;
-    } else if (text.includes('Отключить дайджест')) {
-      newValue = 0;
-    }
-
-    if (newValue !== null) {
-      await this._updateDigestEnabled(chatId, newValue);
-      const status = newValue ? 'включён' : 'отключён';
-      this.bot.sendMessage(
-          chatId,
-          `✅ Дайджест ${status}.`,
           this.getMainMenuKeyboard(chatId)
       );
       return { handled: true, deleteState: true };

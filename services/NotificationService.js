@@ -10,69 +10,24 @@ class NotificationService {
   }
 
   classifyPriority(routeData) {
-    const { currentPrice, userBudget, avgPrice, historicalMin, priceDropPercent } = routeData;
+    const { currentPrice, userBudget, historicalMin } = routeData;
     const reasons = [];
 
-    // CRITICAL
-    if (userBudget && currentPrice <= userBudget) {
-      reasons.push('Цена в рамках бюджета');
-    }
-    if (historicalMin && currentPrice <= historicalMin) {
-      reasons.push('Исторический минимум');
-    }
-    if (avgPrice && avgPrice > 0) {
-      const discountFromAvg = ((avgPrice - currentPrice) / avgPrice) * 100;
-      if (discountFromAvg >= 50) {
-        reasons.push(`Скидка ${Math.round(discountFromAvg)}% от средней`);
-      }
-    }
-    if (reasons.length > 0) {
+    // CRITICAL: цена ниже бюджета
+    if (userBudget && currentPrice < userBudget) {
+      reasons.push(`Цена ${currentPrice.toLocaleString('ru-RU')} ₽ ниже бюджета ${userBudget.toLocaleString('ru-RU')} ₽`);
       return { priority: 'CRITICAL', reasons };
     }
 
-    // HIGH
-    const highReasons = [];
-    if (userBudget && currentPrice > userBudget) {
-      const overPercent = ((currentPrice - userBudget) / userBudget) * 100;
-      if (overPercent <= 15) {
-        highReasons.push(`Превышение бюджета ${Math.round(overPercent)}%`);
-      }
-    }
-    if (avgPrice && avgPrice > 0) {
-      const discountFromAvg = ((avgPrice - currentPrice) / avgPrice) * 100;
-      if (discountFromAvg >= 30 && discountFromAvg < 50) {
-        highReasons.push(`Скидка ${Math.round(discountFromAvg)}% от средней`);
-      }
-    }
-    if (priceDropPercent && priceDropPercent >= 15) {
-      highReasons.push(`Падение ${Math.round(priceDropPercent)}% за 24ч`);
-    }
-    if (highReasons.length > 0) {
-      return { priority: 'HIGH', reasons: highReasons };
+    // HIGH: цена ниже исторического минимума (но не ниже бюджета)
+    if (historicalMin && currentPrice < historicalMin) {
+      reasons.push(`Цена ${currentPrice.toLocaleString('ru-RU')} ₽ ниже исторического минимума ${historicalMin.toLocaleString('ru-RU')} ₽`);
+      return { priority: 'HIGH', reasons };
     }
 
-    // MEDIUM
-    const mediumReasons = [];
-    if (userBudget && currentPrice > userBudget) {
-      const overPercent = ((currentPrice - userBudget) / userBudget) * 100;
-      if (overPercent > 15 && overPercent <= 30) {
-        mediumReasons.push(`Превышение бюджета ${Math.round(overPercent)}%`);
-      }
-    }
-    if (avgPrice && avgPrice > 0) {
-      const discountFromAvg = ((avgPrice - currentPrice) / avgPrice) * 100;
-      if (discountFromAvg >= 15 && discountFromAvg < 30) {
-        mediumReasons.push(`Скидка ${Math.round(discountFromAvg)}% от средней`);
-      }
-    }
-    if (priceDropPercent && priceDropPercent >= 10 && priceDropPercent < 15) {
-      mediumReasons.push(`Падение ${Math.round(priceDropPercent)}% за 24ч`);
-    }
-    if (mediumReasons.length > 0) {
-      return { priority: 'MEDIUM', reasons: mediumReasons };
-    }
-
-    return { priority: 'LOW', reasons: ['Обычная проверка'] };
+    // LOW: все остальное
+    reasons.push('Цена не соответствует критериям CRITICAL/HIGH');
+    return { priority: 'LOW', reasons };
   }
 
   getRouteAnalytics(routeId) {
@@ -109,6 +64,128 @@ class NotificationService {
     });
   }
 
+  async _canSendNotification(chatId, routeId, priority, currentPrice) {
+    if (priority === 'CRITICAL') {
+      // URGENT: проверяем последнее URGENT уведомление
+      const lastUrgent = await new Promise((resolve, reject) => {
+        db.get(
+          `SELECT price, sent_at FROM notification_log
+           WHERE chat_id = ? AND route_id = ? AND message_type = 'URGENT'
+           ORDER BY sent_at DESC LIMIT 1`,
+          [chatId, routeId],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve(row);
+          }
+        );
+      });
+
+      if (!lastUrgent) {
+        return { canSend: true, reason: 'Первое уведомление' };
+      }
+
+      const hoursSince = (Date.now() - new Date(lastUrgent.sent_at).getTime()) / (1000 * 60 * 60);
+
+      if (hoursSince >= 6) {
+        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+      }
+
+      // Проверяем падение цены
+      if (lastUrgent.price > currentPrice) {
+        return { canSend: true, reason: `Цена упала с ${lastUrgent.price} до ${currentPrice}` };
+      }
+
+      return { canSend: false, reason: `URGENT < 6ч назад (${hoursSince.toFixed(1)}ч), цена не упала` };
+    }
+
+    if (priority === 'HIGH') {
+      // DAILY (12ч): проверяем последнее уведомление любого типа
+      const lastAny = await new Promise((resolve, reject) => {
+        db.get(
+          `SELECT sent_at FROM notification_log
+           WHERE chat_id = ? AND route_id = ?
+           ORDER BY sent_at DESC LIMIT 1`,
+          [chatId, routeId],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve(row);
+          }
+        );
+      });
+
+      if (!lastAny) {
+        return { canSend: true, reason: 'Первое уведомление' };
+      }
+
+      const hoursSince = (Date.now() - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
+
+      if (hoursSince >= 12) {
+        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+      }
+
+      return { canSend: false, reason: `Последнее уведомление < 12ч назад (${hoursSince.toFixed(1)}ч)` };
+    }
+
+    if (priority === 'LOW') {
+      // DAILY (24ч): проверяем последнее уведомление любого типа
+      const lastAny = await new Promise((resolve, reject) => {
+        db.get(
+          `SELECT sent_at FROM notification_log
+           WHERE chat_id = ? AND route_id = ?
+           ORDER BY sent_at DESC LIMIT 1`,
+          [chatId, routeId],
+          (err, row) => {
+            if (err) return reject(err);
+            resolve(row);
+          }
+        );
+      });
+
+      if (!lastAny) {
+        return { canSend: true, reason: 'Первое уведомление' };
+      }
+
+      const hoursSince = (Date.now() - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
+
+      if (hoursSince >= 24) {
+        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+      }
+
+      return { canSend: false, reason: `Последнее уведомление < 24ч назад (${hoursSince.toFixed(1)}ч)` };
+    }
+
+    return { canSend: false, reason: 'Неизвестный приоритет' };
+  }
+
+  async processNoResults(chatId, routeId) {
+    // Проверяем последнее уведомление для маршрута
+    const lastNotif = await new Promise((resolve, reject) => {
+      db.get(
+        `SELECT sent_at FROM notification_log
+         WHERE chat_id = ? AND route_id = ?
+         ORDER BY sent_at DESC LIMIT 1`,
+        [chatId, routeId],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(row);
+        }
+      );
+    });
+
+    if (!lastNotif) {
+      // Нет уведомлений - отправляем
+      return { shouldSend: true, reason: 'Первое уведомление о отсутствии цен' };
+    }
+
+    const hoursSince = (Date.now() - new Date(lastNotif.sent_at).getTime()) / (1000 * 60 * 60);
+
+    if (hoursSince >= 48) {
+      return { shouldSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов с последнего уведомления` };
+    }
+
+    return { shouldSend: false, reason: `Уведомление о отсутствии цен < 48ч назад (${hoursSince.toFixed(1)}ч)` };
+  }
+
   getRouteCheckStats(routeId) {
     return new Promise((resolve, reject) => {
       db.get(
@@ -138,76 +215,55 @@ class NotificationService {
   }
 
   async processAndRouteNotification({ chatId, routeId, route, priority, reasons, currentPrice, analytics, bestResult, checkStats, userSettings, subscriptionType }) {
-    const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
-    const isNight = this._isNightTime(timezone, userSettings);
-    const notificationsEnabled = userSettings?.notifications_enabled !== 0;
-    const isFree = subscriptionType === 'free';
-    const bestResultId = bestResult?.id || null;
+    // 1. Проверка возможности отправки
+    const checkResult = await this._canSendNotification(chatId, routeId, priority, currentPrice);
 
-    // CRITICAL
+    if (!checkResult.canSend) {
+      console.log(`    ⏭️  Пропуск уведомления [${priority}] для маршрута ${routeId}: ${checkResult.reason}`);
+      return {
+        action: 'skipped',
+        priority,
+        reason: checkResult.reason
+      };
+    }
+
+    // 2. Определение message_type
+    let messageType;
     if (priority === 'CRITICAL') {
-      if (isNight) {
-        // Ночью CRITICAL приходит беззвучно
-        const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
-        await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, true);
-        return { action: 'sent_silent', priority };
-      }
-
-      if (isFree) {
-        const critToday = await this._getCriticalCountToday(chatId);
-        if (critToday >= 3) {
-          await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-          return { action: 'digest', priority };
-        }
-      }
-
-      const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
-      await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, false);
-      return { action: 'sent', priority };
+      messageType = 'URGENT';
+    } else if (priority === 'HIGH' || priority === 'LOW') {
+      messageType = 'DAILY';
     }
 
-    // HIGH
-    if (priority === 'HIGH') {
-      if (!notificationsEnabled) {
-        return { action: 'skipped', priority, reason: 'notifications_disabled' };
-      }
-      if (isNight) {
-        await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-        return { action: 'digest', priority };
+    // 3. Определение звука
+    let disableNotification = false;
+
+    if (priority === 'LOW') {
+      disableNotification = true; // LOW всегда без звука
+    } else {
+      // CRITICAL/HIGH - проверяем настройки и время
+      if (userSettings?.notifications_enabled === 0) {
+        disableNotification = true;
       }
 
-      if (isFree) {
-        await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-        return { action: 'digest', priority };
+      const hour = new Date().getHours();
+      if (hour >= 23 || hour < 8) {
+        disableNotification = true;
       }
-
-      // Plus: раз в 3 часа
-      const onCooldown = await this._checkPriorityCooldown(chatId, routeId, 'HIGH', 3);
-      if (onCooldown) {
-        await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-        return { action: 'digest', priority };
-      }
-
-      const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
-      await this._sendInstantAlert(chatId, routeId, block, priority, currentPrice, timezone, true);
-      return { action: 'sent_silent', priority };
     }
 
-    // MEDIUM
-    if (priority === 'MEDIUM') {
-      if (!notificationsEnabled) {
-        return { action: 'skipped', priority, reason: 'notifications_disabled' };
-      }
-      if (isNight) {
-        await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-        return { action: 'digest', priority };
-      }
-      await this._addToDigestQueue(chatId, routeId, priority, currentPrice, analytics, bestResultId);
-      return { action: 'digest', priority };
-    }
+    // 4. Логирование
+    await this._logNotification(chatId, routeId, priority, currentPrice, messageType, disableNotification);
 
-    // LOW
-    return { action: 'silent', priority };
+    console.log(`    ${disableNotification ? '🔕' : '🔔'} Уведомление [${priority}/${messageType}] для маршрута ${routeId}: ${checkResult.reason}`);
+
+    // 5. Возвращаем результат
+    return {
+      action: disableNotification ? 'sent_silent' : 'sent',
+      priority,
+      messageType,
+      reason: checkResult.reason
+    };
   }
 
   async formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority = 'MEDIUM') {
@@ -376,13 +432,13 @@ class NotificationService {
       return { text, searchLink: bestResult?.search_link || null };
     }
 
-    // ========== MEDIUM/LOW: Минимальный формат ==========
+    // ========== LOW: Минимальный формат ==========
     const depDate = bestResult.departure_date ? this._formatShortDateForProgressBar(bestResult.departure_date) : null;
     const retDate = bestResult.return_date ? this._formatShortDateForProgressBar(bestResult.return_date) : null;
 
     // Цена
-    let text = `${priority === "MEDIUM" ? "🟠" : "🔴"} Цена: ${Formatters.formatPrice(currentPrice)}\n`;
-    text += `<b>${routeName}</b>\n\n`;
+    let text = `<b>${routeName}</b>\n\n`;
+    text += `Цена: ${Formatters.formatPrice(currentPrice)}\n`;
 
     if (depDate && retDate) {
       text += `📅 ${depDate}–${retDate}\n`;
@@ -407,24 +463,32 @@ class NotificationService {
       text += `Ваш бюджет: ${Formatters.formatPrice(userBudget)} (+${budgetPercent}%)\n`;
     }
 
-    // Сравнение со средней ценой (если есть достаточно данных)
-    if (analytics && analytics.avgPrice && analytics.dataPoints >= 5) {
-      const avgDiff = currentPrice - analytics.avgPrice;
-      const avgPercent = Math.round((avgDiff / analytics.avgPrice) * 100);
+    return { text, searchLink: bestResult?.search_link || null };
+  }
 
-      text += `Средняя цена: ${Formatters.formatPrice(analytics.avgPrice)}`;
+  formatNoResultsBlock(route, analytics, checkStats, timezone) {
+    const time = this._formatTimeForUser(new Date(), timezone);
+    const routeName = airportResolver.formatRoute(route.origin, route.destination);
 
-      if (avgDiff < 0) {
-        // Цена ниже средней - показываем как выгоду
-        text += ` (${avgPercent}%)`;
-      } else if (avgDiff > 0) {
-        // Цена выше средней - тоже показываем для полноты информации
-        text += ` (+${avgPercent}%)`;
+    let text = `🔍 Цены не найдены • ${time}\n\n`;
+    text += `<b>${routeName}</b>\n`;
+    text += `❌ Цены не найдены\n`;
+    text += `Ваш бюджет: ${route.threshold_price.toLocaleString('ru-RU')} ₽\n\n`;
+
+    if (checkStats && checkStats.current) {
+      if (route.is_flexible) {
+        text += `Сейчас выполнено ${checkStats.current.successful_checks} проверок. Всего проверок ${checkStats.totalAllCombinations}\n\n`;
+      } else if (checkStats.totalAllCombinations > 0) {
+        text += `Всего выполнено ${checkStats.totalAllCombinations} проверок\n\n`;
       }
-      text += '\n';
     }
 
-    return { text, searchLink: bestResult?.search_link || null };
+    text += `Продолжаю мониторинг 🔍`;
+
+    return {
+      text,
+      searchLink: null
+    };
   }
 
   async sendConsolidatedReport(chatId, routeBlocks, timezone, disableNotification = true) {
@@ -505,39 +569,6 @@ class NotificationService {
       console.log(`📊 Сводный отчет отправлен пользователю ${chatId} (${routeBlocks.length} маршрутов)`);
     } catch (error) {
       console.error('Ошибка отправки сводного отчета:', error.message);
-    }
-  }
-
-  async sendDigestForUser(chatId) {
-    try {
-      const items = await this._getPendingDigestItems(chatId);
-      if (items.length === 0) return;
-
-      await airportResolver.load();
-      const timezone = await this._getUserTimezone(chatId);
-      const routeBlocks = [];
-
-      for (const item of items) {
-        const route = await UnifiedRoute.findNonArchivedByChatId(chatId);
-        if (!route) continue;
-
-        const bestResults = await RouteResult.getTopResults(item.route_id, 1);
-        const bestResult = bestResults[0] || null;
-        const analytics = { avgPrice: item.avg_price, minPrice: item.historical_min, dataPoints: 5 };
-        const checkStats = await this.getRouteCheckStats(item.route_id);
-
-        const block = await this.formatSingleRouteBlock(route, bestResult, analytics, checkStats, item.priority);
-        routeBlocks.push({ block, route, priority: item.priority });
-      }
-
-      if (routeBlocks.length > 0) {
-        await this.sendConsolidatedReport(chatId, routeBlocks, timezone, true);
-      }
-
-      await this._markDigestProcessed(chatId);
-      console.log(`📬 Дайджест отправлен пользователю ${chatId} (${items.length} элементов)`);
-    } catch (error) {
-      console.error(`Ошибка отправки дайджеста для ${chatId}:`, error.message);
     }
   }
 
@@ -637,14 +668,14 @@ class NotificationService {
       let header, footer;
 
       if (priority === 'CRITICAL') {
-        header = `🔥 <b>СУПЕР ЦЕНА!</b> 🔥\n\n`;
+        header = `🔥🔥🔥 <b>Цена ниже бюджета</b>\n\n`;
         footer = '\n\n⚡️ <b>Цена может вырасти в ближайшие часы</b>';
       } else if (priority === 'HIGH') {
-        header = `📊 <b>Хорошая цена найдена</b> • ${time}\n\n`;
+        header = `📊 <b>Самая низкая цена</b> • ${time}\n\n`;
         footer = '\n\n💡 Продолжаю искать варианты в бюджете';
       } else {
-        header = `📊 <b>Проверка завершена</b> • ${time}\n\n`;
-        footer = '\n\nПродолжаю мониторинг 🔍';
+        header = `🔍 <b>Продолжаем поиск</b> • ${time}\n\n`;
+        footer = '\n\nПродолжаю мониторинг 🔎';
       }
 
       const message = `${header}${block.text}${footer}`;
@@ -666,7 +697,6 @@ class NotificationService {
       }
 
       await this.bot.sendMessage(chatId, message, sendOpts);
-      await this._logNotification(chatId, routeId, priority, price, 'instant', silent);
 
       console.log(`${silent ? '🔕' : '🔔'} Алерт [${priority}] отправлен пользователю ${chatId}`);
     } catch (error) {
@@ -682,40 +712,6 @@ class NotificationService {
           (err, row) => {
             if (err) return resolve('Asia/Yekaterinburg');
             resolve(row?.timezone || 'Asia/Yekaterinburg');
-          }
-      );
-    });
-  }
-
-  _getPendingDigestItems(chatId) {
-    return new Promise((resolve, reject) => {
-      db.all(
-          `SELECT * FROM daily_digest_queue
-           WHERE chat_id = ? AND processed = 0
-           ORDER BY
-             CASE priority
-               WHEN 'CRITICAL' THEN 1
-               WHEN 'HIGH' THEN 2
-               WHEN 'MEDIUM' THEN 3
-               WHEN 'LOW' THEN 4
-               END, created_at DESC`,
-          [chatId],
-          (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows || []);
-          }
-      );
-    });
-  }
-
-  _markDigestProcessed(chatId) {
-    return new Promise((resolve, reject) => {
-      db.run(
-          'UPDATE daily_digest_queue SET processed = 1 WHERE chat_id = ? AND processed = 0',
-          [chatId],
-          (err) => {
-            if (err) return reject(err);
-            resolve();
           }
       );
     });
@@ -772,63 +768,15 @@ class NotificationService {
     return 'дней';
   }
 
-  _checkPriorityCooldown(chatId, routeId, priority, hours) {
-    return new Promise((resolve, reject) => {
-      db.get(
-          `SELECT COUNT(*) as cnt FROM notification_log
-         WHERE chat_id = ? AND route_id = ? AND priority = ?
-           AND sent_at > datetime('now', '-' || ? || ' hours')`,
-          [chatId, routeId, priority, hours],
-          (err, row) => {
-            if (err) return reject(err);
-            resolve((row?.cnt || 0) > 0);
-          }
-      );
-    });
-  }
-
-  _getCriticalCountToday(chatId) {
-    return new Promise((resolve, reject) => {
-      db.get(
-          `SELECT COUNT(*) as cnt FROM notification_log
-         WHERE chat_id = ? AND priority = 'CRITICAL'
-           AND sent_at > datetime('now', 'start of day')`,
-          [chatId],
-          (err, row) => {
-            if (err) return reject(err);
-            resolve(row?.cnt || 0);
-          }
-      );
-    });
-  }
-
   _logNotification(chatId, routeId, priority, price, messageType, silent) {
     return new Promise((resolve, reject) => {
       db.run(
-          `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, disable_notification)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, sent_at, disable_notification)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`,
           [chatId, routeId, priority, price, messageType, silent ? 1 : 0],
           (err) => {
             if (err) {
               console.error('Ошибка записи notification_log:', err);
-              reject(err);
-            } else {
-              resolve();
-            }
-          }
-      );
-    });
-  }
-
-  _addToDigestQueue(chatId, routeId, priority, price, analytics, bestResultId) {
-    return new Promise((resolve, reject) => {
-      db.run(
-          `INSERT INTO daily_digest_queue (chat_id, route_id, priority, price, avg_price, historical_min, best_result_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [chatId, routeId, priority, price, analytics?.avgPrice || null, analytics?.minPrice || null, bestResultId || null],
-          (err) => {
-            if (err) {
-              console.error('Ошибка записи в digest queue:', err);
               reject(err);
             } else {
               resolve();
