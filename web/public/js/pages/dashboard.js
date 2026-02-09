@@ -18,23 +18,24 @@ class DashboardPage {
 
         try {
             // Fetch all required data
-            const [statsData, users, routes, checkStats, monetizationStats, engagementStats] = await Promise.all([
+            const [statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration] = await Promise.all([
                 api.get('/analytics-main'),
                 api.getUsers(),
                 api.getRoutes(),
                 api.getCheckStats(),
                 api.get('/monetization-stats?period=30'),
-                api.get('/engagement-stats?period=30')
+                api.get('/engagement-stats?period=30'),
+                api.get('/check-duration-by-hour?days=7')
             ]);
 
-            this.renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats);
+            this.renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration);
         } catch (error) {
             console.error('Dashboard error:', error);
             showError(content, error);
         }
     }
 
-    renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats) {
+    renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration) {
         const content = document.getElementById('main-content');
 
         // Статистика проверок из API
@@ -111,6 +112,20 @@ class DashboardPage {
                                         <small class="text-muted">Success Rate</small>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- График длительности проверок -->
+                <div class="row g-4 mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="mb-0">⏱️ Длительность проверок по часам</h5>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="check-duration-chart"></canvas>
                             </div>
                         </div>
                     </div>
@@ -230,6 +245,9 @@ class DashboardPage {
 
         // Render hourly chart
         this.renderHourlyChart(statsData.hourlyStats || []);
+
+        // Render check duration chart
+        this.renderCheckDurationChart(checkDuration.checkDuration || []);
     }
 
     renderStatsCards(statsData, users, routes) {
@@ -695,6 +713,87 @@ class DashboardPage {
         this.charts.hourly.render();
     }
 
+    renderCheckDurationChart(checkDurationData) {
+        if (!checkDurationData || checkDurationData.length === 0) {
+            return;
+        }
+
+        // Подготовка данных для графика
+        const labels = checkDurationData.map(item => {
+            // Форматируем дату-время в читаемый вид
+            const date = new Date(item.hour.replace(' ', 'T'));
+            const day = date.getDate().toString().padStart(2, '0');
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const hours = date.getHours().toString().padStart(2, '0');
+            return `${day}.${month} ${hours}:00`;
+        });
+
+        const durations = checkDurationData.map(item => item.duration_minutes);
+        const checksCount = checkDurationData.map(item => item.checks_count);
+
+        // Создаем график с двумя осями Y
+        this.charts.checkDuration = new ChartComponent({
+            canvasId: 'check-duration-chart',
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Длительность (мин)',
+                        data: durations,
+                        borderColor: CONFIG.CHART_COLORS.PRIMARY,
+                        backgroundColor: `${CONFIG.CHART_COLORS.PRIMARY}20`,
+                        tension: 0.4,
+                        yAxisID: 'y',
+                        fill: true
+                    },
+                    {
+                        label: 'Кол-во проверок',
+                        data: checksCount,
+                        borderColor: CONFIG.CHART_COLORS.SUCCESS,
+                        backgroundColor: `${CONFIG.CHART_COLORS.SUCCESS}20`,
+                        tension: 0.4,
+                        yAxisID: 'y1',
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Длительность (минуты)'
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Количество проверок'
+                        },
+                        grid: {
+                            drawOnChartArea: false
+                        }
+                    }
+                }
+            }
+        });
+        this.charts.checkDuration.render();
+    }
 
     renderMonetization(monetizationStats) {
         const totalClicks = monetizationStats.totalClicks || 0;

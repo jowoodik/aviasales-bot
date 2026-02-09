@@ -1653,6 +1653,42 @@ app.get('/admin/api/engagement-stats', requireAdmin, async (req, res) => {
   }
 });
 
+// API: Длительность проверок по часам
+app.get('/admin/api/check-duration-by-hour', requireAdmin, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7; // по умолчанию 7 дней
+
+    // Получаем данные о проверках, группируя по часу
+    const checkDuration = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          strftime('%Y-%m-%d %H:00', check_timestamp) as hour,
+          COUNT(*) as checks_count,
+          MIN(check_timestamp) as first_check,
+          MAX(check_timestamp) as last_check,
+          -- Вычисляем длительность в минутах как разницу между первой и последней проверкой в этом часе
+          CAST((julianday(MAX(check_timestamp)) - julianday(MIN(check_timestamp))) * 24 * 60 AS INTEGER) as duration_minutes
+        FROM route_check_stats
+        WHERE check_timestamp >= datetime('now', '-${days} days')
+        GROUP BY strftime('%Y-%m-%d %H:00', check_timestamp)
+        ORDER BY hour DESC
+        LIMIT 168
+      `, [], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json({
+      checkDuration: checkDuration.reverse(), // От старых к новым
+      period: days
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки длительности проверок:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Детали пользователя
 app.get('/admin/api/users/:chatId', requireAdmin, async (req, res) => {
   try {
