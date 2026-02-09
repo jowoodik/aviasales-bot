@@ -675,6 +675,13 @@ class RouteHandlers {
                 state.routeData.destination = iataCode;
                 state.routeData.destination_city = airport.city_name;
                 state.routeData.destination_country = airport.country_name;
+
+                // Логируем выбор аэропортов (шаг воронки)
+                ActivityService.logEvent(chatId, 'route_step_airports', {
+                    origin: state.routeData.origin,
+                    destination: state.routeData.destination
+                }).catch(err => console.error('Activity log error:', err));
+
                 state.step = 'search_type';
 
                 // Переходим к следующему шагу
@@ -850,6 +857,13 @@ class RouteHandlers {
                 state.routeData.destination_city = airport.city_name;
                 state.routeData.destination_country = airport.country_name;
                 state.routeData.destination_city_code = airport.city_code;
+
+                // Логируем выбор аэропортов (шаг воронки)
+                ActivityService.logEvent(chatId, 'route_step_airports', {
+                    origin: state.routeData.origin,
+                    destination: state.routeData.destination
+                }).catch(err => console.error('Activity log error:', err));
+
                 state.step = 'search_type';
                 delete state.tempAirport;
                 delete state.tempStepType;
@@ -924,6 +938,13 @@ class RouteHandlers {
                 state.routeData.destination_city = selectedAirport.city_name;
                 state.routeData.destination_country = selectedAirport.country_name;
                 state.routeData.destination_city_code = selectedAirport.city_code;
+
+                // Логируем выбор аэропортов (шаг воронки)
+                ActivityService.logEvent(chatId, 'route_step_airports', {
+                    origin: state.routeData.origin,
+                    destination: state.routeData.destination
+                }).catch(err => console.error('Activity log error:', err));
+
                 state.step = 'search_type';
                 delete state.searchResults;
                 delete state.searchQuery;
@@ -998,6 +1019,14 @@ class RouteHandlers {
         }
 
         state.routeData.is_flexible = isFlexible;
+
+        // Логируем выбор типа поиска (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_search_type', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            isFlexible: isFlexible
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'has_return';
 
         const keyboard = {
@@ -1031,6 +1060,13 @@ class RouteHandlers {
 
         const hasReturn = text.includes('Да');
         state.routeData.has_return = hasReturn;
+
+        // Логируем выбор типа билета (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_has_return', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            hasReturn: hasReturn
+        }).catch(err => console.error('Activity log error:', err));
 
         if (state.routeData.is_flexible) {
             // Получаем подписку пользователя для формирования правильного сообщения
@@ -1149,6 +1185,14 @@ class RouteHandlers {
                 keyboard
             );
         } else {
+            // Логируем выбор дат для билета в одну сторону (фиксированные даты)
+            ActivityService.logEvent(chatId, 'route_step_dates', {
+                origin: state.routeData.origin,
+                destination: state.routeData.destination,
+                isFlexible: false,
+                hasReturn: false
+            }).catch(err => console.error('Activity log error:', err));
+
             // Переходим сразу к выбору авиакомпании
             state.step = 'airline';
             this._showAirlineKeyboard(chatId, state);
@@ -1194,6 +1238,15 @@ class RouteHandlers {
         }
 
         state.routeData.return_date = date;
+
+        // Логируем выбор дат для туда-обратно (фиксированные даты)
+        ActivityService.logEvent(chatId, 'route_step_dates', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            isFlexible: false,
+            hasReturn: true
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'airline';
         this._showAirlineKeyboard(chatId, state);
 
@@ -1368,6 +1421,14 @@ class RouteHandlers {
                 return true;
             }
 
+            // Логируем выбор дат для гибкого поиска без обратного билета
+            ActivityService.logEvent(chatId, 'route_step_dates', {
+                origin: state.routeData.origin,
+                destination: state.routeData.destination,
+                isFlexible: true,
+                hasReturn: false
+            }).catch(err => console.error('Activity log error:', err));
+
             // Всё ОК - переходим к авиакомпании
             state.step = 'airline';
             this._showAirlineKeyboard(chatId, state);
@@ -1541,6 +1602,14 @@ class RouteHandlers {
             `📊 Будет проверено ${combCount} ${this._pluralize(combCount, 'комбинация', 'комбинации', 'комбинаций')}\n\n` +
             `Продолжаем настройку...`
         );
+
+        // Логируем выбор дат для гибкого поиска с обратным билетом
+        ActivityService.logEvent(chatId, 'route_step_dates', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            isFlexible: true,
+            hasReturn: true
+        }).catch(err => console.error('Activity log error:', err));
 
         state.step = 'airline';
         this._showAirlineKeyboard(chatId, state);
@@ -1726,6 +1795,14 @@ class RouteHandlers {
         else if (text.includes('Utair')) airline = 'UT';
 
         state.routeData.airline = airline;
+
+        // Логируем выбор авиакомпании (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_airline', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            airline: airline || 'any'
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'adults';
 
         const data = state.routeData;
@@ -1777,6 +1854,14 @@ class RouteHandlers {
         }
 
         state.routeData.adults = adults;
+
+        // Логируем выбор количества взрослых (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_adults', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            adults: adults
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'children';
 
         const data = state.routeData;
@@ -1856,6 +1941,14 @@ class RouteHandlers {
         }
 
         state.routeData.children = children;
+
+        // Логируем выбор количества детей (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_children', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            children: children
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'baggage';
 
         const data = state.routeData;
@@ -1929,6 +2022,14 @@ class RouteHandlers {
 
         const baggage = text.includes('С багажом') ? 1 : 0;
         state.routeData.baggage = baggage;
+
+        // Логируем выбор багажа (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_baggage', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            baggage: baggage === 1
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'max_stops';
 
         const data = state.routeData;
@@ -2015,6 +2116,13 @@ class RouteHandlers {
         }
 
         state.routeData.max_stops = maxStops;
+
+        // Логируем выбор пересадок (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_max_stops', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            maxStops: maxStops
+        }).catch(err => console.error('Activity log error:', err));
 
         if (maxStops === 0) {
             // Прямые рейсы - сразу к порогу
@@ -2103,6 +2211,14 @@ class RouteHandlers {
         }
 
         state.routeData.max_layover_hours = hours;
+
+        // Логируем выбор максимального времени пересадки (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_max_layover', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            maxLayoverHours: hours
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'threshold';
         this._showThresholdInput(chatId, state);
 
@@ -2215,6 +2331,14 @@ class RouteHandlers {
 
         state.routeData.threshold_price = price;
         state.routeData.currency = 'RUB';
+
+        // Логируем указание бюджета (шаг воронки)
+        ActivityService.logEvent(chatId, 'route_step_budget', {
+            origin: state.routeData.origin,
+            destination: state.routeData.destination,
+            budget: price
+        }).catch(err => console.error('Activity log error:', err));
+
         state.step = 'confirm';
 
         // Показываем сводку для подтверждения
@@ -2387,6 +2511,14 @@ class RouteHandlers {
             const newPauseStatus = !route.is_paused;
             await UnifiedRoute.updatePauseStatus(route.id, newPauseStatus);
 
+            // Логируем паузу/возобновление маршрута
+            const eventType = newPauseStatus ? 'pause_route' : 'resume_route';
+            ActivityService.logEvent(chatId, eventType, {
+                routeId: route.id,
+                origin: route.origin,
+                destination: route.destination
+            }).catch(err => console.error('Activity log error:', err));
+
             this.bot.sendMessage(
                 chatId,
                 newPauseStatus
@@ -2478,8 +2610,12 @@ class RouteHandlers {
         if (!state || !state.route) return false;
 
         if (text.includes('Да')) {
-            // Логируем удаление маршрута
-            ActivityService.logEvent(chatId, 'delete_route', { routeId: state.route.id }).catch(err => console.error('Activity log error:', err));
+            // Логируем удаление (архивирование) маршрута
+            ActivityService.logEvent(chatId, 'delete_route', {
+                routeId: state.route.id,
+                origin: state.route.origin,
+                destination: state.route.destination
+            }).catch(err => console.error('Activity log error:', err));
 
             await UnifiedRoute.setAsArchived(state.route.id);
             this.bot.sendMessage(

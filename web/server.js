@@ -1244,22 +1244,6 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
-    // Популярные маршруты (исправлено имя на topRoutes)
-    const topRoutes = await new Promise((resolve) => {
-      db.all(`
-        SELECT
-          origin,
-          destination,
-          COUNT(*) as count
-        FROM unified_routes
-        GROUP BY origin, destination
-        ORDER BY count DESC
-          LIMIT 10
-      `, (err, rows) => {
-        resolve(rows || []);
-      });
-    });
-
     // Статистика по часам
     const hourlyStats = await new Promise((resolve) => {
       db.all(`
@@ -1275,36 +1259,86 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
-    // Средние цены
-    const avgPrices = await new Promise((resolve) => {
-      db.all(`
-        SELECT
-          origin,
-          destination,
-          AVG(price) as avgprice,
-          COUNT(*) as pricecount
-        FROM price_analytics
-        WHERE found_at >= datetime('now', '-30 days')
-        GROUP BY origin, destination
-        HAVING pricecount > 5
-        ORDER BY avgprice DESC
-          LIMIT 10
-      `, (err, rows) => {
-        resolve(rows || []);
-      });
-    });
+    // Статистика настроек (таймзона, уведомления, ночной режим)
+    const settingsActivity = await new Promise((resolve) => {
+      db.serialize(() => {
+        const stats = {};
+        let completed = 0;
+        const totalQueries = 7;
 
-    // Статистика проверок (всего, успешных, неудачных)
-    const checkStats = await new Promise((resolve) => {
-      db.get(`
-        SELECT
-          COALESCE(SUM(total_combinations), 0) as total_combinations,
-          COALESCE(SUM(successful_checks), 0) as successful_checks,
-          COALESCE(SUM(failed_checks), 0) as failed_checks,
-          COUNT(*) as total_check_runs
-        FROM route_check_stats
-      `, (err, row) => {
-        resolve(row || { total_combinations: 0, successful_checks: 0, failed_checks: 0, total_check_runs: 0 });
+        const checkComplete = () => {
+          completed++;
+          if (completed === totalQueries) {
+            resolve(stats);
+          }
+        };
+
+        // Смена таймзоны
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'change_timezone'
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.timezoneChanges = row?.count || 0;
+            checkComplete();
+          });
+
+        // Переключения уведомлений
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_notifications'
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.notificationToggles = row?.count || 0;
+            checkComplete();
+          });
+
+        // Уведомления включены
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_notifications'
+                AND json_extract(event_data, '$.enabled') = 1
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.notificationsEnabled = row?.count || 0;
+            checkComplete();
+          });
+
+        // Уведомления отключены
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_notifications'
+                AND json_extract(event_data, '$.enabled') = 0
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.notificationsDisabled = row?.count || 0;
+            checkComplete();
+          });
+
+        // Переключения ночного режима
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_night_mode'
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.nightModeToggles = row?.count || 0;
+            checkComplete();
+          });
+
+        // Ночной режим включен
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_night_mode'
+                AND json_extract(event_data, '$.enabled') = 1
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.nightModeEnabled = row?.count || 0;
+            checkComplete();
+          });
+
+        // Ночной режим отключен
+        db.get(`SELECT COUNT(*) as count FROM user_activity_log
+                WHERE event_type = 'toggle_night_mode'
+                AND json_extract(event_data, '$.enabled') = 0
+                AND created_at >= datetime('now', '-30 days')`,
+          (err, row) => {
+            stats.nightModeDisabled = row?.count || 0;
+            checkComplete();
+          });
       });
     });
 
@@ -1357,10 +1391,8 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
     res.json({
       success: true,
       topUsers,
-      topRoutes,
       hourlyStats,
-      avgPrices,
-      checkStats,
+      settingsActivity,
       userActivity: { dau, wau, mau },
       combinations: {
         total: totalCombinations,
@@ -1484,6 +1516,139 @@ app.get('/admin/api/monetization-stats', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('Ошибка загрузки статистики монетизации:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Статистика вовлеченности (Engagement)
+app.get('/admin/api/engagement-stats', requireAdmin, async (req, res) => {
+  try {
+    const period = req.query.period || '30'; // дней
+
+    // Stickiness = DAU / MAU
+    const stickiness = await new Promise((resolve) => {
+      db.get(`
+        SELECT
+          (SELECT COUNT(DISTINCT chat_id) FROM user_activity_log
+           WHERE created_at >= datetime('now', '-1 day')) * 100.0 /
+          NULLIF((SELECT COUNT(DISTINCT chat_id) FROM user_activity_log
+           WHERE created_at >= datetime('now', '-30 days')), 0) as stickiness
+      `, (err, row) => {
+        resolve(row?.stickiness ? parseFloat(row.stickiness.toFixed(2)) : 0);
+      });
+    });
+
+    // Активных маршрутов на активного пользователя
+    const activeRoutesPerUser = await new Promise((resolve) => {
+      db.get(`
+        SELECT
+          COUNT(ur.id) * 1.0 / NULLIF(COUNT(DISTINCT ur.chat_id), 0) as avg_routes
+        FROM unified_routes ur
+        WHERE ur.is_paused = 0
+          AND ur.is_archived = 0
+          AND ur.chat_id IN (
+            SELECT DISTINCT chat_id
+            FROM user_activity_log
+            WHERE created_at >= datetime('now', '-${period} days')
+          )
+      `, (err, row) => {
+        resolve(row?.avg_routes ? parseFloat(row.avg_routes.toFixed(2)) : 0);
+      });
+    });
+
+    // Retention D1 - пользователи, вернувшиеся через 1 день
+    const retentionD1 = await new Promise((resolve) => {
+      db.get(`
+        WITH new_users AS (
+          SELECT DISTINCT chat_id, DATE(MIN(created_at)) as first_day
+          FROM user_activity_log
+          WHERE created_at >= datetime('now', '-8 days')
+          GROUP BY chat_id
+          HAVING DATE(MIN(created_at)) = DATE('now', '-1 day')
+        ),
+        returned_users AS (
+          SELECT DISTINCT nu.chat_id
+          FROM new_users nu
+          JOIN user_activity_log ual ON nu.chat_id = ual.chat_id
+          WHERE DATE(ual.created_at) = DATE(nu.first_day, '+1 day')
+        )
+        SELECT
+          COUNT(DISTINCT nu.chat_id) as total,
+          COUNT(DISTINCT ru.chat_id) as returned
+        FROM new_users nu
+        LEFT JOIN returned_users ru ON nu.chat_id = ru.chat_id
+      `, (err, row) => {
+        if (!row || row.total === 0) return resolve(0);
+        resolve(Math.round((row.returned / row.total) * 100));
+      });
+    });
+
+    // Retention D7 - пользователи, вернувшиеся через 7 дней
+    const retentionD7 = await new Promise((resolve) => {
+      db.get(`
+        WITH new_users AS (
+          SELECT DISTINCT chat_id, DATE(MIN(created_at)) as first_day
+          FROM user_activity_log
+          WHERE created_at >= datetime('now', '-14 days')
+          GROUP BY chat_id
+          HAVING DATE(MIN(created_at)) = DATE('now', '-7 days')
+        ),
+        returned_users AS (
+          SELECT DISTINCT nu.chat_id
+          FROM new_users nu
+          JOIN user_activity_log ual ON nu.chat_id = ual.chat_id
+          WHERE DATE(ual.created_at) BETWEEN DATE(nu.first_day, '+6 days') AND DATE(nu.first_day, '+8 days')
+        )
+        SELECT
+          COUNT(DISTINCT nu.chat_id) as total,
+          COUNT(DISTINCT ru.chat_id) as returned
+        FROM new_users nu
+        LEFT JOIN returned_users ru ON nu.chat_id = ru.chat_id
+      `, (err, row) => {
+        if (!row || row.total === 0) return resolve(0);
+        resolve(Math.round((row.returned / row.total) * 100));
+      });
+    });
+
+    // Retention D30 - пользователи, вернувшиеся через 30 дней
+    const retentionD30 = await new Promise((resolve) => {
+      db.get(`
+        WITH new_users AS (
+          SELECT DISTINCT chat_id, DATE(MIN(created_at)) as first_day
+          FROM user_activity_log
+          WHERE created_at >= datetime('now', '-60 days')
+          GROUP BY chat_id
+          HAVING DATE(MIN(created_at)) = DATE('now', '-30 days')
+        ),
+        returned_users AS (
+          SELECT DISTINCT nu.chat_id
+          FROM new_users nu
+          JOIN user_activity_log ual ON nu.chat_id = ual.chat_id
+          WHERE DATE(ual.created_at) BETWEEN DATE(nu.first_day, '+28 days') AND DATE(nu.first_day, '+32 days')
+        )
+        SELECT
+          COUNT(DISTINCT nu.chat_id) as total,
+          COUNT(DISTINCT ru.chat_id) as returned
+        FROM new_users nu
+        LEFT JOIN returned_users ru ON nu.chat_id = ru.chat_id
+      `, (err, row) => {
+        if (!row || row.total === 0) return resolve(0);
+        resolve(Math.round((row.returned / row.total) * 100));
+      });
+    });
+
+    res.json({
+      stickiness,
+      activeRoutesPerUser,
+      retention: {
+        d1: retentionD1,
+        d7: retentionD7,
+        d30: retentionD30
+      },
+      period: parseInt(period)
+    });
+  } catch (error) {
+    console.error('Ошибка загрузки статистики вовлеченности:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2797,23 +2962,52 @@ app.get('/admin/api/analytics', requireAdmin, async (req, res) => {
     });
 
     // 14. Лучшие найденные предложения за последние 7 дней
+    // Сравниваем с средней ценой по направлению, берем только уникальные маршруты
     const bestDeals = await new Promise((resolve) => {
       db.all(`
+        WITH avg_prices AS (
+          SELECT
+            ur.origin,
+            ur.destination,
+            AVG(rr.total_price) as avg_price
+          FROM route_results rr
+          JOIN unified_routes ur ON rr.route_id = ur.id
+          GROUP BY ur.origin, ur.destination
+        ),
+        best_per_route AS (
+          SELECT
+            rr.id,
+            rr.route_id,
+            ur.origin,
+            ur.destination,
+            rr.departure_date,
+            rr.return_date,
+            rr.total_price,
+            ap.avg_price,
+            (ap.avg_price - rr.total_price) as savings,
+            rr.airline,
+            rr.found_at,
+            ROW_NUMBER() OVER (PARTITION BY ur.origin, ur.destination ORDER BY (ap.avg_price - rr.total_price) DESC) as rn
+          FROM route_results rr
+          JOIN unified_routes ur ON rr.route_id = ur.id
+          JOIN avg_prices ap ON ur.origin = ap.origin AND ur.destination = ap.destination
+          WHERE rr.found_at >= datetime('now', '-7 days')
+            AND rr.total_price < ap.avg_price
+        )
         SELECT
-          rr.id,
-          rr.route_id,
-          ur.origin,
-          ur.destination,
-          rr.departure_date,
-          rr.return_date,
-          rr.total_price,
-          ur.threshold_price,
-          (ur.threshold_price - rr.total_price) as savings,
-          rr.airline,
-          rr.found_at
-        FROM route_results rr
-        JOIN unified_routes ur ON rr.route_id = ur.id
-        WHERE rr.found_at >= datetime('now', '-7 days')
+          id,
+          route_id,
+          origin,
+          destination,
+          departure_date,
+          return_date,
+          total_price,
+          avg_price,
+          savings,
+          airline,
+          found_at
+        FROM best_per_route
+        WHERE rn = 1
         ORDER BY savings DESC
         LIMIT 20
       `, (err, rows) => {

@@ -306,6 +306,13 @@ bot.on('message', async (msg) => {
 
       // Если мы в создании маршрута -> отмена и главное меню
       if (state?.routeData) {
+        // Логируем отмену создания маршрута
+        ActivityService.logEvent(chatId, 'cancel_route_creation', {
+          step: state.step,
+          origin: state.routeData.origin || null,
+          destination: state.routeData.destination || null
+        }).catch(err => console.error('Activity log error:', err));
+
         delete userStates[chatId];
         bot.sendMessage(
             chatId,

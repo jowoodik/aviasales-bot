@@ -516,14 +516,34 @@ class SettingsHandlers {
 
   _updateTimezone(chatId, timezone) {
     return new Promise((resolve, reject) => {
-      db.run(
-          'UPDATE user_settings SET timezone = ? WHERE chat_id = ?',
-          [timezone, chatId],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-      );
+      // Сначала получаем старое значение
+      db.get('SELECT timezone FROM user_settings WHERE chat_id = ?', [chatId], (err, row) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const oldTimezone = row?.timezone;
+
+        // Обновляем таймзону
+        db.run(
+            'UPDATE user_settings SET timezone = ? WHERE chat_id = ?',
+            [timezone, chatId],
+            (err) => {
+              if (err) {
+                reject(err);
+              } else {
+                // Логируем изменение
+                ActivityService.logEvent(chatId, 'change_timezone', {
+                  oldValue: oldTimezone,
+                  newValue: timezone
+                }).catch(err => console.error('Activity log error:', err));
+
+                resolve();
+              }
+            }
+        );
+      });
     });
   }
 
@@ -533,8 +553,16 @@ class SettingsHandlers {
           'UPDATE user_settings SET notifications_enabled = ? WHERE chat_id = ?',
           [value, chatId],
           (err) => {
-            if (err) reject(err);
-            else resolve();
+            if (err) {
+              reject(err);
+            } else {
+              // Логируем изменение
+              ActivityService.logEvent(chatId, 'toggle_notifications', {
+                enabled: value === 1
+              }).catch(err => console.error('Activity log error:', err));
+
+              resolve();
+            }
           }
       );
     });
@@ -546,8 +574,16 @@ class SettingsHandlers {
           'UPDATE user_settings SET night_mode = ? WHERE chat_id = ?',
           [value, chatId],
           (err) => {
-            if (err) reject(err);
-            else resolve();
+            if (err) {
+              reject(err);
+            } else {
+              // Логируем изменение
+              ActivityService.logEvent(chatId, 'toggle_night_mode', {
+                enabled: value === 1
+              }).catch(err => console.error('Activity log error:', err));
+
+              resolve();
+            }
           }
       );
     });

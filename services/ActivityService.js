@@ -87,7 +87,7 @@ class ActivityService {
       db.serialize(() => {
         const funnel = {};
         let completed = 0;
-        const totalQueries = 4;
+        const totalQueries = 13;
 
         const checkComplete = () => {
           completed++;
@@ -96,32 +96,9 @@ class ActivityService {
           }
         };
 
-        // Активные пользователи (любое действие)
+        // Начали создание маршрута (базовый уровень)
         db.get(
-          `SELECT COUNT(DISTINCT chat_id) as count
-           FROM user_activity_log
-           WHERE created_at >= datetime('now', '-${days} days')`,
-          (err, row) => {
-            funnel.active_users = row?.count || 0;
-            checkComplete();
-          }
-        );
-
-        // Просмотрели маршруты
-        db.get(
-          `SELECT COUNT(DISTINCT chat_id) as count
-           FROM user_activity_log
-           WHERE event_type = 'view_routes'
-             AND created_at >= datetime('now', '-${days} days')`,
-          (err, row) => {
-            funnel.viewed_routes = row?.count || 0;
-            checkComplete();
-          }
-        );
-
-        // Начали создание маршрута
-        db.get(
-          `SELECT COUNT(DISTINCT chat_id) as count
+          `SELECT COUNT(*) as count
            FROM user_activity_log
            WHERE event_type = 'create_route_start'
              AND created_at >= datetime('now', '-${days} days')`,
@@ -131,9 +108,141 @@ class ActivityService {
           }
         );
 
+        // Выбрали аэропорты
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_airports'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_airports = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали тип поиска (фиксированные/гибкие)
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_search_type'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_search_type = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали тип билета (туда-обратно/в одну сторону)
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_has_return'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_has_return = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали даты
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_dates'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_dates = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали авиакомпанию
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_airline'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_airline = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Указали взрослых
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_adults'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_adults = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Указали детей
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_children'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_children = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали багаж
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_baggage'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_baggage = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали пересадки
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_max_stops'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_max_stops = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Выбрали время пересадки (только если есть пересадки)
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_max_layover'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_max_layover = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // Указали бюджет
+        db.get(
+          `SELECT COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'route_step_budget'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.selected_budget = row?.count || 0;
+            checkComplete();
+          }
+        );
+
         // Завершили создание маршрута
         db.get(
-          `SELECT COUNT(DISTINCT chat_id) as count
+          `SELECT COUNT(*) as count
            FROM user_activity_log
            WHERE event_type = 'route_created'
              AND created_at >= datetime('now', '-${days} days')`,

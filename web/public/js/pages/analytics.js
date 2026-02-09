@@ -17,7 +17,7 @@ class AnalyticsPage {
       <div class="analytics-page">
         <div class="page-header">
           <h1>📊 Детальная аналитика</h1>
-          <p class="subtitle">Статистика использования и эффективности</p>
+          <p class="subtitle">Глубокий анализ маршрутов, цен и трендов</p>
         </div>
 
         <div id="analytics-loading" class="loading-state">
@@ -27,20 +27,15 @@ class AnalyticsPage {
 
         <div id="analytics-content" style="display: none;">
 
-          <!-- Общая статистика -->
-          <div class="row mb-4" id="general-stats">
-            <!-- Заполняется динамически -->
-          </div>
-
-          <!-- Секция: Маршруты -->
+          <!-- Секция: Популярные маршруты -->
           <div class="card mb-4">
-            <div class="card-header">
+            <div class="card-header bg-primary text-white">
               <h5 class="mb-0">🛫 Популярные маршруты</h5>
             </div>
             <div class="card-body">
               <div class="row">
                 <div class="col-lg-6">
-                  <div class="chart-container" style="height: 300px;">
+                  <div class="chart-container" style="height: 350px;">
                     <canvas id="chart-top-routes"></canvas>
                   </div>
                 </div>
@@ -51,22 +46,22 @@ class AnalyticsPage {
             </div>
           </div>
 
-          <!-- Секция: Направления -->
+          <!-- Секция: Топ направлений -->
           <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">🌍 Топ направлений</h5>
+            <div class="card-header bg-info text-white">
+              <h5 class="mb-0">🌍 География полетов</h5>
             </div>
             <div class="card-body">
               <div class="row">
                 <div class="col-lg-6">
-                  <h6 class="text-center">По прилету</h6>
-                  <div class="chart-container" style="height: 300px;">
+                  <h6 class="text-center">Топ городов прилета</h6>
+                  <div class="chart-container" style="height: 350px;">
                     <canvas id="chart-destinations"></canvas>
                   </div>
                 </div>
                 <div class="col-lg-6">
-                  <h6 class="text-center">По вылету</h6>
-                  <div class="chart-container" style="height: 300px;">
+                  <h6 class="text-center">Топ городов вылета</h6>
+                  <div class="chart-container" style="height: 350px;">
                     <canvas id="chart-origins"></canvas>
                   </div>
                 </div>
@@ -74,120 +69,78 @@ class AnalyticsPage {
             </div>
           </div>
 
-          <!-- Секция: Цены -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">💰 Распределение цен</h5>
+          <!-- Секция: Ценовая аналитика -->
+          <div class="row g-4 mb-4">
+            <div class="col-lg-6">
+              <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                  <h5 class="mb-0">💰 Распределение бюджетов</h5>
+                </div>
+                <div class="card-body">
+                  <div class="chart-container" style="height: 300px;">
+                    <canvas id="chart-price-distribution"></canvas>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="card-body">
-              <div class="chart-container" style="height: 300px;">
-                <canvas id="chart-price-distribution"></canvas>
+            <div class="col-lg-6">
+              <div class="card h-100">
+                <div class="card-header bg-warning">
+                  <h5 class="mb-0">✈️ Популярные авиакомпании</h5>
+                </div>
+                <div class="card-body">
+                  <div class="chart-container" style="height: 300px;">
+                    <canvas id="chart-airlines"></canvas>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
           <!-- Секция: Средние цены -->
           <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">📈 Средние цены по маршрутам</h5>
+            <div class="card-header bg-secondary text-white">
+              <h5 class="mb-0">📈 Ценовая аналитика по направлениям (30 дней)</h5>
             </div>
             <div class="card-body">
               <div class="table-responsive" id="table-avg-prices"></div>
             </div>
           </div>
 
-          <!-- Секция: Активность по времени -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">⏰ Активность проверок</h5>
-            </div>
-            <div class="card-body">
-              <div class="row">
-                <div class="col-lg-6">
-                  <h6 class="text-center">По часам (последние 7 дней)</h6>
-                  <div class="chart-container" style="height: 300px;">
-                    <canvas id="chart-hourly-stats"></canvas>
-                  </div>
-                </div>
-                <div class="col-lg-6">
-                  <h6 class="text-center">По дням недели</h6>
-                  <div class="chart-container" style="height: 300px;">
-                    <canvas id="chart-weekday-stats"></canvas>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Секция: Пользователи -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">👥 Топ пользователей</h5>
-            </div>
-            <div class="card-body">
-              <div class="table-responsive" id="table-top-users"></div>
-            </div>
-          </div>
-
-          <!-- Секция: Динамика -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">📊 Динамика создания маршрутов</h5>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" style="height: 300px;">
-                <canvas id="chart-route-trend"></canvas>
-              </div>
-            </div>
-          </div>
-
           <!-- Секция: Лучшие предложения -->
           <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">🔥 Лучшие предложения (7 дней)</h5>
+            <div class="card-header bg-danger text-white">
+              <h5 class="mb-0">🔥 Лучшие предложения недели</h5>
             </div>
             <div class="card-body">
               <div class="table-responsive" id="table-best-deals"></div>
             </div>
           </div>
 
-          <!-- Секция: Успешность -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">✅ Успешность проверок</h5>
-            </div>
-            <div class="card-body">
-              <div id="success-rate-info"></div>
-            </div>
-          </div>
-
-          <!-- Секция: Подписки -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">💎 Статистика подписок</h5>
-            </div>
-            <div class="card-body">
-              <div class="row">
-                <div class="col-lg-6">
-                  <div class="chart-container" style="height: 300px;">
-                    <canvas id="chart-subscriptions"></canvas>
-                  </div>
+          <!-- Секция: Временной анализ -->
+          <div class="row g-4 mb-4">
+            <div class="col-lg-8">
+              <div class="card h-100">
+                <div class="card-header">
+                  <h5 class="mb-0">📊 Динамика создания маршрутов (30 дней)</h5>
                 </div>
-                <div class="col-lg-6">
-                  <div class="table-responsive" id="table-subscriptions"></div>
+                <div class="card-body">
+                  <div class="chart-container" style="height: 300px;">
+                    <canvas id="chart-route-trend"></canvas>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- Секция: Авиакомпании -->
-          <div class="card mb-4">
-            <div class="card-header">
-              <h5 class="mb-0">✈️ Популярные авиакомпании</h5>
-            </div>
-            <div class="card-body">
-              <div class="chart-container" style="height: 300px;">
-                <canvas id="chart-airlines"></canvas>
+            <div class="col-lg-4">
+              <div class="card h-100">
+                <div class="card-header">
+                  <h5 class="mb-0">📅 Активность по дням недели</h5>
+                </div>
+                <div class="card-body">
+                  <div class="chart-container" style="height: 300px;">
+                    <canvas id="chart-weekday-stats"></canvas>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -215,53 +168,21 @@ class AnalyticsPage {
             document.getElementById('analytics-loading').style.display = 'none';
             document.getElementById('analytics-content').style.display = 'block';
 
-            this.renderGeneralStats();
+            // Рендерим только уникальные для Analytics данные
             this.renderTopRoutesChart();
             this.renderDestinationsChart();
             this.renderOriginsChart();
             this.renderPriceDistribution();
             this.renderAvgPricesTable();
-            this.renderHourlyStats();
             this.renderWeekdayStats();
-            this.renderTopUsersTable();
             this.renderRouteTrendChart();
             this.renderBestDealsTable();
-            this.renderSuccessRate();
-            this.renderSubscriptionsChart();
             this.renderAirlinesChart();
 
         } catch (error) {
             console.error('Error loading analytics:', error);
             showError('Ошибка загрузки аналитики: ' + error.message);
         }
-    }
-
-    renderGeneralStats() {
-        const stats = this.analyticsData.generalStats;
-        console.log(this.analyticsData);
-        const container = document.getElementById('general-stats');
-
-        const cards = [
-            { label: 'Всего маршрутов', value: stats.total_routes || 0, icon: '🛫', color: 'primary' },
-            { label: 'Активных', value: stats.active_routes || 0, icon: '✅', color: 'success' },
-            { label: 'Фиксированных', value: stats.fixed_routes || 0, icon: '📅', color: 'info' },
-            { label: 'Гибких', value: stats.flexible_routes || 0, icon: '🔄', color: 'warning' },
-            { label: 'Пользователей', value: stats.total_users || 0, icon: '👥', color: 'secondary' },
-            { label: 'Найдено билетов', value: stats.total_results || 0, icon: '🎫', color: 'success' },
-            { label: 'Проверок выполнено', value: stats.total_checks || 0, icon: '🔍', color: 'primary' },
-        ];
-
-        container.innerHTML = cards.map(card => `
-      <div class="col-lg-3 col-md-4 col-sm-6 mb-3">
-        <div class="card border-${card.color}">
-          <div class="card-body text-center">
-            <div class="display-4 mb-2">${card.icon}</div>
-            <h3 class="text-${card.color}">${formatNumber(card.value)}</h3>
-            <p class="text-muted mb-0">${card.label}</p>
-          </div>
-        </div>
-      </div>
-    `).join('');
     }
 
     formatRouteLabel(route) {
@@ -287,25 +208,27 @@ class AnalyticsPage {
             return;
         }
 
-        // Таблица
+        // Таблица с расширенной информацией
         const html = `
       <table class="table table-sm table-hover">
         <thead>
           <tr>
             <th>#</th>
             <th>Маршрут</th>
-            <th>Создано</th>
+            <th>Всего</th>
             <th>Активных</th>
-            <th>Средний порог</th>
+            <th>Гибких</th>
+            <th>Средний бюджет</th>
           </tr>
         </thead>
         <tbody>
           ${data.slice(0, 10).map((route, index) => `
             <tr>
-              <td>${index + 1}</td>
+              <td><span class="badge bg-primary rounded-circle">${index + 1}</span></td>
               <td><strong>${this.formatRouteLabel(route)}</strong></td>
-              <td>${route.count}</td>
-              <td>${route.active_count}</td>
+              <td><span class="badge bg-secondary">${route.count}</span></td>
+              <td><span class="badge bg-success">${route.active_count}</span></td>
+              <td><span class="badge bg-info">${route.flexible_count || 0}</span></td>
               <td>${formatNumber(Math.round(route.avg_threshold))} ₽</td>
             </tr>
           `).join('')}
@@ -314,7 +237,7 @@ class AnalyticsPage {
     `;
         tableContainer.innerHTML = html;
 
-        // График - короткие метки для читаемости
+        // График
         this.charts.topRoutes = ChartComponent.barChart(
             'chart-top-routes',
             data.slice(0, 10).map(r => r.origin_city ? `${r.origin_city} → ${r.destination_city}` : `${r.origin}-${r.destination}`),
@@ -330,7 +253,10 @@ class AnalyticsPage {
     renderDestinationsChart() {
         const data = this.analyticsData.topDestinations || [];
 
-        if (data.length === 0) return;
+        if (data.length === 0) {
+            document.getElementById('chart-destinations').parentElement.innerHTML = '<p class="text-muted text-center">Нет данных</p>';
+            return;
+        }
 
         this.charts.destinations = ChartComponent.doughnutChart(
             'chart-destinations',
@@ -344,7 +270,10 @@ class AnalyticsPage {
     renderOriginsChart() {
         const data = this.analyticsData.topOrigins || [];
 
-        if (data.length === 0) return;
+        if (data.length === 0) {
+            document.getElementById('chart-origins').parentElement.innerHTML = '<p class="text-muted text-center">Нет данных</p>';
+            return;
+        }
 
         this.charts.origins = ChartComponent.doughnutChart(
             'chart-origins',
@@ -357,6 +286,11 @@ class AnalyticsPage {
 
     renderPriceDistribution() {
         const data = this.analyticsData.priceDistribution || [];
+
+        if (data.length === 0) {
+            document.getElementById('chart-price-distribution').parentElement.innerHTML = '<p class="text-muted text-center">Нет данных</p>';
+            return;
+        }
 
         this.charts.priceDistribution = ChartComponent.barChart(
             'chart-price-distribution',
@@ -375,7 +309,12 @@ class AnalyticsPage {
         const container = document.getElementById('table-avg-prices');
 
         if (data.length === 0) {
-            container.innerHTML = '<p class="text-muted">Нет данных за последние 30 дней</p>';
+            container.innerHTML = `
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Пока нет ценовых данных.</strong> Статистика появится после первых найденных билетов.
+                </div>
+            `;
             return;
         }
 
@@ -385,48 +324,37 @@ class AnalyticsPage {
           <tr>
             <th>#</th>
             <th>Маршрут</th>
-            <th>Средняя цена</th>
-            <th>Мин</th>
-            <th>Макс</th>
-            <th>Проверок</th>
+            <th>Средняя</th>
+            <th>Минимум</th>
+            <th>Максимум</th>
+            <th>Разброс</th>
+            <th>Находок</th>
           </tr>
         </thead>
         <tbody>
-          ${data.map((item, index) => `
+          ${data.map((item, index) => {
+            const spread = item.max_price - item.min_price;
+            const spreadPercent = ((spread / item.average_price) * 100).toFixed(0);
+            return `
             <tr>
-              <td>${index + 1}</td>
+              <td><span class="badge bg-secondary rounded-circle">${index + 1}</span></td>
               <td><strong>${this.formatRouteLabel(item)}</strong></td>
-              <td>${formatNumber(Math.round(item.average_price))} ₽</td>
-              <td>${formatNumber(Math.round(item.min_price))} ₽</td>
-              <td>${formatNumber(Math.round(item.max_price))} ₽</td>
+              <td><strong>${formatNumber(Math.round(item.average_price))} ₽</strong></td>
+              <td><span class="text-success">${formatNumber(Math.round(item.min_price))} ₽</span></td>
+              <td><span class="text-danger">${formatNumber(Math.round(item.max_price))} ₽</span></td>
+              <td>
+                <span class="badge ${spreadPercent > 50 ? 'bg-danger' : spreadPercent > 25 ? 'bg-warning' : 'bg-success'}">
+                  ±${spreadPercent}%
+                </span>
+              </td>
               <td>${item.price_count}</td>
             </tr>
-          `).join('')}
+          `}).join('')}
         </tbody>
       </table>
     `;
 
         container.innerHTML = html;
-    }
-
-    renderHourlyStats() {
-        const data = this.analyticsData.hourlyStats || [];
-
-        const fullData = Array(24).fill(0);
-        data.forEach(item => {
-            fullData[item.hour] = item.checks;
-        });
-
-        this.charts.hourlyStats = ChartComponent.lineChart(
-            'chart-hourly-stats',
-            Array.from({length: 24}, (_, i) => `${i}:00`),
-            [{
-                label: 'Проверок',
-                data: fullData,
-                color: CONFIG.CHART_COLORS.WARNING
-            }]
-        );
-        this.charts.hourlyStats.render();
     }
 
     renderWeekdayStats() {
@@ -442,7 +370,7 @@ class AnalyticsPage {
             'chart-weekday-stats',
             weekdays,
             [{
-                label: 'Проверок',
+                label: 'Создано маршрутов',
                 data: fullData,
                 color: CONFIG.CHART_COLORS.INFO
             }]
@@ -450,49 +378,13 @@ class AnalyticsPage {
         this.charts.weekdayStats.render();
     }
 
-    renderTopUsersTable() {
-        const data = this.analyticsData.topUsers || [];
-        const container = document.getElementById('table-top-users');
-
-        if (data.length === 0) {
-            container.innerHTML = '<p class="text-muted">Нет данных</p>';
-            return;
-        }
-
-        const html = `
-      <table class="table table-sm table-hover">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Chat ID</th>
-            <th>Всего маршрутов</th>
-            <th>Активных</th>
-            <th>Гибких</th>
-            <th>Подписка</th>
-            <th>Первый маршрут</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map((user, index) => `
-            <tr>
-              <td>${index + 1}</td>
-              <td><code>${user.chat_id}</code></td>
-              <td>${user.route_count}</td>
-              <td>${user.active_count}</td>
-              <td>${user.flexible_count}</td>
-              <td>${user.subscription_type}</td>
-              <td>${new Date(user.first_route_date).toLocaleDateString('ru-RU')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-
-        container.innerHTML = html;
-    }
-
     renderRouteTrendChart() {
         const data = this.analyticsData.routeCreationTrend || [];
+
+        if (data.length === 0) {
+            document.getElementById('chart-route-trend').parentElement.innerHTML = '<p class="text-muted text-center">Нет данных</p>';
+            return;
+        }
 
         this.charts.routeTrend = ChartComponent.lineChart(
             'chart-route-trend',
@@ -504,7 +396,7 @@ class AnalyticsPage {
                     color: CONFIG.CHART_COLORS.PRIMARY
                 },
                 {
-                    label: 'Гибких',
+                    label: 'Гибкие маршруты',
                     data: data.map(d => d.flexible_count),
                     color: CONFIG.CHART_COLORS.DANGER
                 }
@@ -518,7 +410,12 @@ class AnalyticsPage {
         const container = document.getElementById('table-best-deals');
 
         if (data.length === 0) {
-            container.innerHTML = '<p class="text-muted">Нет данных за последние 7 дней</p>';
+            container.innerHTML = `
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Пока нет выгодных предложений за последние 7 дней.</strong> Они появятся, когда будут найдены билеты ниже средней цены по направлению.
+                </div>
+            `;
             return;
         }
 
@@ -530,138 +427,68 @@ class AnalyticsPage {
             <th>Маршрут</th>
             <th>Даты</th>
             <th>Цена</th>
-            <th>Порог</th>
+            <th>Средняя</th>
             <th>Экономия</th>
+            <th>%</th>
             <th>Авиакомпания</th>
-            <th>Найдено</th>
           </tr>
         </thead>
         <tbody>
-          ${data.slice(0, 15).map((deal, index) => `
+          ${data.slice(0, 15).map((deal, index) => {
+            const savingsPercent = ((deal.savings / deal.avg_price) * 100).toFixed(0);
+            return `
             <tr>
-              <td>${index + 1}</td>
+              <td><span class="badge ${index < 3 ? 'bg-danger' : 'bg-secondary'} rounded-circle">${index + 1}</span></td>
               <td><strong>${this.formatRouteLabel(deal)}</strong></td>
-              <td><small>${new Date(deal.departure_date).toLocaleDateString('ru-RU')}${deal.return_date ? ' - ' + new Date(deal.return_date).toLocaleDateString('ru-RU') : ''}</small></td>
-              <td><strong>${formatNumber(Math.round(deal.total_price))} ₽</strong></td>
-              <td>${formatNumber(Math.round(deal.threshold_price))} ₽</td>
-              <td class="text-success"><strong>-${formatNumber(Math.round(deal.savings))} ₽</strong></td>
-              <td>${deal.airline}</td>
-              <td><small>${new Date(deal.found_at).toLocaleString('ru-RU')}</small></td>
+              <td><small>${new Date(deal.departure_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}${deal.return_date ? ' - ' + new Date(deal.return_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : ''}</small></td>
+              <td><strong class="text-success">${formatNumber(Math.round(deal.total_price))} ₽</strong></td>
+              <td><span class="text-muted">${formatNumber(Math.round(deal.avg_price))} ₽</span></td>
+              <td><strong class="text-success">-${formatNumber(Math.round(deal.savings))} ₽</strong></td>
+              <td><span class="badge bg-success">-${savingsPercent}%</span></td>
+              <td><small>${deal.airline || 'N/A'}</small></td>
             </tr>
-          `).join('')}
+          `}).join('')}
         </tbody>
       </table>
-    `;
-
-        container.innerHTML = html;
-    }
-
-    renderSuccessRate() {
-        const data = this.analyticsData.checkSuccessRate || {};
-        const container = document.getElementById('success-rate-info');
-
-        const successRate = data.success_rate || 0;
-        const totalChecks = data.total_checks || 0;
-        const totalSuccess = data.total_success || 0;
-        const totalFailed = data.total_failed || 0;
-
-        const html = `
-      <div class="row text-center">
-        <div class="col-lg-3 col-md-6 mb-3">
-          <div class="card border-primary">
-            <div class="card-body">
-              <h2 class="text-primary">${successRate.toFixed(1)}%</h2>
-              <p class="text-muted mb-0">Успешность</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-lg-3 col-md-6 mb-3">
-          <div class="card">
-            <div class="card-body">
-              <h2>${formatNumber(totalChecks)}</h2>
-              <p class="text-muted mb-0">Всего проверок</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-lg-3 col-md-6 mb-3">
-          <div class="card border-success">
-            <div class="card-body">
-              <h2 class="text-success">${formatNumber(totalSuccess)}</h2>
-              <p class="text-muted mb-0">Успешных</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-lg-3 col-md-6 mb-3">
-          <div class="card border-danger">
-            <div class="card-body">
-              <h2 class="text-danger">${formatNumber(totalFailed)}</h2>
-              <p class="text-muted mb-0">Неудачных</p>
-            </div>
-          </div>
-        </div>
+      <div class="mt-3">
+        <small class="text-muted">
+          <i class="bi bi-info-circle me-1"></i>
+          Показаны уникальные направления с лучшими ценами ниже средней. По каждому направлению выбрано наиболее выгодное предложение.
+        </small>
       </div>
     `;
 
         container.innerHTML = html;
     }
 
-    renderSubscriptionsChart() {
-        const data = this.analyticsData.subscriptionStats || [];
-        const table = document.getElementById('table-subscriptions');
-
-        this.charts.subscriptions = ChartComponent.pieChart(
-            'chart-subscriptions',
-            data.map(s => s.subscription_type),
-            data.map(s => s.user_count),
-            [CONFIG.CHART_COLORS.SUCCESS, CONFIG.CHART_COLORS.DANGER, CONFIG.CHART_COLORS.WARNING]
-        );
-        this.charts.subscriptions.render();
-
-        // Таблица
-        const tableHtml = `
-      <table class="table table-sm">
-        <thead>
-          <tr>
-            <th>Подписка</th>
-            <th>Пользователей</th>
-            <th>Маршрутов</th>
-            <th>Средний порог</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(sub => `
-            <tr>
-              <td><span class="badge badge-${sub.subscription_type === 'free' ? 'secondary' : 'success'}">${sub.subscription_type}</span></td>
-              <td>${sub.user_count}</td>
-              <td>${sub.route_count}</td>
-              <td>${formatNumber(Math.round(sub.avg_threshold))} ₽</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-
-        table.innerHTML = tableHtml;
-    }
-
     renderAirlinesChart() {
         const data = this.analyticsData.airlineStats || [];
 
         if (data.length === 0) {
-            document.getElementById('chart-airlines').parentElement.innerHTML = '<p class="text-muted">Нет данных</p>';
+            document.getElementById('chart-airlines').parentElement.innerHTML = '<p class="text-muted text-center">Нет данных</p>';
             return;
         }
 
         this.charts.airlines = ChartComponent.barChart(
             'chart-airlines',
-            data.map(a => a.airline),
+            data.slice(0, 10).map(a => a.airline || 'Любая'),
             [{
                 label: 'Количество маршрутов',
-                data: data.map(a => a.count),
+                data: data.slice(0, 10).map(a => a.count),
                 color: CONFIG.CHART_COLORS.DANGER
             }]
         );
         this.charts.airlines.render();
+    }
+
+    destroy() {
+        // Cleanup charts
+        Object.values(this.charts).forEach(chart => {
+            if (chart && chart.destroy) {
+                chart.destroy();
+            }
+        });
+        this.charts = {};
     }
 }
 
