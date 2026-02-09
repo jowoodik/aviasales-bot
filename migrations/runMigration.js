@@ -1,9 +1,9 @@
 /**
- * Запуск миграции для очистки user_activity_log
+ * Запуск миграции
  * Использование: node migrations/runMigration.js
  */
 
-const migration = require('./009_clear_activity_log');
+const migration = require('./010_clear_notification_log');
 
 console.log('🚀 Запуск миграции...\n');
 
