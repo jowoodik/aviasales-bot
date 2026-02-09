@@ -1684,10 +1684,10 @@ class RouteHandlers {
         const keyboard = {
             reply_markup: {
                 keyboard: [
+                    ['🌍 Любая'],
                     ['🌐 Аэрофлот (SU)', 'S7 Airlines (S7)'],
                     ['Etihad (EY)', 'Emirates (EK)'],
                     ['Flydubai (FZ)', 'Utair (UT)'],
-                    ['🌍 Любая'],
                     ['🔙 Назад']
                 ],
                 one_time_keyboard: true,

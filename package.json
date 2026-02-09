@@ -12,7 +12,10 @@
     "pm2:restart": "pm2 restart ecosystem.config.js",
     "pm2:delete": "pm2 delete ecosystem.config.js",
     "pm2:logs": "pm2 logs",
-    "pm2:monit": "pm2 monit"
+    "pm2:monit": "pm2 monit",
+    "test:batch:unit": "node test/batch-optimization/01-unit-prepareBatchItem.test.js && node test/batch-optimization/02-unit-processBatchResults.test.js",
+    "test:batch:integration": "node test/batch-optimization/03-integration-batch30.test.js && node test/batch-optimization/04-integration-filters.test.js",
+    "test:batch": "npm run test:batch:unit && npm run test:batch:integration"
   },
   "keywords": [
     "telegram",

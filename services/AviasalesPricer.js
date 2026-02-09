@@ -1184,6 +1184,120 @@ class AviasalesPricer {
       }
     };
   }
+
+  /**
+   * Проверка URLs с индивидуальными фильтрами для каждого маршрута.
+   * Позволяет параллельно проверять маршруты с разными настройками фильтров.
+   *
+   * @param {Array} urlsWithFilters - Массив объектов [{url, airline, baggage, max_stops, max_layover_hours}, ...]
+   * @returns {Object} - {results: Array, stats: {total, success, failed, elapsed}}
+   */
+  async getPricesFromUrlsWithIndividualFilters(urlsWithFilters) {
+    const total = urlsWithFilters.length;
+    const results = new Array(total).fill(null);
+
+    console.log('');
+    console.log('========================================');
+    console.log('НАЧАЛО BATCH-ОБРАБОТКИ: ' + total + ' маршрутов');
+    console.log('Размер пачки: ' + this.maxConcurrent);
+    console.log('========================================');
+    console.log('');
+
+    // Проверяем прокси и куки (как в getPricesFromUrls)
+    await this.initProxies();
+
+    const cookiesCount = Math.min(this.maxConcurrent, total);
+    await this.initCookiesSets(cookiesCount);
+
+    const startTime = Date.now();
+    let completedCount = 0;
+    let successCount = 0;
+    let failedCount = 0;
+
+    const batchSize = this.maxConcurrent;
+    const totalBatches = Math.ceil(total / batchSize);
+
+    // Обрабатываем батчами по 10
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * batchSize;
+      const batchEnd = Math.min(batchStart + batchSize, total);
+      const batchItems = urlsWithFilters.slice(batchStart, batchEnd);
+
+      console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🔄 ПАЧКА ' + (batchIndex + 1) + '/' + totalBatches + ': маршруты ' + (batchStart + 1) + '-' + batchEnd);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      const batchPromises = [];
+
+      for (let i = 0; i < batchItems.length; i++) {
+        const globalIndex = batchStart + i;
+        const item = batchItems[i];
+        const workerCookies = this.cookiesList[i % this.cookiesList.length];
+
+        const workerPromise = (async () => {
+          try {
+            // Каждый URL проверяется со СВОИМИ фильтрами!
+            const result = await this.getPriceFromUrl(
+              item.url,
+              workerCookies,
+              globalIndex + 1,
+              total,
+              item.airline,
+              item.max_layover_hours,
+              item.baggage,
+              item.max_stops
+            );
+
+            results[globalIndex] = result;
+            completedCount++;
+
+            if (result && result.price) {
+              successCount++;
+            } else {
+              failedCount++;
+            }
+
+            console.log('ПРОГРЕСС: Обработано ' + completedCount + ' из ' + total + ' (✅ ' + successCount + ', ❌ ' + failedCount + ')');
+
+            return result;
+          } catch (error) {
+            console.error('[' + (globalIndex + 1) + '/' + total + '] КРИТИЧЕСКАЯ ОШИБКА: ' + error.message);
+            results[globalIndex] = null;
+            completedCount++;
+            failedCount++;
+            return null;
+          }
+        })();
+
+        batchPromises.push(workerPromise);
+      }
+
+      console.log('⏳ Ожидание завершения пачки ' + (batchIndex + 1) + '/' + totalBatches + '...\n');
+      await Promise.allSettled(batchPromises);
+      console.log('\n✅ Пачка ' + (batchIndex + 1) + '/' + totalBatches + ' завершена\n');
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    console.log('');
+    console.log('========================================');
+    console.log('BATCH-ОБРАБОТКА ЗАВЕРШЕНА');
+    console.log('✅ Успешно: ' + successCount + ' из ' + total);
+    console.log('❌ Ошибок: ' + failedCount + ' из ' + total);
+    console.log('⏱ Общее время: ' + elapsed + ' секунд');
+    console.log('========================================');
+    console.log('');
+
+    return {
+      results,
+      stats: {
+        total,
+        success: successCount,
+        failed: failedCount,
+        elapsed: parseFloat(elapsed)
+      }
+    };
+  }
 }
 
 module.exports = AviasalesPricer;

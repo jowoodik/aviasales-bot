@@ -40,6 +40,146 @@ class UnifiedMonitor {
     }
 
     /**
+     * Подготовка маршрута для batch-проверки (БЕЗ проверки цен).
+     * Генерирует URLs и метаданные для всех комбинаций маршрута.
+     *
+     * @param {Object} route - Объект маршрута
+     * @returns {Array} - Массив объектов {url, combination, airline, baggage, max_stops, max_layover_hours}
+     */
+    prepareBatchItem(route) {
+        // Генерируем комбинации для проверки
+        const combinations = UnifiedRoute.getCombinations(route);
+
+        if (combinations.length === 0) {
+            return [];
+        }
+
+        // Формируем массив объектов с URL и метаданными
+        const items = combinations.map(combo => {
+            const url = this.api.generateSearchLink({
+                origin: route.origin,
+                destination: route.destination,
+                departure_date: combo.departure_date,
+                return_date: combo.return_date,
+                adults: route.adults || 1,
+                children: route.children || 0,
+                airline: route.airline
+            });
+
+            return {
+                url: url,
+                combination: combo,
+                // Фильтры маршрута (для индивидуальной проверки)
+                airline: route.airline || null,
+                baggage: route.baggage === 1,
+                max_stops: route.max_stops !== null ? route.max_stops : null,
+                max_layover_hours: route.max_layover_hours || null
+            };
+        });
+
+        return items;
+    }
+
+    /**
+     * Обработка результатов batch-проверки для одного маршрута.
+     * Сохраняет результаты в БД, обновляет статистику и аналитику.
+     *
+     * @param {number} routeId - ID маршрута
+     * @param {Object} route - Объект маршрута
+     * @param {Array} batchResults - Массив результатов [{combination, priceResult, url}, ...]
+     * @returns {Array} - Массив успешных результатов
+     */
+    async processBatchResults(routeId, route, batchResults) {
+        const checkTimestamp = new Date().toISOString();
+        const results = [];
+        let successfulChecks = 0;
+        let failedChecks = 0;
+        const combinationResults = [];
+
+        console.log(`📋 Обработка ${batchResults.length} результатов для маршрута #${routeId}`);
+
+        for (const item of batchResults) {
+            const { combination, priceResult, url } = item;
+
+            // Используем enhancedSearchLink если доступен
+            const searchLink = priceResult?.enhancedSearchLink || url;
+
+            let status, errorReason = null;
+
+            if (priceResult && priceResult.price && priceResult.price > 0) {
+                // Успешная проверка
+                status = 'success';
+                successfulChecks++;
+
+                // Сохраняем результат в БД
+                await RouteResult.save(routeId, {
+                    departure_date: combination.departure_date,
+                    return_date: combination.return_date,
+                    days_in_country: combination.days_in_country || null,
+                    total_price: priceResult.price,
+                    airline: route.airline || 'ANY',
+                    search_link: searchLink,
+                    screenshot_path: null
+                });
+
+                results.push({
+                    ...priceResult,
+                    combination: combination
+                });
+
+                // Сохраняем в price_analytics
+                await this.saveToPriceAnalytics(route, priceResult.price, combination);
+
+            } else if (priceResult === null) {
+                // Билеты не найдены
+                status = 'not_found';
+                errorReason = 'Билеты не найдены по заданным параметрам';
+                failedChecks++;
+            } else {
+                // Другая ошибка
+                status = 'error';
+                errorReason = priceResult.error || 'Неизвестная ошибка при проверке';
+                failedChecks++;
+            }
+
+            // Сохраняем детальную информацию о проверке комбинации
+            combinationResults.push({
+                route_id: routeId,
+                check_timestamp: checkTimestamp,
+                departure_date: combination.departure_date,
+                return_date: combination.return_date,
+                days_in_country: combination.days_in_country,
+                status: status,
+                price: priceResult?.price || null,
+                currency: priceResult?.currency || 'RUB',
+                error_reason: errorReason,
+                search_url: searchLink
+            });
+        }
+
+        // Сохраняем общую статистику проверки
+        await this.saveCheckStats(routeId, {
+            check_timestamp: checkTimestamp,
+            total_combinations: batchResults.length,
+            successful_checks: successfulChecks,
+            failed_checks: failedChecks
+        });
+
+        // Сохраняем детальные результаты всех комбинаций
+        await this.saveCombinationResults(combinationResults);
+
+        // Обновляем время последней проверки
+        await UnifiedRoute.updateLastCheck(routeId);
+
+        // Очищаем старые результаты (оставляем последние 10)
+        await RouteResult.cleanOldResults(routeId, 10);
+
+        console.log(`✅ Маршрут #${routeId} обработан. Найдено результатов: ${successfulChecks}/${batchResults.length}`);
+
+        return results;
+    }
+
+    /**
      * Проверка одного маршрута
      */
     async checkSingleRoute(route) {

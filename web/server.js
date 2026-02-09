@@ -2359,18 +2359,6 @@ app.get('/admin/api/routes/:id/price-history', requireAdmin, async (req, res) =>
   try {
     const routeId = parseInt(req.params.id);
 
-    // Получаем origin и destination маршрута
-    const route = await new Promise((resolve, reject) => {
-      db.get('SELECT origin, destination FROM unified_routes WHERE id = ?', [routeId], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
-
-    if (!route) {
-      return res.status(404).json({ error: 'Маршрут не найден' });
-    }
-
     // Сводка из price_analytics
     const summary = await new Promise((resolve, reject) => {
       db.get(`
@@ -2380,9 +2368,9 @@ app.get('/admin/api/routes/:id/price-history', requireAdmin, async (req, res) =>
           MAX(price) as max_price,
           COUNT(*) as data_points
         FROM price_analytics
-        WHERE origin = ? AND destination = ?
+        WHERE route_id = ?
           AND found_at >= datetime('now', '-30 days')
-      `, [route.origin, route.destination], (err, row) => {
+      `, [routeId], (err, row) => {
         if (err) reject(err);
         else resolve(row || {});
       });
@@ -2397,11 +2385,11 @@ app.get('/admin/api/routes/:id/price-history', requireAdmin, async (req, res) =>
           AVG(price) as avg_price,
           COUNT(*) as count
         FROM price_analytics
-        WHERE origin = ? AND destination = ?
+        WHERE route_id = ?
           AND found_at >= datetime('now', '-30 days')
         GROUP BY DATE(found_at)
-        ORDER BY date ASC
-      `, [route.origin, route.destination], (err, rows) => {
+        ORDER BY date DESC
+      `, [routeId], (err, rows) => {
         if (err) reject(err);
         else resolve(rows || []);
       });

@@ -225,17 +225,13 @@ async function initializeScheduler() {
 }
 
 /**
- * Проверить маршруты для определенного типа подписки
+ * BATCH-версия: Проверить маршруты для подписки параллельно (оптимизация)
  */
-async function checkRoutesBySubscription(subscriptionType) {
-  const startTime = new Date();
-  console.log(`\n⏰ [${formatTimestamp(startTime)}] → НАЧАЛО проверки для подписки ${subscriptionType.toUpperCase()}`);
-
-  const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
-  const notificationService = new NotificationService(bot);
+async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notificationService) {
+  console.log(`\n📦 BATCH-режим для подписки ${subscriptionType.toUpperCase()}`);
 
   try {
-    // Получаем пользователей с указанным типом подписки
+    // 1. Получить всех пользователей подписки
     const users = await getUsersBySubscription(subscriptionType);
 
     if (users.length === 0) {
@@ -245,14 +241,219 @@ async function checkRoutesBySubscription(subscriptionType) {
 
     console.log(`  📊 Найдено ${users.length} пользователей с подпиской ${subscriptionType}`);
 
-    // Для каждого пользователя проверяем его маршруты
+    // 2. Собрать все маршруты всех пользователей с метаданными
+    const batchItems = [];
+    const routeMetaMap = new Map(); // routeId → {route, chatId, userSettings, combinations, urls}
+
     for (const user of users) {
-      try {
-        await checkUserRoutes(user.chat_id, monitor, notificationService, subscriptionType);
-      } catch (error) {
-        console.error(`  ❌ Ошибка проверки пользователя ${user.chat_id}:`, error);
+      const routes = await getUserActiveRoutes(user.chat_id);
+      const userSettings = await getUserSettings(user.chat_id);
+
+      for (const route of routes) {
+        // Генерируем URLs с метаданными для маршрута
+        const items = monitor.prepareBatchItem(route);
+
+        if (items.length === 0) {
+          console.log(`    ⏭️  Маршрут #${route.id}: нет комбинаций для проверки`);
+          continue;
+        }
+
+        // Сохраняем метаданные маршрута
+        routeMetaMap.set(route.id, {
+          route,
+          chatId: user.chat_id,
+          userSettings,
+          combinations: items.map(item => item.combination),
+          urls: items.map(item => item.url)
+        });
+
+        // Добавляем items в общий пул с привязкой к маршруту
+        items.forEach(item => {
+          batchItems.push({
+            ...item,
+            routeId: route.id,
+            chatId: user.chat_id
+          });
+        });
       }
     }
+
+    if (batchItems.length === 0) {
+      console.log('  ℹ️  Нет маршрутов для проверки');
+      return;
+    }
+
+    console.log(`  📋 Подготовлено ${batchItems.length} URLs для ${routeMetaMap.size} маршрутов`);
+
+    // 3. Проверить ВСЕ URLs одним батчем с индивидуальными фильтрами!
+    const urlsWithFilters = batchItems.map(item => ({
+      url: item.url,
+      airline: item.airline,
+      baggage: item.baggage,
+      max_stops: item.max_stops,
+      max_layover_hours: item.max_layover_hours
+    }));
+
+    const response = await monitor.pricer.getPricesFromUrlsWithIndividualFilters(urlsWithFilters);
+
+    console.log(`  ✅ Batch-проверка завершена: ${response.stats.success}/${response.stats.total} успешно`);
+
+    // 4. Группируем результаты по маршрутам
+    const routeResults = new Map(); // routeId → [{combination, priceResult, url}]
+
+    for (let i = 0; i < response.results.length; i++) {
+      const item = batchItems[i];
+      const result = response.results[i];
+
+      if (!routeResults.has(item.routeId)) {
+        routeResults.set(item.routeId, []);
+      }
+
+      routeResults.get(item.routeId).push({
+        combination: item.combination,
+        priceResult: result,
+        url: item.url
+      });
+    }
+
+    console.log(`  📦 Результаты сгруппированы по ${routeResults.size} маршрутам`);
+
+    // 5. Обрабатываем каждый маршрут (сохраняем в БД)
+    for (const [routeId, results] of routeResults) {
+      const meta = routeMetaMap.get(routeId);
+
+      try {
+        // Сохраняем результаты в БД (аналогично checkSingleRoute)
+        await monitor.processBatchResults(routeId, meta.route, results);
+      } catch (error) {
+        console.error(`  ❌ Ошибка сохранения результатов для маршрута ${routeId}:`, error);
+      }
+    }
+
+    // 6. Отправляем уведомления по пользователям (КАК РАНЬШЕ!)
+    await airportResolver.load();
+    let totalSent = 0;
+
+    for (const [routeId, results] of routeResults) {
+      const meta = routeMetaMap.get(routeId);
+      const route = meta.route;
+      const chatId = meta.chatId;
+      const userSettings = meta.userSettings;
+      const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
+
+      try {
+        // Получаем лучший результат
+        const bestResults = await RouteResult.getTopResults(routeId, 1);
+        const bestResult = bestResults[0] || null;
+
+        // Обработка NO_RESULTS
+        if (!bestResult) {
+          const noResultsCheck = await notificationService.processNoResults(chatId, routeId);
+
+          if (noResultsCheck.shouldSend) {
+            const analytics = await notificationService.getRouteAnalytics(routeId);
+            const checkStats = await notificationService.getRouteCheckStats(routeId);
+            const noResultsBlock = notificationService.formatNoResultsBlock(route, analytics, checkStats, timezone);
+
+            await notificationService._sendInstantAlert(
+              chatId,
+              routeId,
+              noResultsBlock,
+              'NO_RESULTS',
+              null,
+              timezone,
+              true // всегда без звука
+            );
+
+            await notificationService._logNotification(
+              chatId,
+              routeId,
+              'NO_RESULTS',
+              null,
+              'NO_RESULTS',
+              true
+            );
+
+            console.log(`    📭 NO_RESULTS уведомление отправлено для маршрута ${routeId}`);
+            totalSent++;
+          }
+
+          await updateRouteLastCheck(routeId);
+          continue;
+        }
+
+        // Аналитика, классификация, маршрутизация
+        const analytics = await notificationService.getRouteAnalytics(routeId);
+        const checkStats = await notificationService.getRouteCheckStats(routeId);
+
+        const currentPrice = bestResult.total_price;
+        const classified = notificationService.classifyPriority({
+          currentPrice,
+          userBudget: route.threshold_price,
+          historicalMin: analytics.minPrice
+        });
+        const priority = classified.priority;
+        const reasons = classified.reasons;
+
+        // Маршрутизация уведомления
+        const routeResult = await notificationService.processAndRouteNotification({
+          chatId,
+          routeId,
+          route,
+          priority,
+          reasons,
+          currentPrice,
+          analytics,
+          bestResult,
+          checkStats,
+          userSettings,
+          subscriptionType
+        });
+
+        // Отправка уведомления
+        if (routeResult.action === 'sent' || routeResult.action === 'sent_silent') {
+          const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
+
+          await notificationService._sendInstantAlert(
+            chatId,
+            routeId,
+            block,
+            priority,
+            currentPrice,
+            timezone,
+            routeResult.action === 'sent_silent'
+          );
+
+          totalSent++;
+        }
+
+        await updateRouteLastCheck(routeId);
+
+      } catch (error) {
+        console.error(`  ❌ Ошибка уведомления для маршрута ${routeId}:`, error);
+      }
+    }
+
+    console.log(`  📬 Отправлено ${totalSent} уведомлений`);
+
+  } catch (error) {
+    console.error(`  ❌ Критическая ошибка batch-проверки для ${subscriptionType}:`, error);
+  }
+}
+
+/**
+ * Проверить маршруты для определенного типа подписки (с оптимизацией batch-проверки)
+ */
+async function checkRoutesBySubscription(subscriptionType) {
+  const startTime = new Date();
+  console.log(`\n⏰ [${formatTimestamp(startTime)}] → НАЧАЛО проверки для подписки ${subscriptionType.toUpperCase()}`);
+
+  const monitor = new UnifiedMonitor(process.env.TRAVELPAYOUTS_TOKEN, bot);
+  const notificationService = new NotificationService(bot);
+
+  try {
+    // 🔥 ИСПОЛЬЗУЕМ BATCH-ВЕРСИЮ для параллельной проверки всех маршрутов
+    await checkRoutesBySubscriptionBatch(subscriptionType, monitor, notificationService);
 
     const endTime = new Date();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
@@ -267,6 +468,12 @@ async function checkRoutesBySubscription(subscriptionType) {
 
 /**
  * Проверить маршруты конкретного пользователя (новый flow с приоритетами)
+ *
+ * ВАЖНО: Эта функция сохранена для ОБРАТНОЙ СОВМЕСТИМОСТИ и используется:
+ * - Командой /check (ручная проверка одного пользователя)
+ * - Другими местами, где нужна последовательная проверка маршрутов
+ *
+ * Для планировщика используется checkRoutesBySubscriptionBatch() - оптимизированная версия.
  */
 async function checkUserRoutes(chatId, monitor, notificationService, subscriptionType) {
   const userStartTime = new Date();
@@ -582,6 +789,7 @@ async function runManualCheck(subscriptionType) {
 module.exports = {
   runManualCheck,
   checkRoutesBySubscription,
+  checkUserRoutes, // для команды /check и ручной проверки
   updateSchedulerJobs, // для принудительного обновления интервалов
   getIntervalsFromDB, // для диагностики
   activeJobs // для мониторинга активных задач
