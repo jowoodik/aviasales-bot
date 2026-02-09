@@ -67,34 +67,66 @@ function getIntervalsFromDB() {
 }
 
 /**
- * Последовательная проверка всех типов подписок по приоритету
+ * Проверка конкретного типа подписки (обертка с логированием)
  */
-async function checkAllSubscriptionsSequentially() {
+async function checkSubscriptionType(type) {
+  const emoji = type === 'admin' ? '🔴' : type === 'plus' ? '🟠' : '🟢';
+  const startTime = new Date();
+  console.log(`\n${emoji} [${formatTimestamp(startTime)}] ⚡ СТАРТ: ${type.toUpperCase()} подписка`);
+
+  try {
+    await checkRoutesBySubscription(type);
+  } catch (error) {
+    console.error(`${emoji} ❌ Ошибка при проверке ${type}:`, error);
+  }
+
+  const endTime = new Date();
+  const duration = ((endTime - startTime) / 1000).toFixed(2);
+  console.log(`${emoji} [${formatTimestamp(endTime)}] ✅ ЗАВЕРШЕНО: ${type.toUpperCase()} (${duration}s)`);
+}
+
+/**
+ * Определить, какие типы подписок должны проверяться в этот час
+ */
+function getSubscriptionTypesToCheck() {
+  const now = new Date();
+  const currentHour = now.getHours();
+  const typesToCheck = [];
+
+  // Проверяем каждый тип подписки по приоритету
   const priorityOrder = ['admin', 'plus', 'free'];
 
-  console.log(`\n🔄 [${formatTimestamp()}] Начало последовательной проверки всех подписок`);
+  for (const type of priorityOrder) {
+    if (!currentIntervals[type]) continue;
+
+    const interval = currentIntervals[type];
+
+    // Проверяем, должен ли этот тип проверяться в этот час
+    // Используем делимость текущего часа на интервал
+    if (currentHour % interval === 0) {
+      typesToCheck.push(type);
+    }
+  }
+
+  return typesToCheck;
+}
+
+/**
+ * Последовательная проверка типов подписок с учетом приоритетов
+ */
+async function checkScheduledSubscriptions() {
+  const typesToCheck = getSubscriptionTypesToCheck();
+
+  if (typesToCheck.length === 0) {
+    console.log(`\n⏭️  [${formatTimestamp()}] Нет типов подписок для проверки в этот час`);
+    return;
+  }
+
+  console.log(`\n🔄 [${formatTimestamp()}] Начало проверки: ${typesToCheck.join(' → ')}`);
   const globalStart = new Date();
 
-  for (const type of priorityOrder) {
-    // Проверяем, есть ли этот тип в активных интервалах
-    if (!currentIntervals[type]) {
-      console.log(`  ⏭️  Пропускаем ${type} (не настроен)`);
-      continue;
-    }
-
-    const emoji = type === 'admin' ? '🔴' : type === 'plus' ? '🟠' : '🟢';
-    const startTime = new Date();
-    console.log(`\n${emoji} [${formatTimestamp(startTime)}] ⚡ СТАРТ: ${type.toUpperCase()} подписка`);
-
-    try {
-      await checkRoutesBySubscription(type);
-    } catch (error) {
-      console.error(`${emoji} ❌ Ошибка при проверке ${type}:`, error);
-    }
-
-    const endTime = new Date();
-    const duration = ((endTime - startTime) / 1000).toFixed(2);
-    console.log(`${emoji} [${formatTimestamp(endTime)}] ✅ ЗАВЕРШЕНО: ${type.toUpperCase()} (${duration}s)`);
+  for (const type of typesToCheck) {
+    await checkSubscriptionType(type);
   }
 
   const globalEnd = new Date();
@@ -156,17 +188,17 @@ async function updateSchedulerJobs() {
     }
     activeJobs.clear();
 
-    // Находим минимальный интервал для общего крона
+    // Находим минимальный интервал и создаем общий cron
     const intervals = Object.values(newIntervals);
     const minInterval = Math.min(...intervals);
 
-    // Создаем новый общий cron-job
     console.log('\n📅 Перезапуск планировщика с новыми интервалами:');
     console.log(`  • Общий cron: ${hoursToCron(minInterval)} (каждые ${minInterval} ч.)`);
+    console.log(`  • Интервалы: ${Object.entries(newIntervals).map(([type, hours]) => `${type}=${hours}ч`).join(', ')}`);
     console.log(`  • Порядок проверки: admin → plus → free (последовательно)`);
 
     const mainJob = cron.schedule(hoursToCron(minInterval), async () => {
-      await checkAllSubscriptionsSequentially();
+      await checkScheduledSubscriptions();
     });
 
     activeJobs.set('main', mainJob);
@@ -189,7 +221,7 @@ async function initializeScheduler() {
 
     if (Object.keys(currentIntervals).length === 0) {
       console.log('⚠️  Не найдено активных типов подписок в БД, используем значения по умолчанию');
-      currentIntervals = { free: 4, plus: 2, admin: 1 };
+      currentIntervals = { free: 2, plus: 1, admin: 1 };
     }
 
     // Находим минимальный интервал для общего крона
@@ -198,11 +230,12 @@ async function initializeScheduler() {
 
     console.log('✅ Планировщик настроен:');
     console.log(`  • Общий cron: ${hoursToCron(minInterval)} (каждые ${minInterval} ч.)`);
+    console.log(`  • Интервалы: ${Object.entries(currentIntervals).map(([type, hours]) => `${type}=${hours}ч`).join(', ')}`);
     console.log(`  • Порядок проверки: admin → plus → free (последовательно)`);
 
-    // Создаем один общий cron-job, который запускает последовательную проверку
+    // Создаем один общий cron-job, который запускает проверку по расписанию
     const mainJob = cron.schedule(hoursToCron(minInterval), async () => {
-      await checkAllSubscriptionsSequentially();
+      await checkScheduledSubscriptions();
     });
 
     activeJobs.set('main', mainJob);
@@ -215,10 +248,10 @@ async function initializeScheduler() {
     console.error('❌ Ошибка инициализации планировщика:', error);
     // Fallback на статические интервалы
     console.log('⚠️  Используем fallback интервалы...');
-    currentIntervals = { free: 4, plus: 2, admin: 1 };
+    currentIntervals = { free: 2, plus: 1, admin: 1 };
 
     const mainJob = cron.schedule(hoursToCron(1), async () => {
-      await checkAllSubscriptionsSequentially();
+      await checkScheduledSubscriptions();
     });
     activeJobs.set('main', mainJob);
   }

@@ -4,6 +4,20 @@ const path = require('path');
 const dbPath = path.join(__dirname, '../data/bot.db');
 const db = new sqlite3.Database(dbPath);
 
+// КРИТИЧНО: защита от повреждений
+db.run("PRAGMA journal_mode=WAL");     // Write-Ahead Logging
+db.run("PRAGMA synchronous=NORMAL");   // Безопасная запись
+db.run("PRAGMA busy_timeout=5000");    // Ждать 5 сек при блокировке
+db.run("PRAGMA cache_size=10000");     // Больше кеша
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  db.close((err) => {
+    console.log('БД закрыта корректно');
+    process.exit(err ? 1 : 0);
+  });
+});
+
 db.serialize(() => {
   console.log('🔄 Инициализация базы данных...');
 

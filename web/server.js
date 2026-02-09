@@ -1472,7 +1472,7 @@ app.get('/admin/api/monetization-stats', requireAdmin, async (req, res) => {
            WHERE event_type = 'affiliate_click'
            AND created_at >= datetime('now', '-${period} days')) * 100.0 /
           NULLIF((SELECT COUNT(*) FROM notification_log
-           WHERE created_at >= datetime('now', '-${period} days')), 0) as ctr
+           WHERE sent_at >= datetime('now', '-${period} days')), 0) as ctr
       `, (err, row) => {
         resolve(row?.ctr ? parseFloat(row.ctr.toFixed(2)) : 0);
       });
@@ -1499,7 +1499,7 @@ app.get('/admin/api/monetization-stats', requireAdmin, async (req, res) => {
       db.get(`
         SELECT COUNT(*) as count
         FROM notification_log
-        WHERE created_at >= datetime('now', '-${period} days')
+        WHERE sent_at >= datetime('now', '-${period} days')
       `, (err, row) => {
         resolve(row?.count || 0);
       });

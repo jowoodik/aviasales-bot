@@ -224,7 +224,14 @@ class NotificationService {
         disableNotification = true;
       }
 
-      const hour = new Date().getHours();
+      // Получаем час в таймзоне пользователя
+      const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
+      const hour = parseInt(new Date().toLocaleString('en-US', {
+        timeZone: timezone,
+        hour: 'numeric',
+        hour12: false
+      }));
+
       if (hour >= 23 || hour < 8) {
         disableNotification = true;
       }
