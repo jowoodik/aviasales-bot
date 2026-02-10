@@ -999,9 +999,10 @@ class AviasalesPricer {
     try {
       const urlObj = new URL(url);
       const pathParts = urlObj.pathname.split('/');
-      const searchPath = pathParts[pathParts.length - 1];
+      const searchPath = decodeURIComponent(pathParts[pathParts.length - 1]);
 
-      const match = searchPath.match(/^([A-Z]{3})(\d{4})([A-Z]{3})(\d{4})?(\d)(\d)?(\d)?$/);
+      // Поддержка кириллических IATA-кодов (например, ХЖР, ВАГ, ЕСН)
+      const match = searchPath.match(/^([A-ZА-Я]{3})(\d{4})([A-ZА-Я]{3})(\d{4})?(\d)(\d)?(\d)?$/i);
 
       if (!match) {
         throw new Error('Не удалось распарсить URL: ' + searchPath);
