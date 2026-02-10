@@ -101,6 +101,54 @@ class RouteResult {
     }
 
     /**
+     * Статистика цен по направлению за последние 30 дней
+     * Нормализует на 1 человека через JOIN с unified_routes
+     */
+    static getDirectionPriceStats(origin, destination, hasReturn) {
+        return new Promise((resolve, reject) => {
+            db.get(`
+                SELECT
+                    MIN(pa.price / (ur.adults + COALESCE(ur.children, 0))) as min_price_per_person,
+                    ROUND(AVG(pa.price / (ur.adults + COALESCE(ur.children, 0)))) as avg_price_per_person
+                FROM price_analytics pa
+                JOIN unified_routes ur ON pa.route_id = ur.id
+                WHERE pa.origin = ? AND pa.destination = ?
+                  AND ur.has_return = ?
+                  AND pa.found_at > datetime('now', '-30 days')
+            `, [origin, destination, hasReturn ? 1 : 0], (err, row) => {
+                if (err) reject(err);
+                else resolve(row && row.min_price_per_person ? row : null);
+            });
+        });
+    }
+
+    /**
+     * Глобальная статистика бота
+     */
+    static getGlobalStats() {
+        return new Promise((resolve, reject) => {
+            db.get(
+                `SELECT COALESCE(SUM(total_combinations), 0) as totalCombinations FROM route_check_stats`,
+                (err, row1) => {
+                    if (err) return reject(err);
+                    db.get(
+                        `SELECT COUNT(*) as belowBudgetCount FROM route_results rr
+                         JOIN unified_routes ur ON rr.route_id = ur.id
+                         WHERE rr.total_price <= ur.threshold_price AND ur.threshold_price > 0`,
+                        (err, row2) => {
+                            if (err) return reject(err);
+                            resolve({
+                                totalCombinations: row1?.totalCombinations || 0,
+                                belowBudgetCount: row2?.belowBudgetCount || 0
+                            });
+                        }
+                    );
+                }
+            );
+        });
+    }
+
+    /**
      * Удалить все результаты маршрута
      */
     static deleteByRouteId(routeId) {

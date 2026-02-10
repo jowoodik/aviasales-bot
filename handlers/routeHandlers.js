@@ -2435,10 +2435,40 @@ class RouteHandlers {
             // Логируем успешное создание маршрута
             ActivityService.logEvent(chatId, 'route_created', { routeId }).catch(err => console.error('Activity log error:', err));
 
+            // Показываем примеры цен после создания маршрута
+            let successMessage = '✅ Маршрут успешно создан!';
+            try {
+                const { origin, destination, origin_city, destination_city, adults, children, has_return } = state.routeData;
+                const totalPassengers = (adults || 1) + (children || 0);
+                const originName = origin_city || origin;
+                const destinationName = destination_city || destination;
+
+                const priceStats = await RouteResult.getDirectionPriceStats(origin, destination, has_return);
+
+                if (priceStats) {
+                    const minPrice = Math.round(priceStats.min_price_per_person * totalPassengers);
+                    const avgPrice = Math.round(priceStats.avg_price_per_person * totalPassengers);
+
+                    successMessage += `\n\n💡 По направлению ${originName} → ${destinationName} бот уже находил цены:`;
+                    successMessage += `\n• Мин. цена: от ${Formatters.formatPrice(minPrice)}`;
+                    successMessage += `\n• Средняя цена: ${Formatters.formatPrice(avgPrice)}`;
+                    successMessage += `\n\nℹ️ Цены указаны для ${Formatters.formatPassengers(adults || 1, children || 0)} без учёта ваших фильтров (багаж, пересадки, авиакомпания). Поиск по вашему маршруту будет учитывать все заданные параметры.`;
+                    successMessage += `\n\nБот начнёт проверять цены и сообщит, когда найдёт подходящие варианты.`;
+                } else {
+                    const globalStats = await RouteResult.getGlobalStats();
+                    if (globalStats.totalCombinations > 0) {
+                        successMessage += `\n\n📊 Бот проверил ${globalStats.totalCombinations.toLocaleString('ru-RU')} комбинаций и нашёл ${globalStats.belowBudgetCount.toLocaleString('ru-RU')} предложений ниже бюджета пользователей.`;
+                    }
+                    successMessage += `\n\nБот начнёт проверять цены и сообщит, когда найдёт подходящие варианты.`;
+                }
+            } catch (statsError) {
+                console.error('Ошибка получения статистики цен:', statsError);
+                successMessage += '\n\nБот автоматически начнёт проверять цены и сообщит вам, когда найдёт подходящие варианты.';
+            }
+
             this.bot.sendMessage(
                 chatId,
-                '✅ Маршрут успешно создан!\n\n' +
-                'Бот автоматически начнёт проверять цены и сообщит вам, когда найдёт подходящие варианты.',
+                successMessage,
                 this.getMainMenuKeyboard(chatId)
             );
 

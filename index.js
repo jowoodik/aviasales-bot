@@ -6,6 +6,7 @@ const SettingsHandlers = require('./handlers/settingsHandlers');
 const SubscriptionHandlers = require('./handlers/subscriptionHandlers'); // Добавляем
 const SubscriptionService = require('./services/SubscriptionService'); // Добавляем
 const ActivityService = require('./services/ActivityService'); // Логирование активности
+const RouteResult = require('./models/RouteResult');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: false });
@@ -99,13 +100,25 @@ bot.onText(/\/start/, async (msg) => {
       }
     };
 
+    // Получаем глобальную статистику для онбординга
+    let statsLine = '';
+    try {
+        const globalStats = await RouteResult.getGlobalStats();
+        if (globalStats.totalCombinations > 0) {
+            statsLine = `\n📊 За последний час бот проверил ${globalStats.totalCombinations.toLocaleString('ru-RU')} комбинаций и нашёл ${globalStats.belowBudgetCount.toLocaleString('ru-RU')} предложений ниже бюджета пользователей.\n`;
+        }
+    } catch (e) {
+        console.error('Ошибка получения глобальной статистики:', e);
+    }
+
     bot.sendMessage(
         chatId,
         '👋 Добро пожаловать в бот мониторинга цен на авиабилеты!\n\n' +
         'Я помогу отслеживать цены на билеты и сообщу, когда найду выгодные предложения.\n\n' +
         'Если нужно получать уведомления о каждой проверке, то можно включить это в настройках.\n\n' +
         '⚠️ Важно! Для корректного отображения времени уведомлений настройте вашу таймзону.\n\n' +
-        '🌍 По умолчанию установлена таймзона: Asia/Yekaterinburg (UTC+5)\n\n' +
+        '🌍 По умолчанию установлена таймзона: Asia/Yekaterinburg (UTC+5)\n' +
+        statsLine + '\n' +
         '📊 Вам доступна бесплатная подписка со следующими возможностями:\n' +
         '• 3 фиксированных маршрута\n' +
         '• 1 гибкий маршрут\n' +
