@@ -303,6 +303,146 @@ class ActivityService {
   }
 
   /**
+   * Получить детальную воронку оплаты с метриками времени и drop-off
+   * @param {string} period - '1d', '7d', '30d'
+   */
+  static getPaymentFunnelDetailed(period = '30d') {
+    const days = period === '1d' ? 1 : period === '7d' ? 7 : 30;
+
+    return new Promise((resolve, reject) => {
+      db.serialize(() => {
+        const funnel = {};
+        let completed = 0;
+        const totalQueries = 8;
+
+        const checkComplete = () => {
+          completed++;
+          if (completed === totalQueries) {
+            resolve(funnel);
+          }
+        };
+
+        // 1. Просмотрели информацию о подписке
+        db.get(
+          `SELECT COUNT(DISTINCT chat_id) as count
+           FROM user_activity_log
+           WHERE event_type = 'subscription_info'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.viewed_subscription = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // 2. Попытка апгрейда (нажали на кнопку)
+        db.get(
+          `SELECT COUNT(DISTINCT chat_id) as count
+           FROM user_activity_log
+           WHERE event_type = 'upgrade_attempt'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.upgrade_attempts = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // 3. Создана ссылка на оплату
+        db.get(
+          `SELECT COUNT(DISTINCT chat_id) as count
+           FROM user_activity_log
+           WHERE event_type = 'payment_link_created'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.payment_link_created = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // 4. Открыли помощь по оплате
+        db.get(
+          `SELECT COUNT(DISTINCT chat_id) as count
+           FROM user_activity_log
+           WHERE event_type = 'payment_help_viewed'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.payment_help_viewed = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // 5. Успешная оплата
+        db.get(
+          `SELECT COUNT(DISTINCT chat_id) as count
+           FROM user_activity_log
+           WHERE event_type = 'payment_success'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.payment_success = row?.count || 0;
+            checkComplete();
+          }
+        );
+
+        // 6. Общая сумма оплат
+        db.get(
+          `SELECT
+             SUM(CAST(json_extract(event_data, '$.amount') AS REAL)) as total_amount,
+             COUNT(*) as payment_count
+           FROM user_activity_log
+           WHERE event_type = 'payment_success'
+             AND created_at >= datetime('now', '-${days} days')`,
+          (err, row) => {
+            funnel.total_revenue = row?.total_amount || 0;
+            funnel.payment_count = row?.payment_count || 0;
+            checkComplete();
+          }
+        );
+
+        // 7. Средние времена между шагами
+        db.all(
+          `WITH steps AS (
+             SELECT
+               chat_id,
+               event_type,
+               created_at,
+               LAG(created_at) OVER (PARTITION BY chat_id ORDER BY created_at) as prev_time,
+               LAG(event_type) OVER (PARTITION BY chat_id ORDER BY created_at) as prev_event
+             FROM user_activity_log
+             WHERE event_type IN ('subscription_info', 'upgrade_attempt', 'payment_link_created', 'payment_success')
+               AND created_at >= datetime('now', '-${days} days')
+           )
+           SELECT
+             prev_event || '_to_' || event_type as transition,
+             AVG((julianday(created_at) - julianday(prev_time)) * 24 * 60) as avg_minutes,
+             COUNT(*) as count
+           FROM steps
+           WHERE prev_event IS NOT NULL
+           GROUP BY prev_event, event_type`,
+          (err, rows) => {
+            funnel.time_metrics = rows || [];
+            checkComplete();
+          }
+        );
+
+        // 8. Методы оплаты
+        db.all(
+          `SELECT
+             json_extract(event_data, '$.payment_method') as payment_method,
+             COUNT(*) as count
+           FROM user_activity_log
+           WHERE event_type = 'payment_success'
+             AND created_at >= datetime('now', '-${days} days')
+             AND event_data IS NOT NULL
+           GROUP BY payment_method`,
+          (err, rows) => {
+            funnel.payment_methods = rows || [];
+            checkComplete();
+          }
+        );
+      });
+    });
+  }
+
+  /**
    * Получить историю DAU за последние N дней
    * @param {number} days - количество дней
    */

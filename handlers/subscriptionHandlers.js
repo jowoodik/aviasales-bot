@@ -216,6 +216,13 @@ class SubscriptionHandlers {
             // Сохраняем запись о платеже в БД
             await this._createPaymentRecord(chatId, payload, 'plus', PLUS_SUBSCRIPTION.price * 100, payment.id, payment.confirmationUrl);
 
+            // Логируем создание ссылки на оплату
+            ActivityService.logEvent(chatId, 'payment_link_created', {
+                subscription_type: 'plus',
+                amount: PLUS_SUBSCRIPTION.price,
+                payment_id: payment.id
+            }).catch(err => console.error('Activity log error:', err));
+
             // Отправляем пользователю кнопку с URL оплаты
             const keyboard = {
                 reply_markup: {
@@ -325,6 +332,9 @@ class SubscriptionHandlers {
      * Помощь по оплате
      */
     async handlePaymentHelp(chatId, callbackQueryId) {
+        // Логируем просмотр помощи
+        ActivityService.logEvent(chatId, 'payment_help_viewed').catch(err => console.error('Activity log error:', err));
+
         this.bot.answerCallbackQuery(callbackQueryId);
 
         this.bot.sendMessage(

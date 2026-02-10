@@ -18,24 +18,25 @@ class DashboardPage {
 
         try {
             // Fetch all required data
-            const [statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration] = await Promise.all([
+            const [statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration, paymentFunnel] = await Promise.all([
                 api.get('/analytics-main'),
                 api.getUsers(),
                 api.getRoutes(),
                 api.getCheckStats(),
                 api.get('/monetization-stats?period=30'),
                 api.get('/engagement-stats?period=30'),
-                api.get('/check-duration-by-hour?days=3')
+                api.get('/check-duration-by-hour?days=3'),
+                api.get('/payment-funnel-detailed?period=30d')
             ]);
 
-            this.renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration);
+            this.renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration, paymentFunnel);
         } catch (error) {
             console.error('Dashboard error:', error);
             showError(content, error);
         }
     }
 
-    renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration) {
+    renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration, paymentFunnel) {
         const content = document.getElementById('main-content');
 
         // Статистика проверок - агрегируем из checkStats (как в checkStats.js)
@@ -181,7 +182,7 @@ class DashboardPage {
                 ${this.renderEngagement(engagementStats || {})}
 
                 <!-- Воронки конверсии -->
-                ${this.renderFunnels(statsData.funnels || {})}
+                ${this.renderFunnels(statsData.funnels || {}, paymentFunnel || {})}
 
                 <!-- Charts Row -->
                 <div class="row g-4 mb-4">
@@ -267,7 +268,7 @@ class DashboardPage {
     }
 
     renderStatsCards(statsData, users, routes) {
-        const activeRoutes = routes.filter(r => !r.is_paused).length;
+        const activeRoutes = routes.filter(r => !r.is_paused && !r.is_archived).length;
         const flexibleRoutes = routes.filter(r => r.is_flexible).length;
 
         const stats = [
@@ -445,7 +446,7 @@ class DashboardPage {
         `;
     }
 
-    renderFunnels(funnels) {
+    renderFunnels(funnels, paymentFunnel) {
         const routes = funnels.routes || {
             started_creation: 0,
             selected_airports: 0,
@@ -461,7 +462,6 @@ class DashboardPage {
             selected_budget: 0,
             completed_creation: 0
         };
-        const subscription = funnels.subscription || { viewed_subscription: 0, upgrade_attempts: 0 };
 
         // Рассчитываем проценты от базы (начали создание = 100%)
         const routesBase = routes.started_creation || 1;
@@ -482,10 +482,6 @@ class DashboardPage {
         const dropAirports = Math.round(((routesBase - routes.selected_airports) / routesBase) * 100);
         const dropDates = Math.round(((routes.selected_has_return - routes.selected_dates) / Math.max(routes.selected_has_return, 1)) * 100);
         const dropBudget = Math.round(((routes.selected_max_stops - routes.selected_budget) / Math.max(routes.selected_max_stops, 1)) * 100);
-
-        // Рассчитываем проценты для воронки подписки
-        const subscriptionBase = subscription.viewed_subscription || 1;
-        const upgradePercent = Math.round((subscription.upgrade_attempts / subscriptionBase) * 100);
 
         // Средняя конверсия попыток в маршрут
         const attemptsPerRoute = routesBase > 0 && routes.completed_creation > 0
@@ -664,34 +660,137 @@ class DashboardPage {
                 </div>
                 <div class="col-lg-4">
                     <div class="card">
-                        <div class="card-header">
-                            <h5 class="mb-0">💎 Воронка подписки (30 дней)</h5>
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">💰 Воронка оплаты (30 дней)</h5>
+                            <span class="badge bg-success">${paymentFunnel.revenue?.total ? Math.round(paymentFunnel.revenue.total).toLocaleString() + ' ₽' : '0 ₽'}</span>
                         </div>
-                        <div class="card-body">
-                            <div class="funnel-step mb-3">
+                        <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+                            <!-- 1. Просмотр подписки -->
+                            <div class="funnel-step mb-2">
                                 <div class="d-flex justify-content-between mb-1">
-                                    <span>Просмотрели подписку</span>
-                                    <span class="badge bg-primary">${subscription.viewed_subscription} (100%)</span>
+                                    <span><strong>👁️ Просмотр подписки</strong></span>
+                                    <span class="badge bg-primary">${paymentFunnel.viewed_subscription || 0} (100%)</span>
                                 </div>
-                                <div class="progress" style="height: 25px;">
+                                <div class="progress" style="height: 22px;">
                                     <div class="progress-bar bg-primary" style="width: 100%;"></div>
                                 </div>
                             </div>
-                            <div class="text-center text-muted mb-2">↓</div>
-                            <div class="funnel-step">
+
+                            <div class="text-center text-muted mb-2" style="font-size: 0.85em;">
+                                ↓ дроп ${paymentFunnel.dropoff?.viewed_to_attempt || 0}%
+                            </div>
+
+                            <!-- 2. Попытка апгрейда -->
+                            <div class="funnel-step mb-2">
                                 <div class="d-flex justify-content-between mb-1">
-                                    <span>Попытка апгрейда</span>
-                                    <span class="badge bg-success">${subscription.upgrade_attempts} (${upgradePercent}%)</span>
+                                    <span>💎 Нажали "Купить Plus"</span>
+                                    <span class="badge bg-info">${paymentFunnel.upgrade_attempts || 0} (${paymentFunnel.conversion?.viewed_to_attempt || 0}%)</span>
                                 </div>
-                                <div class="progress" style="height: 25px;">
-                                    <div class="progress-bar bg-success" style="width: ${upgradePercent}%;"></div>
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar bg-info" style="width: ${paymentFunnel.conversion?.viewed_to_attempt || 0}%;"></div>
                                 </div>
                             </div>
-                            <div class="mt-4 text-muted">
-                                <small>* Воронка показывает конверсию пользователей в монетизацию</small>
+
+                            <div class="text-center text-muted mb-2" style="font-size: 0.85em;">
+                                ↓ дроп ${paymentFunnel.dropoff?.attempt_to_link || 0}%
+                            </div>
+
+                            <!-- 3. Создана ссылка -->
+                            <div class="funnel-step mb-2">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>🔗 Создана ссылка на оплату</span>
+                                    <span class="badge bg-warning">${paymentFunnel.payment_link_created || 0} (${paymentFunnel.conversion?.attempt_to_link || 0}%)</span>
+                                </div>
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar bg-warning" style="width: ${paymentFunnel.conversion?.attempt_to_link || 0}%;"></div>
+                                </div>
+                            </div>
+
+                            ${paymentFunnel.payment_help_viewed > 0 ? `
+                            <div class="text-center mb-2">
+                                <small class="text-muted">
+                                    📖 Помощь: ${paymentFunnel.payment_help_viewed || 0} (${paymentFunnel.help_rate || 0}%)
+                                </small>
+                            </div>` : ''}
+
+                            <div class="text-center text-muted mb-2" style="font-size: 0.85em;">
+                                ↓ дроп ${paymentFunnel.dropoff?.link_to_success || 0}%
+                                ${parseFloat(paymentFunnel.dropoff?.link_to_success || 0) > 50 ? ' 🚨' : ''}
+                            </div>
+
+                            <!-- 4. Успешная оплата -->
+                            <div class="funnel-step mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span><strong>✅ Успешная оплата</strong></span>
+                                    <span class="badge bg-success">${paymentFunnel.payment_success || 0} (${paymentFunnel.conversion?.overall || 0}%)</span>
+                                </div>
+                                <div class="progress" style="height: 22px;">
+                                    <div class="progress-bar bg-success" style="width: ${paymentFunnel.conversion?.overall || 0}%;"></div>
+                                </div>
+                            </div>
+
+                            <hr>
+
+                            <!-- Финансовые метрики -->
+                            <div class="row text-center mb-3">
+                                <div class="col-6">
+                                    <h4 class="text-success mb-0">${paymentFunnel.revenue?.total ? Math.round(paymentFunnel.revenue.total).toLocaleString() : 0} ₽</h4>
+                                    <small class="text-muted">Всего выручка</small>
+                                </div>
+                                <div class="col-6">
+                                    <h4 class="text-primary mb-0">${paymentFunnel.revenue?.payment_count || 0}</h4>
+                                    <small class="text-muted">Оплат</small>
+                                </div>
+                            </div>
+
+                            <div class="row text-center mb-3">
+                                <div class="col-12">
+                                    <h5 class="text-info mb-0">${paymentFunnel.revenue?.average || 0} ₽</h5>
+                                    <small class="text-muted">Средний чек</small>
+                                </div>
+                            </div>
+
+                            ${paymentFunnel.payment_methods && paymentFunnel.payment_methods.length > 0 ? `
+                            <hr>
+                            <div class="mb-3">
+                                <h6 class="text-muted mb-2">💳 Методы оплаты:</h6>
+                                ${paymentFunnel.payment_methods.map(pm => `
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <small>${pm.payment_method || 'Не указано'}</small>
+                                        <span class="badge bg-secondary">${pm.count}</span>
+                                    </div>
+                                `).join('')}
+                            </div>` : ''}
+
+                            ${paymentFunnel.time_metrics && paymentFunnel.time_metrics.length > 0 ? `
+                            <hr>
+                            <div class="mb-2">
+                                <h6 class="text-muted mb-2">⏱️ Среднее время между шагами:</h6>
+                                ${paymentFunnel.time_metrics.map(tm => {
+                                    const minutes = Math.round(tm.avg_minutes);
+                                    const timeStr = minutes < 60
+                                        ? `${minutes} мин`
+                                        : `${Math.round(minutes / 60)} ч`;
+                                    return `
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <small style="font-size: 0.8em;">${this.formatTransitionName(tm.transition)}</small>
+                                            <span class="badge bg-light text-dark">${timeStr}</span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>` : ''}
+
+                            <div class="mt-3 alert alert-info mb-0">
+                                <small>
+                                    <strong>💡 Как улучшить конверсию:</strong><br>
+                                    • Дроп >30% = потенциальная проблема<br>
+                                    • Большой дроп на "ссылка→оплата" = трение в процессе оплаты<br>
+                                    • Общая конверсия: ${paymentFunnel.conversion?.overall || 0}% (цель: >5%)
+                                </small>
                             </div>
                         </div>
                     </div>
+                </div>
             </div>
         `;
     }
@@ -1069,6 +1168,17 @@ class DashboardPage {
                 </div>
             </div>
         `;
+    }
+
+    formatTransitionName(transition) {
+        const names = {
+            'subscription_info_to_upgrade_attempt': 'Просмотр → Апгрейд',
+            'upgrade_attempt_to_payment_link_created': 'Апгрейд → Ссылка',
+            'payment_link_created_to_payment_success': 'Ссылка → Оплата',
+            'subscription_info_to_payment_link_created': 'Просмотр → Ссылка',
+            'upgrade_attempt_to_payment_success': 'Апгрейд → Оплата'
+        };
+        return names[transition] || transition;
     }
 
     destroy() {

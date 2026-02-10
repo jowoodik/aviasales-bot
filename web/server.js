@@ -1653,6 +1653,76 @@ app.get('/admin/api/engagement-stats', requireAdmin, async (req, res) => {
   }
 });
 
+// API: Детальная воронка оплаты
+app.get('/admin/api/payment-funnel-detailed', requireAdmin, async (req, res) => {
+  try {
+    const period = req.query.period || '30d';
+
+    // Получаем детальную воронку из ActivityService
+    const funnel = await ActivityService.getPaymentFunnelDetailed(period);
+
+    // Рассчитываем конверсию и drop-off между шагами
+    const base = funnel.viewed_subscription || 1;
+
+    const metrics = {
+      // Основные шаги воронки
+      viewed_subscription: funnel.viewed_subscription,
+      upgrade_attempts: funnel.upgrade_attempts,
+      payment_link_created: funnel.payment_link_created,
+      payment_help_viewed: funnel.payment_help_viewed,
+      payment_success: funnel.payment_success,
+
+      // Проценты конверсии (от начального шага)
+      conversion: {
+        viewed_to_attempt: base > 0 ? ((funnel.upgrade_attempts / base) * 100).toFixed(1) : 0,
+        attempt_to_link: base > 0 ? ((funnel.payment_link_created / base) * 100).toFixed(1) : 0,
+        link_to_success: base > 0 ? ((funnel.payment_success / base) * 100).toFixed(1) : 0,
+        overall: base > 0 ? ((funnel.payment_success / base) * 100).toFixed(1) : 0
+      },
+
+      // Drop-off между шагами
+      dropoff: {
+        viewed_to_attempt: funnel.viewed_subscription > 0
+          ? (((funnel.viewed_subscription - funnel.upgrade_attempts) / funnel.viewed_subscription) * 100).toFixed(1)
+          : 0,
+        attempt_to_link: funnel.upgrade_attempts > 0
+          ? (((funnel.upgrade_attempts - funnel.payment_link_created) / funnel.upgrade_attempts) * 100).toFixed(1)
+          : 0,
+        link_to_success: funnel.payment_link_created > 0
+          ? (((funnel.payment_link_created - funnel.payment_success) / funnel.payment_link_created) * 100).toFixed(1)
+          : 0
+      },
+
+      // Финансовые метрики
+      revenue: {
+        total: funnel.total_revenue || 0,
+        payment_count: funnel.payment_count || 0,
+        average: funnel.payment_count > 0
+          ? (funnel.total_revenue / funnel.payment_count).toFixed(2)
+          : 0
+      },
+
+      // Метрики времени между шагами
+      time_metrics: funnel.time_metrics || [],
+
+      // Методы оплаты
+      payment_methods: funnel.payment_methods || [],
+
+      // Дополнительные метрики
+      help_rate: funnel.payment_link_created > 0
+        ? ((funnel.payment_help_viewed / funnel.payment_link_created) * 100).toFixed(1)
+        : 0,
+
+      period: period
+    };
+
+    res.json(metrics);
+  } catch (error) {
+    console.error('Ошибка загрузки детальной воронки оплаты:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // API: Длительность проверок по часам
 app.get('/admin/api/check-duration-by-hour', requireAdmin, async (req, res) => {
   try {
