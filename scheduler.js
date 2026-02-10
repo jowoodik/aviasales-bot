@@ -6,6 +6,7 @@ const UnifiedMonitor = require('./services/UnifiedMonitor');
 const NotificationService = require('./services/NotificationService');
 const RouteResult = require('./models/RouteResult');
 const airportResolver = require('./utils/AirportCodeResolver');
+const TimezoneUtils = require('./utils/timezoneUtils');
 const db = require('./config/database');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -283,8 +284,15 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
       const userSettings = await getUserSettings(user.chat_id);
 
       for (const route of routes) {
-        // Генерируем URLs с метаданными для маршрута
-        const items = monitor.prepareBatchItem(route);
+        // Проверяем истечение срока маршрута
+        const isExpired = await checkAndArchiveExpiredRoute(route, userSettings);
+        if (isExpired) {
+          console.log(`    📦 Маршрут #${route.id} архивирован - пропускаем проверку`);
+          continue;
+        }
+
+        // Генерируем URLs с метаданными для маршрута (с учетом таймзоны)
+        const items = monitor.prepareBatchItem(route, userSettings);
 
         if (items.length === 0) {
           console.log(`    ⏭️  Маршрут #${route.id}: нет комбинаций для проверки`);
@@ -530,8 +538,15 @@ async function checkUserRoutes(chatId, monitor, notificationService, subscriptio
 
     for (const route of userRoutes) {
       try {
+        // 0. Проверяем истечение срока маршрута
+        const isExpired = await checkAndArchiveExpiredRoute(route, userSettings);
+        if (isExpired) {
+          console.log(`    📦 Маршрут #${route.id} архивирован - пропускаем проверку`);
+          continue;
+        }
+
         // 1. Проверка маршрута (данные сохраняются в БД внутри checkSingleRoute)
-        await monitor.checkSingleRoute(route);
+        await monitor.checkSingleRoute(route, userSettings);
 
         // 2. Лучший результат
         const bestResults = await RouteResult.getTopResults(route.id, 1);
@@ -655,6 +670,80 @@ cron.schedule('0 3 * * *', async () => {
 // ========================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ========================================
+
+/**
+ * Получить "сегодня" в таймзоне пользователя (00:00:00)
+ */
+function getTodayInUserTimezone(timezone) {
+  try {
+    const userNow = TimezoneUtils.getCurrentTimeInTimezone(timezone);
+    userNow.setHours(0, 0, 0, 0);
+    return userNow;
+  } catch (error) {
+    console.error('Ошибка получения даты в таймзоне:', error);
+    const fallback = new Date();
+    fallback.setHours(0, 0, 0, 0);
+    return fallback;
+  }
+}
+
+/**
+ * Проверить истечение срока маршрута и архивировать если нужно
+ * @returns {boolean} true если маршрут архивирован, false если актуален
+ */
+async function checkAndArchiveExpiredRoute(route, userSettings) {
+  const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
+  const today = getTodayInUserTimezone(timezone);
+
+  // Определяем дату для проверки
+  let checkDate;
+  let dateLabel;
+
+  if (route.is_flexible) {
+    // Для гибких маршрутов проверяем конец диапазона
+    checkDate = new Date(route.departure_end);
+    dateLabel = `${route.departure_start} - ${route.departure_end}`;
+  } else {
+    // Для фиксированных проверяем дату вылета
+    checkDate = new Date(route.departure_date);
+    dateLabel = route.departure_date;
+  }
+
+  checkDate.setHours(0, 0, 0, 0);
+
+  // Если дата прошла - архивируем
+  if (checkDate < today) {
+    try {
+      // Архивируем маршрут
+      await new Promise((resolve, reject) => {
+        db.run(
+          'UPDATE unified_routes SET is_archived = 1 WHERE id = ?',
+          [route.id],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+
+      // Отправляем уведомление пользователю
+      const message = `📦 *Маршрут архивирован*\n\n` +
+        `${route.origin} → ${route.destination}\n` +
+        `Дата: ${dateLabel}\n\n` +
+        `Причина: дата вылета прошла`;
+
+      await bot.sendMessage(route.chat_id, message, { parse_mode: 'Markdown' });
+
+      console.log(`    📦 Маршрут ${route.id} автоматически архивирован (дата прошла)`);
+      return true; // Маршрут архивирован
+    } catch (error) {
+      console.error(`    ❌ Ошибка архивации маршрута ${route.id}:`, error);
+      return false;
+    }
+  }
+
+  return false; // Маршрут актуален
+}
 
 /**
  * Получить пользователей по типу подписки

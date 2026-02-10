@@ -2,6 +2,7 @@ const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
 const AviasalesPricer = require('./AviasalesPricer');
 const AviasalesAPI = require('./AviasalesAPI');
+const TimezoneUtils = require('../utils/timezoneUtils');
 const db = require('../config/database');
 
 class UnifiedMonitor {
@@ -40,15 +41,36 @@ class UnifiedMonitor {
     }
 
     /**
+     * Получить "сегодня" в таймзоне пользователя (00:00:00)
+     */
+    _getTodayInUserTimezone(userSettings) {
+        try {
+            const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
+            const userNow = TimezoneUtils.getCurrentTimeInTimezone(timezone);
+            userNow.setHours(0, 0, 0, 0);
+            return userNow;
+        } catch (error) {
+            console.error('Ошибка получения даты в таймзоне:', error);
+            const fallback = new Date();
+            fallback.setHours(0, 0, 0, 0);
+            return fallback;
+        }
+    }
+
+    /**
      * Подготовка маршрута для batch-проверки (БЕЗ проверки цен).
      * Генерирует URLs и метаданные для всех комбинаций маршрута.
      *
      * @param {Object} route - Объект маршрута
+     * @param {Object} userSettings - Настройки пользователя (для таймзоны)
      * @returns {Array} - Массив объектов {url, combination, airline, baggage, max_stops, max_layover_hours}
      */
-    prepareBatchItem(route) {
-        // Генерируем комбинации для проверки
-        const combinations = UnifiedRoute.getCombinations(route);
+    prepareBatchItem(route, userSettings = null) {
+        // Получаем today в таймзоне пользователя
+        const today = userSettings ? this._getTodayInUserTimezone(userSettings) : null;
+
+        // Генерируем комбинации для проверки (с учетом прошедших дат)
+        const combinations = UnifiedRoute.getCombinations(route, today);
 
         if (combinations.length === 0) {
             return [];
@@ -181,12 +203,17 @@ class UnifiedMonitor {
 
     /**
      * Проверка одного маршрута
+     * @param {Object} route - Объект маршрута
+     * @param {Object} userSettings - Настройки пользователя (для таймзоны)
      */
-    async checkSingleRoute(route) {
+    async checkSingleRoute(route, userSettings = null) {
         const checkTimestamp = new Date().toISOString();
 
-        // Генерируем комбинации для проверки
-        const combinations = UnifiedRoute.getCombinations(route);
+        // Получаем today в таймзоне пользователя
+        const today = userSettings ? this._getTodayInUserTimezone(userSettings) : null;
+
+        // Генерируем комбинации для проверки (с учетом прошедших дат)
+        const combinations = UnifiedRoute.getCombinations(route, today);
         console.log(`📋 Комбинаций для проверки: ${combinations.length}`);
 
         if (combinations.length === 0) {

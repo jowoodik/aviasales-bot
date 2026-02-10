@@ -185,8 +185,10 @@ class UnifiedRoute {
 
     /**
      * Генерация комбинаций для гибкого маршрута
+     * @param {Object} route - маршрут
+     * @param {Date|null} todayDate - сегодняшняя дата (для фильтрации прошедших дат)
      */
-    static getCombinations(route) {
+    static getCombinations(route, todayDate = null) {
         if (!route.is_flexible) {
             // Фиксированный маршрут - одна комбинация
             return [{
@@ -197,8 +199,25 @@ class UnifiedRoute {
         }
 
         const combinations = [];
-        const startDate = new Date(route.departure_start);
+
+        // Определяем начальную дату с учетом фильтрации
+        let startDate;
+        if (todayDate !== null) {
+            // Если передана today - фильтруем прошедшие даты
+            const today = new Date(todayDate);
+            today.setHours(0, 0, 0, 0);
+            startDate = new Date(Math.max(new Date(route.departure_start), today));
+        } else {
+            // Если today не передана - не фильтруем, используем departure_start
+            startDate = new Date(route.departure_start);
+        }
+
         const endDate = new Date(route.departure_end);
+
+        // Если весь диапазон прошел - возвращаем пустой массив
+        if (startDate > endDate) {
+            return [];
+        }
 
         // Если нет обратного билета - генерируем только даты вылета
         if (!route.has_return) {
