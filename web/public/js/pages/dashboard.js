@@ -25,7 +25,7 @@ class DashboardPage {
                 api.getCheckStats(),
                 api.get('/monetization-stats?period=30'),
                 api.get('/engagement-stats?period=30'),
-                api.get('/check-duration-by-hour?days=7')
+                api.get('/check-duration-by-hour?days=3')
             ]);
 
             this.renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration);
@@ -38,10 +38,13 @@ class DashboardPage {
     renderContent(statsData, users, routes, checkStats, monetizationStats, engagementStats, checkDuration) {
         const content = document.getElementById('main-content');
 
-        // Статистика проверок из API
-        const apiCheckStats = statsData.checkStats || {};
-        const successRate = apiCheckStats.total_combinations > 0
-            ? ((apiCheckStats.successful_checks / apiCheckStats.total_combinations) * 100).toFixed(1)
+        // Статистика проверок - агрегируем из checkStats (как в checkStats.js)
+        const totalCheckRuns = checkStats.length;
+        const successfulChecks = checkStats.reduce((sum, s) => sum + (s.successful_checks || 0), 0);
+        const failedChecks = checkStats.reduce((sum, s) => sum + (s.failed_checks || 0), 0);
+        const totalCombinations = successfulChecks + failedChecks;
+        const successRate = totalCombinations > 0
+            ? ((successfulChecks / totalCombinations) * 100).toFixed(1)
             : 0;
 
         // DAU/WAU/MAU
@@ -96,15 +99,15 @@ class DashboardPage {
                             <div class="card-body">
                                 <div class="row text-center">
                                     <div class="col-3">
-                                        <h3 class="text-primary mb-0">${apiCheckStats.total_check_runs?.toLocaleString() || 0}</h3>
+                                        <h3 class="text-primary mb-0">${totalCheckRuns.toLocaleString()}</h3>
                                         <small class="text-muted">Проверок</small>
                                     </div>
                                     <div class="col-3">
-                                        <h3 class="text-success mb-0">${apiCheckStats.successful_checks?.toLocaleString() || 0}</h3>
+                                        <h3 class="text-success mb-0">${successfulChecks.toLocaleString()}</h3>
                                         <small class="text-muted">Успешных</small>
                                     </div>
                                     <div class="col-3">
-                                        <h3 class="text-danger mb-0">${apiCheckStats.failed_checks?.toLocaleString() || 0}</h3>
+                                        <h3 class="text-danger mb-0">${failedChecks.toLocaleString()}</h3>
                                         <small class="text-muted">Неудачных</small>
                                     </div>
                                     <div class="col-3">
@@ -121,8 +124,18 @@ class DashboardPage {
                 <div class="row g-4 mb-4">
                     <div class="col-12">
                         <div class="card">
-                            <div class="card-header">
+                            <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0">⏱️ Длительность проверок по часам</h5>
+                                <div class="btn-group" role="group" id="duration-period-filter">
+                                    <input type="radio" class="btn-check" name="duration-period" id="duration-3d" value="3" checked>
+                                    <label class="btn btn-outline-primary btn-sm" for="duration-3d">3 дня</label>
+
+                                    <input type="radio" class="btn-check" name="duration-period" id="duration-7d" value="7">
+                                    <label class="btn btn-outline-primary btn-sm" for="duration-7d">7 дней</label>
+
+                                    <input type="radio" class="btn-check" name="duration-period" id="duration-all" value="all">
+                                    <label class="btn btn-outline-primary btn-sm" for="duration-all">Всё время</label>
+                                </div>
                             </div>
                             <div class="card-body">
                                 <canvas id="check-duration-chart"></canvas>
@@ -248,6 +261,9 @@ class DashboardPage {
 
         // Render check duration chart
         this.renderCheckDurationChart(checkDuration.checkDuration || []);
+
+        // Attach duration period filter listeners
+        this.attachDurationFilterListeners();
     }
 
     renderStatsCards(statsData, users, routes) {
@@ -760,7 +776,7 @@ class DashboardPage {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: true,
                 interaction: {
                     mode: 'index',
                     intersect: false
@@ -793,6 +809,53 @@ class DashboardPage {
             }
         });
         this.charts.checkDuration.render();
+    }
+
+    attachDurationFilterListeners() {
+        const filterButtons = document.querySelectorAll('input[name="duration-period"]');
+        filterButtons.forEach(button => {
+            button.addEventListener('change', async (e) => {
+                const period = e.target.value;
+                await this.reloadCheckDurationChart(period);
+            });
+        });
+    }
+
+    async reloadCheckDurationChart(days) {
+        try {
+            // Show loading state
+            const canvas = document.getElementById('check-duration-chart');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '14px sans-serif';
+            ctx.fillStyle = '#666';
+            ctx.textAlign = 'center';
+            ctx.fillText('Загрузка...', canvas.width / 2, canvas.height / 2);
+
+            // Fetch new data
+            const url = days === 'all'
+                ? '/check-duration-by-hour'
+                : `/check-duration-by-hour?days=${days}`;
+            const result = await api.get(url);
+
+            // Destroy old chart
+            if (this.charts.checkDuration) {
+                this.charts.checkDuration.destroy();
+            }
+
+            // Render new chart
+            this.renderCheckDurationChart(result.checkDuration || []);
+        } catch (error) {
+            console.error('Error reloading check duration chart:', error);
+            // Show error on canvas
+            const canvas = document.getElementById('check-duration-chart');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '14px sans-serif';
+            ctx.fillStyle = '#dc3545';
+            ctx.textAlign = 'center';
+            ctx.fillText('Ошибка загрузки данных', canvas.width / 2, canvas.height / 2);
+        }
     }
 
     renderMonetization(monetizationStats) {
