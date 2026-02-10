@@ -8,7 +8,7 @@ const AviasalesAPI = require('./AviasalesAPI');
 
 class AviasalesPricer {
   constructor(debug = false, marker = '696196') {
-    this.maxConcurrent = 10;
+    this.maxConcurrent = 17;
     this.debug = debug;
     // Партнёрский маркер для ссылок пользователям (влияет на статистику travelpayouts)
     this.marker = marker;
@@ -35,7 +35,12 @@ class AviasalesPricer {
       'http://PEesVANV:hiBzhNjR@85.142.0.77:63718',
       'http://PEesVANV:hiBzhNjR@85.142.2.177:62616',
       'http://PEesVANV:hiBzhNjR@85.142.48.85:63040',
-      'http://PEesVANV:hiBzhNjR@85.142.49.242:63112'
+      'http://PEesVANV:hiBzhNjR@85.142.49.242:63112',
+      'http://PEesVANV:hiBzhNjR@45.93.15.126:64148',
+      'http://PEesVANV:hiBzhNjR@45.132.129.239:64390',
+      'http://PEesVANV:hiBzhNjR@176.103.91.194:63874',
+      'http://PEesVANV:hiBzhNjR@85.142.3.169:64302',
+      'http://PEesVANV:hiBzhNjR@85.142.140.23:64908',
     ];
     this.workingProxies = [];
     this.currentProxyIndex = 0;
@@ -90,7 +95,6 @@ class AviasalesPricer {
       }
     }
   }
-
 
   // 🆕 ИСПРАВЛЕННЫЙ МЕТОД: Формирование расширенной ссылки для шаринга
   buildEnhancedSearchLink(params, ticket, proposal, price) {

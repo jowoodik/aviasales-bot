@@ -173,6 +173,12 @@ bot.on('message', async (msg) => {
       return;
     }
 
+    if (text === '❌ Отмена') {
+      await routeHandlers.handleMyRoutes(chatId);
+      ActivityService.logEvent(chatId, 'cancel_route_creation').catch(err => console.error('Activity log error:', err));
+      return;
+    }
+
     if (text === '⚙️ Настройки') {
       settingsHandlers.handleSettings(chatId);
       return;

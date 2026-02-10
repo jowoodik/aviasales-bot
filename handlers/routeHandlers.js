@@ -520,7 +520,7 @@ class RouteHandlers {
                 keyboard: [
                     ['📅 Конкретная дата'],
                     ['📆 Диапазон дат'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -740,7 +740,7 @@ class RouteHandlers {
             if (airports.length === 0) {
                 const keyboard = {
                     reply_markup: {
-                        keyboard: [['🔙 Назад']],
+                        keyboard: [['🔙 Назад', '❌ Отмена']],
                         resize_keyboard: true,
                         one_time_keyboard: true
                     }
@@ -776,7 +776,7 @@ class RouteHandlers {
                         keyboard: [
                             ['✅ Да, использовать'],
                             ['❌ Нет, искать другой'],
-                            ['🔙 Назад']
+                            ['🔙 Назад', '❌ Отмена'],
                         ],
                         resize_keyboard: true,
                         one_time_keyboard: true
@@ -797,7 +797,7 @@ class RouteHandlers {
             const keyboard = AirportFormatter.createAirportsKeyboard(airports, false);
 
             // Добавляем кнопку "Назад"
-            keyboard.reply_markup.keyboard.push(['🔙 Назад']);
+            keyboard.reply_markup.keyboard.push(['🔙 Назад', '❌ Отмена']);
 
             this.bot.sendMessage(chatId, message, keyboard);
 
@@ -817,7 +817,7 @@ class RouteHandlers {
             this.bot.sendMessage(
                 chatId,
                 `❌ Ошибка при поиске аэропортов: ${error.message}\n\nПопробуйте еще раз.`,
-                { reply_markup: { keyboard: [['🔙 Назад']], resize_keyboard: true } }
+                { reply_markup: { keyboard: [['🔙 Назад', '❌ Отмена']], resize_keyboard: true } }
             );
         }
     }
@@ -985,7 +985,7 @@ class RouteHandlers {
                 keyboard: [
                     ...airportButtons,
                     ['🔍 Поиск аэропорта'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1034,7 +1034,7 @@ class RouteHandlers {
                 keyboard: [
                     ['✅ Да, нужен обратный билет'],
                     ['❌ Нет, только в одну сторону'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1087,7 +1087,7 @@ class RouteHandlers {
             state.step = 'departure_start';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1106,7 +1106,7 @@ class RouteHandlers {
             state.step = 'departure_date';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1132,7 +1132,7 @@ class RouteHandlers {
                     keyboard: [
                         ['✅ Да, нужен обратный билет'],
                         ['❌ Нет, только в одну сторону'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1171,7 +1171,7 @@ class RouteHandlers {
             state.step = 'return_date';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1206,7 +1206,7 @@ class RouteHandlers {
             state.step = 'departure_date';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1261,7 +1261,7 @@ class RouteHandlers {
                     keyboard: [
                         ['✅ Да, нужен обратный билет'],
                         ['❌ Нет, только в одну сторону'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1297,7 +1297,7 @@ class RouteHandlers {
         state.step = 'departure_end';
         const keyboard = {
             reply_markup: {
-                keyboard: [['🔙 Назад']],
+                keyboard: [['🔙 Назад', '❌ Отмена']],
                 resize_keyboard: true,
                 one_time_keyboard: true
             }
@@ -1319,7 +1319,7 @@ class RouteHandlers {
             state.step = 'departure_start';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1369,7 +1369,7 @@ class RouteHandlers {
                         ['2', '3', '5'],
                         ['7', '10', '14'],
                         ['21', '28', '30'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1448,7 +1448,7 @@ class RouteHandlers {
             state.step = 'departure_start';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1471,7 +1471,7 @@ class RouteHandlers {
             state.step = 'departure_end';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1503,7 +1503,7 @@ class RouteHandlers {
                     [String(minDays), String(minDays + 1), String(minDays + 2)],
                     ['7', '14', '21'],
                     ['28', '30', '60'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1530,7 +1530,7 @@ class RouteHandlers {
                         ['2', '3', '5'],
                         ['7', '10', '14'],
                         ['21', '28', '30'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1627,7 +1627,7 @@ class RouteHandlers {
             state.step = 'departure_start';
             const keyboard = {
                 reply_markup: {
-                    keyboard: [['🔙 Назад']],
+                    keyboard: [['🔙 Назад', '❌ Отмена']],
                     resize_keyboard: true,
                     one_time_keyboard: true
                 }
@@ -1650,7 +1650,7 @@ class RouteHandlers {
                         ['2', '3', '5'],
                         ['7', '10', '14'],
                         ['21', '28', '30'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1688,7 +1688,7 @@ class RouteHandlers {
                     ['🌐 Аэрофлот (SU)', 'S7 Airlines (S7)'],
                     ['Etihad (EY)', 'Emirates (EK)'],
                     ['Flydubai (FZ)', 'Utair (UT)'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1714,7 +1714,7 @@ class RouteHandlers {
                                 [String(state.routeData.min_days), String(state.routeData.min_days + 1), String(state.routeData.min_days + 2)],
                                 ['7', '14', '21'],
                                 ['28', '30', '60'],
-                                ['🔙 Назад']
+                                ['🔙 Назад', '❌ Отмена'],
                             ],
                             one_time_keyboard: true,
                             resize_keyboard: true
@@ -1732,7 +1732,7 @@ class RouteHandlers {
                     state.step = 'departure_end';
                     const keyboard = {
                         reply_markup: {
-                            keyboard: [['🔙 Назад']],
+                            keyboard: [['🔙 Назад', '❌ Отмена']],
                             resize_keyboard: true,
                             one_time_keyboard: true
                         }
@@ -1751,7 +1751,7 @@ class RouteHandlers {
                     state.step = 'return_date';
                     const keyboard = {
                         reply_markup: {
-                            keyboard: [['🔙 Назад']],
+                            keyboard: [['🔙 Назад', '❌ Отмена']],
                             resize_keyboard: true,
                             one_time_keyboard: true
                         }
@@ -1768,7 +1768,7 @@ class RouteHandlers {
                     state.step = 'departure_date';
                     const keyboard = {
                         reply_markup: {
-                            keyboard: [['🔙 Назад']],
+                            keyboard: [['🔙 Назад', '❌ Отмена']],
                             resize_keyboard: true,
                             one_time_keyboard: true
                         }
@@ -1821,7 +1821,7 @@ class RouteHandlers {
                 keyboard: [
                     ['1', '2', '3'],
                     ['4', '5', '6'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1880,7 +1880,7 @@ class RouteHandlers {
                 keyboard: [
                     ['0 (без детей)'],
                     ['1', '2', '3'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -1916,7 +1916,7 @@ class RouteHandlers {
                     keyboard: [
                         ['1', '2', '3'],
                         ['4', '5', '6'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -1967,7 +1967,7 @@ class RouteHandlers {
                 keyboard: [
                     ['🧳 С багажом 20 кг'],
                     ['🎒 Без багажа'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -2003,7 +2003,7 @@ class RouteHandlers {
                     keyboard: [
                         ['0 (без детей)'],
                         ['1', '2', '3'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -2050,7 +2050,7 @@ class RouteHandlers {
                     ['1 (до 1)'],
                     ['2 (до 2)'],
                     ['🌐 Любое'],
-                    ['🔙 Назад']
+                    ['🔙 Назад', '❌ Отмена'],
                 ],
                 one_time_keyboard: true,
                 resize_keyboard: true
@@ -2086,7 +2086,7 @@ class RouteHandlers {
                     keyboard: [
                         ['🧳 С багажом 20 кг'],
                         ['🎒 Без багажа'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -2148,7 +2148,7 @@ class RouteHandlers {
                     keyboard: [
                         ['5 ч', '10 ч', '15 ч'],
                         ['24 ч'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена'],
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -2187,7 +2187,7 @@ class RouteHandlers {
                         ['1 (до 1)'],
                         ['2 (до 2)'],
                         ['🌐 Любое'],
-                        ['🔙 Назад']
+                        ['🔙 Назад', '❌ Отмена']
                     ],
                     one_time_keyboard: true,
                     resize_keyboard: true
@@ -2237,7 +2237,7 @@ class RouteHandlers {
 
         const keyboard = {
             reply_markup: {
-                keyboard: [['🔙 Назад']],
+                keyboard: [['🔙 Назад', '❌ Отмена']],
                 resize_keyboard: true,
                 one_time_keyboard: true
             }
@@ -2273,7 +2273,7 @@ class RouteHandlers {
                             ['1 (до 1)'],
                             ['2 (до 2)'],
                             ['🌐 Любое'],
-                            ['🔙 Назад']
+                            ['🔙 Назад', '❌ Отмена']
                         ],
                         one_time_keyboard: true,
                         resize_keyboard: true
@@ -2304,7 +2304,7 @@ class RouteHandlers {
                         keyboard: [
                             ['5 ч', '10 ч', '15 ч'],
                             ['24 ч'],
-                            ['🔙 Назад']
+                            ['🔙 Назад', '❌ Отмена']
                         ],
                         one_time_keyboard: true,
                         resize_keyboard: true

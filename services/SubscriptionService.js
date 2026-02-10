@@ -52,7 +52,7 @@ class SubscriptionService {
      */
     static async checkUserLimits(chatId, isFlexible, combinationsCount = 0) {
         const subscription = await this.getUserSubscription(chatId);
-        const routes = await UnifiedRoute.findByChatId(chatId);
+        const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
 
         const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;
@@ -102,7 +102,7 @@ class SubscriptionService {
      */
     static async getSubscriptionStats(chatId) {
         const subscription = await this.getUserSubscription(chatId);
-        const routes = await UnifiedRoute.findByChatId(chatId);
+        const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
 
         const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;

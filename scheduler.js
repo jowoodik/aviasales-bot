@@ -681,7 +681,7 @@ function getUserActiveRoutes(chatId) {
   return new Promise((resolve, reject) => {
     db.all(`
       SELECT * FROM unified_routes
-      WHERE chat_id = ? AND is_paused = 0
+      WHERE chat_id = ? AND is_paused = 0 AND is_archived = 0
       ORDER BY created_at DESC
     `, [chatId], (err, rows) => {
       if (err) reject(err);
