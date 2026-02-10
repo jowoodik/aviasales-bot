@@ -94,69 +94,57 @@ class RouteHandlers {
             );
 
             // Формируем сообщение со списком
-            let message = `📋 МОИ МАРШРУТЫ\n\nУ вас ${routes.length} ${this._pluralize(routes.length, 'активный маршрут', 'активных маршрута', 'активных маршрутов')}:\n\n`;
+            let message = `📋 МОИ МАРШРУТЫ (${routes.length} ${this._pluralize(routes.length, 'активный', 'активных', 'активных')})\n\n`;
 
             const buttons = [['➕ Создать маршрут']];
 
             for (let i = 0; i < routesWithBestPrices.length; i++) {
                 const r = routesWithBestPrices[i];
                 const statusIcon = r.is_paused ? '⏸️' : '✅';
+                const routeType = r.is_flexible ? '(гибкий)' : '(фиксированный)';
 
                 // Формат даты
                 let dateStr;
                 if (r.is_flexible) {
                     const start = DateUtils.formatDateDisplay(r.departure_start).substring(0, 5);
                     const end = DateUtils.formatDateDisplay(r.departure_end).substring(0, 5);
-                    dateStr = `${start} - ${end} (диапазон, ${r.min_days}-${r.max_days} дней)`;
+                    dateStr = `${start} - ${end} (${r.min_days}-${r.max_days} дней)`;
                 } else if (r.has_return) {
                     const dep = DateUtils.formatDateDisplay(r.departure_date).substring(0, 5);
                     const ret = DateUtils.formatDateDisplay(r.return_date).substring(0, 5);
-                    dateStr = `${dep} - ${ret} (туда-обратно)`;
+                    const depDate = new Date(r.departure_date);
+                    const retDate = new Date(r.return_date);
+                    const days = Math.round((retDate - depDate) / (1000 * 60 * 60 * 24));
+                    dateStr = `${dep} - ${ret} (${days} ${this._pluralize(days, 'день', 'дня', 'дней')})`;
                 } else {
                     const dep = DateUtils.formatDateDisplay(r.departure_date).substring(0, 5);
                     dateStr = `${dep} (в одну сторону)`;
                 }
 
-                // Авиакомпания
-                const airlineName = Formatters.getAirlineName(r.airline);
-
-                // Пассажиры
-                const passengers = Formatters.formatPassengers(r.adults, r.children);
-
-                // Багаж
-                const baggageIcon = r.baggage ? '🧳' : '🎒';
-                const baggageText = r.baggage ? 'С багажом' : 'Без багажа';
-
-                // Пересадки
-                let stopsText;
-                if (r.max_stops === 0) {
-                    stopsText = 'Только прямые';
-                } else if (r.max_stops === 99 || r.max_stops === null) {
-                    stopsText = 'Любое количество пересадок';
-                } else {
-                    stopsText = `До ${r.max_stops} ${this._pluralize(r.max_stops, 'пересадки', 'пересадок', 'пересадок')}`;
-                    if (r.max_layover_hours) {
-                        stopsText += ` (макс ${r.max_layover_hours}ч)`;
-                    }
-                }
-
-                // Лучшая цена с датой
+                // Лучшая цена
                 let bestPriceText;
+                let belowThreshold = false;
                 if (r.bestResult && r.bestResult.total_price) {
-                    const timeAgo = r.bestResult.found_at ? Formatters.formatTimeAgo(r.bestResult.found_at) : 'давно';
-                    bestPriceText = `${Formatters.formatPrice(r.bestResult.total_price, r.currency)} (найдено ${timeAgo})`;
+                    bestPriceText = Formatters.formatPrice(r.bestResult.total_price, r.currency);
+                    belowThreshold = r.bestResult.total_price <= r.threshold_price;
                 } else {
                     bestPriceText = 'Нет данных';
                 }
 
                 const routeName = airportResolver.formatRoute(r.origin, r.destination);
-                message += `${statusIcon} ${i + 1}. ✈️ ${routeName}\n`;
-                message += `   📅 ${dateStr}\n`;
-                message += `   🏢 ${airlineName} | 👥 ${passengers}\n`;
-                message += `   ${baggageIcon} ${baggageText} | 🔄 ${stopsText}\n`;
-                message += `   💰 Порог: ${Formatters.formatPrice(r.threshold_price, r.currency)} | 🏆 Лучшая: ${bestPriceText}\n\n`;
+                message += `${statusIcon} ${i + 1}. ${routeName} ${routeType}\n`;
+                message += `📅 ${dateStr}\n`;
+                message += `💰 Порог: ${Formatters.formatPrice(r.threshold_price, r.currency)} | Лучшая: ${bestPriceText}${belowThreshold ? ' ✨' : ''}\n`;
+
+                // Разделитель между маршрутами (но не после последнего)
+                if (i < routesWithBestPrices.length - 1) {
+                    message += `\n· · · · · · · · · · · · · · · ·\n\n`;
+                } else {
+                    message += `\n`;
+                }
 
                 // Кнопка для выбора маршрута (компактный формат)
+                const baggageIcon = r.baggage ? '🧳' : '🎒';
                 let buttonText;
                 if (r.is_flexible) {
                     const start = DateUtils.formatDateDisplay(r.departure_start).substring(0, 5);
