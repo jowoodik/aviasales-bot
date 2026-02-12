@@ -1,7 +1,6 @@
 // web/public/js/pages/dashboard.js
 
 import api from '../api.js';
-import StatsCard from '../components/stats.js';
 import ChartComponent from '../components/chart.js';
 import { showLoading, showError, showToast, formatRelativeTime } from '../utils/helpers.js';
 import CONFIG from '../config.js';
@@ -52,7 +51,26 @@ class DashboardPage {
         const userActivity = statsData.userActivity || { dau: 0, wau: 0, mau: 0 };
 
         // Комбинации
-        const combinations = statsData.combinations || { total: 0, fixed: 0, flexible: 0 };
+        const comb = statsData.combinations || { active: { fixed: 0, flexible: 0, trips: 0 }, all: { fixed: 0, flexible: 0, trips: 0 }, new24h: { fixed: 0, flexible: 0, trips: 0 } };
+        const combActive = comb.active;
+        const combAll = comb.all;
+        const combNew = comb.new24h;
+        const newIn24h = statsData.newIn24h || { users: 0, fixedRoutes: 0, flexibleRoutes: 0, trips: 0 };
+
+        // Маршруты
+        const activeRoutes = routes.filter(r => !r.is_paused && !r.is_archived);
+        const fixedRoutes = activeRoutes.filter(r => !r.is_flexible).length;
+        const flexibleRoutes = activeRoutes.filter(r => r.is_flexible).length;
+        const totalFixedRoutes = routes.filter(r => !r.is_flexible).length;
+        const totalFlexibleRoutes = routes.filter(r => r.is_flexible).length;
+        const tripStats = statsData.tripStats || {};
+        const activeTripsCount = tripStats.active || 0;
+        const totalTripsCount = tripStats.total || 0;
+        const totalActiveRoutes = fixedRoutes + flexibleRoutes + activeTripsCount;
+        const totalAllRoutes = routes.length + totalTripsCount;
+        const totalActiveComb = combActive.fixed + combActive.flexible + combActive.trips;
+        const totalAllComb = combAll.fixed + combAll.flexible + combAll.trips;
+        const totalNewComb = combNew.fixed + combNew.flexible + combNew.trips;
 
         const html = `
             <div class="container-fluid">
@@ -63,66 +81,100 @@ class DashboardPage {
                     </div>
                 </div>
 
-                <!-- Stats Cards -->
-                <div id="stats-cards" class="mb-4"></div>
-
-                <!-- Комбинации и проверки -->
+                <!-- Summary Cards -->
                 <div class="row g-4 mb-4">
-                    <div class="col-lg-6">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">🔢 Комбинации для проверки</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row text-center">
-                                    <div class="col-4">
-                                        <h3 class="text-primary mb-0">${combinations.total.toLocaleString()}</h3>
-                                        <small class="text-muted">Всего</small>
-                                    </div>
-                                    <div class="col-4">
-                                        <h3 class="text-info mb-0">${combinations.fixed.toLocaleString()}</h3>
-                                        <small class="text-muted">Фиксированные</small>
-                                    </div>
-                                    <div class="col-4">
-                                        <h3 class="text-warning mb-0">${combinations.flexible.toLocaleString()}</h3>
-                                        <small class="text-muted">Гибкие</small>
-                                    </div>
-                                </div>
+                    <!-- Пользователи -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <div class="mb-2"><i class="bi bi-people-fill text-primary" style="font-size: 1.5rem;"></i></div>
+                                <h2 class="text-primary mb-0">${users.length}</h2>
+                                <p class="text-muted mb-2">Пользователи</p>
+                                ${newIn24h.users > 0
+                                    ? `<span class="badge bg-success">+${newIn24h.users} за 24ч</span>`
+                                    : `<span class="badge bg-light text-muted">0 за 24ч</span>`}
                             </div>
                         </div>
                     </div>
-                    <div class="col-lg-6">
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0">📋 Статистика проверок</h5>
-                                <a href="#check-stats" class="btn btn-sm btn-outline-secondary">Подробнее</a>
+
+                    <!-- Маршруты -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <div class="mb-2"><i class="bi bi-airplane-fill text-success" style="font-size: 1.5rem;"></i></div>
+                                <h2 class="text-success mb-0">${totalActiveRoutes}</h2>
+                                <p class="text-muted mb-1">Маршруты</p>
+                                <small class="text-muted d-block mb-2">всего ${totalAllRoutes}</small>
+                                <table class="table table-sm table-borderless mb-0 mx-auto" style="max-width: 220px; font-size: 0.85em;">
+                                    <tbody>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Фикс</td>
+                                            <td class="text-end py-0"><strong>${fixedRoutes}</strong><span class="text-muted">/${totalFixedRoutes}</span></td>
+                                            <td class="text-end py-0">${newIn24h.fixedRoutes > 0 ? `<span class="text-success">+${newIn24h.fixedRoutes}</span>` : ''}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Гибкие</td>
+                                            <td class="text-end py-0"><strong>${flexibleRoutes}</strong><span class="text-muted">/${totalFlexibleRoutes}</span></td>
+                                            <td class="text-end py-0">${newIn24h.flexibleRoutes > 0 ? `<span class="text-success">+${newIn24h.flexibleRoutes}</span>` : ''}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Составные</td>
+                                            <td class="text-end py-0"><strong>${activeTripsCount}</strong><span class="text-muted">/${totalTripsCount}</span></td>
+                                            <td class="text-end py-0">${newIn24h.trips > 0 ? `<span class="text-success">+${newIn24h.trips}</span>` : ''}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
-                            <div class="card-body">
-                                <div class="row text-center">
-                                    <div class="col-3">
-                                        <h3 class="text-primary mb-0">${totalCheckRuns.toLocaleString()}</h3>
-                                        <small class="text-muted">Проверок</small>
-                                    </div>
-                                    <div class="col-3">
-                                        <h3 class="text-success mb-0">${successfulChecks.toLocaleString()}</h3>
-                                        <small class="text-muted">Успешных</small>
-                                    </div>
-                                    <div class="col-3">
-                                        <h3 class="text-danger mb-0">${failedChecks.toLocaleString()}</h3>
-                                        <small class="text-muted">Неудачных</small>
-                                    </div>
-                                    <div class="col-3">
-                                        <h3 class="text-info mb-0">${successRate}%</h3>
-                                        <small class="text-muted">Success Rate</small>
-                                    </div>
+                        </div>
+                    </div>
+
+                    <!-- Комбинации -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <div class="mb-2"><i class="bi bi-grid-3x3-gap-fill text-warning" style="font-size: 1.5rem;"></i></div>
+                                <h2 class="text-warning mb-0">${totalActiveComb.toLocaleString()}</h2>
+                                <p class="text-muted mb-1">Комбинации</p>
+                                <small class="text-muted d-block mb-2">всего ${totalAllComb.toLocaleString()}</small>
+                                <table class="table table-sm table-borderless mb-0 mx-auto" style="max-width: 220px; font-size: 0.85em;">
+                                    <tbody>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Фикс</td>
+                                            <td class="text-end py-0"><strong>${combActive.fixed.toLocaleString()}</strong><span class="text-muted">/${combAll.fixed.toLocaleString()}</span></td>
+                                            <td class="text-end py-0">${combNew.fixed > 0 ? `<span class="text-success">+${combNew.fixed.toLocaleString()}</span>` : ''}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Гибкие</td>
+                                            <td class="text-end py-0"><strong>${combActive.flexible.toLocaleString()}</strong><span class="text-muted">/${combAll.flexible.toLocaleString()}</span></td>
+                                            <td class="text-end py-0">${combNew.flexible > 0 ? `<span class="text-success">+${combNew.flexible.toLocaleString()}</span>` : ''}</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-start text-muted py-0">Составные</td>
+                                            <td class="text-end py-0"><strong>${combActive.trips.toLocaleString()}</strong><span class="text-muted">/${combAll.trips.toLocaleString()}</span></td>
+                                            <td class="text-end py-0">${combNew.trips > 0 ? `<span class="text-success">+${combNew.trips.toLocaleString()}</span>` : ''}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Success Rate -->
+                    <div class="col-lg-3 col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <div class="mb-2"><i class="bi bi-check-circle-fill ${parseFloat(successRate) >= 80 ? 'text-success' : parseFloat(successRate) >= 50 ? 'text-warning' : 'text-danger'}" style="font-size: 1.5rem;"></i></div>
+                                <h2 class="${parseFloat(successRate) >= 80 ? 'text-success' : parseFloat(successRate) >= 50 ? 'text-warning' : 'text-danger'} mb-0">${successRate}%</h2>
+                                <p class="text-muted mb-2">Успех проверок</p>
+                                <div class="d-flex justify-content-center gap-2 flex-wrap">
+                                    <span class="badge bg-success">${successfulChecks.toLocaleString()} ок</span>
+                                    <span class="badge bg-danger">${failedChecks.toLocaleString()} ошиб</span>
                                 </div>
+                                <a href="#check-stats" class="btn btn-sm btn-outline-secondary mt-2">Подробнее</a>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- Составные маршруты -->
-                ${this.renderTripStats(statsData.tripStats || {})}
 
                 <!-- График длительности проверок -->
                 <div class="row g-4 mb-4">
@@ -254,9 +306,6 @@ class DashboardPage {
 
         content.innerHTML = html;
 
-        // Render stats cards
-        this.renderStatsCards(statsData, users, routes);
-
         // Render charts
         this.renderCharts(statsData, routes);
 
@@ -268,53 +317,6 @@ class DashboardPage {
 
         // Attach duration period filter listeners
         this.attachDurationFilterListeners();
-    }
-
-    renderStatsCards(statsData, users, routes) {
-        const activeRoutes = routes.filter(r => !r.is_paused && !r.is_archived).length;
-        const flexibleRoutes = routes.filter(r => r.is_flexible).length;
-
-        const stats = [
-            {
-                icon: 'bi-people-fill',
-                value: users.length,
-                label: 'Пользователи',
-                sublabel: 'Всего зарегистрировано',
-                variant: 'primary',
-                cols: '3'
-            },
-            {
-                icon: 'bi-airplane-fill',
-                value: routes.length,
-                label: 'Маршруты',
-                sublabel: `${activeRoutes} активных`,
-                variant: 'success',
-                cols: '3'
-            },
-            {
-                icon: 'bi-star-fill',
-                value: flexibleRoutes,
-                label: 'Гибкие маршруты',
-                sublabel: `${routes.length - flexibleRoutes} фиксированных`,
-                variant: 'info',
-                cols: '3'
-            },
-            {
-                icon: 'bi-graph-up',
-                value: users.length ? (routes.length / users.length).toFixed(1) : 0,
-                label: 'Среднее маршрутов',
-                sublabel: 'На пользователя',
-                variant: 'warning',
-                cols: '3'
-            }
-        ];
-
-        const statsCard = new StatsCard({
-            containerId: 'stats-cards',
-            stats: stats
-        });
-
-        statsCard.render();
     }
 
     renderCharts(statsData, routes) {
@@ -790,48 +792,6 @@ class DashboardPage {
                                     • Большой дроп на "ссылка→оплата" = трение в процессе оплаты<br>
                                     • Общая конверсия: ${paymentFunnel.conversion?.overall || 0}% (цель: >5%)
                                 </small>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    renderTripStats(tripStats) {
-        const total = tripStats.total || 0;
-        const active = tripStats.active || 0;
-        const paused = tripStats.paused || 0;
-        const archived = tripStats.archived || 0;
-
-        if (total === 0) return '';
-
-        return `
-            <div class="row g-4 mb-4">
-                <div class="col-lg-6">
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <h5 class="mb-0">🗺️ Составные маршруты</h5>
-                            <a href="#trips" class="btn btn-sm btn-outline-secondary">Подробнее</a>
-                        </div>
-                        <div class="card-body">
-                            <div class="row text-center">
-                                <div class="col-3">
-                                    <h3 class="text-primary mb-0">${total}</h3>
-                                    <small class="text-muted">Всего</small>
-                                </div>
-                                <div class="col-3">
-                                    <h3 class="text-success mb-0">${active}</h3>
-                                    <small class="text-muted">Активных</small>
-                                </div>
-                                <div class="col-3">
-                                    <h3 class="text-secondary mb-0">${paused}</h3>
-                                    <small class="text-muted">На паузе</small>
-                                </div>
-                                <div class="col-3">
-                                    <h3 class="text-muted mb-0">${archived}</h3>
-                                    <small class="text-muted">В архиве</small>
-                                </div>
                             </div>
                         </div>
                     </div>
