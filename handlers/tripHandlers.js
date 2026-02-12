@@ -530,7 +530,7 @@ class TripHandlers {
         state.step = 'trip_add_more';
 
         const subscription = await SubscriptionService.getUserSubscription(chatId);
-        const maxLegs = subscription.name === 'admin' ? 6 : subscription.name === 'plus' ? 5 : 3;
+        const maxLegs = subscription.name === 'admin' ? 99 : subscription.name === 'plus' ? 7 : 5;
 
         let routePreview = state.tripData.origin;
         for (const leg of state.tripData.legs) {
