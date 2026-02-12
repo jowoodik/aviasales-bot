@@ -1,6 +1,7 @@
 const db = require('../config/database');
 const Formatters = require("../utils/formatters");
 const UnifiedRoute = require('../models/UnifiedRoute');
+const Trip = require('../models/Trip');
 
 class SubscriptionService {
     /**
@@ -53,8 +54,10 @@ class SubscriptionService {
     static async checkUserLimits(chatId, isFlexible, combinationsCount = 0) {
         const subscription = await this.getUserSubscription(chatId);
         const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
+        const trips = await Trip.findNonArchivedByChatId(chatId);
 
-        const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
+        // Трипы считаются как гибкие маршруты
+        const flexibleCount = routes.filter(r => r.is_flexible === 1).length + trips.length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;
 
         const limits = {
@@ -103,8 +106,9 @@ class SubscriptionService {
     static async getSubscriptionStats(chatId) {
         const subscription = await this.getUserSubscription(chatId);
         const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
+        const trips = await Trip.findNonArchivedByChatId(chatId);
 
-        const flexibleCount = routes.filter(r => r.is_flexible === 1).length;
+        const flexibleCount = routes.filter(r => r.is_flexible === 1).length + trips.length;
         const fixedCount = routes.filter(r => r.is_flexible === 0).length;
 
         return {

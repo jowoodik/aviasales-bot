@@ -121,6 +121,9 @@ class DashboardPage {
                     </div>
                 </div>
 
+                <!-- Составные маршруты -->
+                ${this.renderTripStats(statsData.tripStats || {})}
+
                 <!-- График длительности проверок -->
                 <div class="row g-4 mb-4">
                     <div class="col-12">
@@ -787,6 +790,48 @@ class DashboardPage {
                                     • Большой дроп на "ссылка→оплата" = трение в процессе оплаты<br>
                                     • Общая конверсия: ${paymentFunnel.conversion?.overall || 0}% (цель: >5%)
                                 </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    renderTripStats(tripStats) {
+        const total = tripStats.total || 0;
+        const active = tripStats.active || 0;
+        const paused = tripStats.paused || 0;
+        const archived = tripStats.archived || 0;
+
+        if (total === 0) return '';
+
+        return `
+            <div class="row g-4 mb-4">
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">🗺️ Составные маршруты</h5>
+                            <a href="#trips" class="btn btn-sm btn-outline-secondary">Подробнее</a>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center">
+                                <div class="col-3">
+                                    <h3 class="text-primary mb-0">${total}</h3>
+                                    <small class="text-muted">Всего</small>
+                                </div>
+                                <div class="col-3">
+                                    <h3 class="text-success mb-0">${active}</h3>
+                                    <small class="text-muted">Активных</small>
+                                </div>
+                                <div class="col-3">
+                                    <h3 class="text-secondary mb-0">${paused}</h3>
+                                    <small class="text-muted">На паузе</small>
+                                </div>
+                                <div class="col-3">
+                                    <h3 class="text-muted mb-0">${archived}</h3>
+                                    <small class="text-muted">В архиве</small>
+                                </div>
                             </div>
                         </div>
                     </div>

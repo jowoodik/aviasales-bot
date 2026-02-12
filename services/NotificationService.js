@@ -42,15 +42,18 @@ class NotificationService {
     });
   }
 
-  async _canSendNotification(chatId, routeId, priority, currentPrice) {
+  async _canSendNotification(chatId, routeId, priority, currentPrice, tripId = null) {
+    // Определяем колонку и значение для поиска (route_id или trip_id)
+    const idColumn = tripId ? 'trip_id' : 'route_id';
+    const idValue = tripId || routeId;
+
     if (priority === 'CRITICAL') {
-      // URGENT: проверяем последнее URGENT уведомление
       const lastUrgent = await new Promise((resolve, reject) => {
         db.get(
           `SELECT price, sent_at FROM notification_log
-           WHERE chat_id = ? AND route_id = ? AND message_type = 'URGENT'
+           WHERE chat_id = ? AND ${idColumn} = ? AND message_type = 'URGENT'
            ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, routeId],
+          [chatId, idValue],
           (err, row) => {
             if (err) return reject(err);
             resolve(row);
@@ -68,7 +71,6 @@ class NotificationService {
         return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
       }
 
-      // Проверяем падение цены
       if (lastUrgent.price > currentPrice) {
         return { canSend: true, reason: `Цена упала с ${lastUrgent.price} до ${currentPrice}` };
       }
@@ -77,13 +79,12 @@ class NotificationService {
     }
 
     if (priority === 'HIGH') {
-      // DAILY (12ч): проверяем последнее уведомление любого типа
       const lastAny = await new Promise((resolve, reject) => {
         db.get(
           `SELECT sent_at FROM notification_log
-           WHERE chat_id = ? AND route_id = ?
+           WHERE chat_id = ? AND ${idColumn} = ?
            ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, routeId],
+          [chatId, idValue],
           (err, row) => {
             if (err) return reject(err);
             resolve(row);
@@ -105,13 +106,12 @@ class NotificationService {
     }
 
     if (priority === 'LOW') {
-      // DAILY (24ч): проверяем последнее уведомление любого типа
       const lastAny = await new Promise((resolve, reject) => {
         db.get(
           `SELECT sent_at FROM notification_log
-           WHERE chat_id = ? AND route_id = ?
+           WHERE chat_id = ? AND ${idColumn} = ?
            ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, routeId],
+          [chatId, idValue],
           (err, row) => {
             if (err) return reject(err);
             resolve(row);
@@ -135,14 +135,16 @@ class NotificationService {
     return { canSend: false, reason: 'Неизвестный приоритет' };
   }
 
-  async processNoResults(chatId, routeId) {
-    // Проверяем последнее уведомление для маршрута
+  async processNoResults(chatId, routeId, tripId = null) {
+    const idColumn = tripId ? 'trip_id' : 'route_id';
+    const idValue = tripId || routeId;
+
     const lastNotif = await new Promise((resolve, reject) => {
       db.get(
         `SELECT sent_at FROM notification_log
-         WHERE chat_id = ? AND route_id = ?
+         WHERE chat_id = ? AND ${idColumn} = ?
          ORDER BY sent_at DESC LIMIT 1`,
-        [chatId, routeId],
+        [chatId, idValue],
         (err, row) => {
           if (err) return reject(err);
           resolve(row);
@@ -151,7 +153,6 @@ class NotificationService {
     });
 
     if (!lastNotif) {
-      // Нет уведомлений - отправляем
       return { shouldSend: true, reason: 'Первое уведомление о отсутствии цен' };
     }
 
@@ -192,12 +193,12 @@ class NotificationService {
     });
   }
 
-  async processAndRouteNotification({ chatId, routeId, route, priority, reasons, currentPrice, analytics, bestResult, checkStats, userSettings, subscriptionType }) {
+  async processAndRouteNotification({ chatId, routeId, tripId, route, priority, reasons, currentPrice, analytics, bestResult, checkStats, userSettings, subscriptionType }) {
     // 1. Проверка возможности отправки
-    const checkResult = await this._canSendNotification(chatId, routeId, priority, currentPrice);
+    const checkResult = await this._canSendNotification(chatId, routeId, priority, currentPrice, tripId);
 
     if (!checkResult.canSend) {
-      console.log(`    ⏭️  Пропуск уведомления [${priority}] для маршрута ${routeId}: ${checkResult.reason}`);
+      console.log(`    ⏭️  Пропуск уведомления [${priority}] для ${tripId ? 'трипа' : 'маршрута'} ${tripId || routeId}: ${checkResult.reason}`);
       return {
         action: 'skipped',
         priority,
@@ -238,7 +239,7 @@ class NotificationService {
     }
 
     // 4. Логирование
-    await this._logNotification(chatId, routeId, priority, currentPrice, messageType, disableNotification);
+    await this._logNotification(chatId, routeId, priority, currentPrice, messageType, disableNotification, tripId);
 
     console.log(`    ${disableNotification ? '🔕' : '🔔'} Уведомление [${priority}/${messageType}] для маршрута ${routeId}: ${checkResult.reason}`);
 
@@ -618,12 +619,12 @@ class NotificationService {
     return 'дней';
   }
 
-  _logNotification(chatId, routeId, priority, price, messageType, silent) {
+  _logNotification(chatId, routeId, priority, price, messageType, silent, tripId = null) {
     return new Promise((resolve, reject) => {
       db.run(
-          `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, sent_at, disable_notification)
-         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`,
-          [chatId, routeId, priority, price, messageType, silent ? 1 : 0],
+          `INSERT INTO notification_log (chat_id, route_id, priority, price, message_type, sent_at, disable_notification, trip_id)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?)`,
+          [chatId, routeId, priority, price, messageType, silent ? 1 : 0, tripId],
           (err) => {
             if (err) {
               console.error('Ошибка записи notification_log:', err);
@@ -636,6 +637,174 @@ class NotificationService {
     });
   }
 
+  // ========================================
+  // TRIP-СПЕЦИФИЧНЫЕ МЕТОДЫ
+  // ========================================
+
+  getTripAnalytics(tripId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+        `SELECT AVG(total_price) as avgPrice, MIN(total_price) as minPrice, COUNT(*) as dataPoints
+         FROM trip_results WHERE trip_id = ?`,
+        [tripId],
+        (err, row) => {
+          if (err) return reject(err);
+          resolve(row || { avgPrice: null, minPrice: null, dataPoints: 0 });
+        }
+      );
+    });
+  }
+
+  formatTripBlock(trip, legs, bestCombo, analytics, priority) {
+    const currentPrice = bestCombo.totalPrice;
+    const userBudget = trip.threshold_price;
+
+    // Цена
+    let text = '';
+    if (priority === 'CRITICAL') {
+      text += `💎 <b>${Formatters.formatPrice(currentPrice)}</b> за всё путешествие\n\n`;
+    } else if (priority === 'HIGH') {
+      text += `💰 <b>${Formatters.formatPrice(currentPrice)}</b> за всё путешествие\n\n`;
+    } else {
+      text += `<b>${Formatters.formatPrice(currentPrice)}</b> за всё путешествие\n\n`;
+    }
+
+    // Маршрут
+    text += `🗺️ <b>${trip.name}</b>\n\n`;
+
+    // Общие даты
+    if (bestCombo.legs.length > 0) {
+      const firstDate = bestCombo.legs[0].departureDate;
+      const lastDate = bestCombo.legs[bestCombo.legs.length - 1].departureDate;
+      const firstDateObj = new Date(firstDate);
+      const lastDateObj = new Date(lastDate);
+      const totalDays = Math.round((lastDateObj - firstDateObj) / (1000 * 60 * 60 * 24));
+
+      text += `📅 ${this._formatShortDateForProgressBar(firstDate)} – ${this._formatShortDateForProgressBar(lastDate)}`;
+      if (totalDays > 0) text += ` (${totalDays} ${this._pluralizeDays(totalDays)})`;
+      text += '\n';
+    }
+
+    text += '\n';
+
+    // Ноги с ценами и per-leg фильтрами
+    const comboLegs = bestCombo.legs;
+    for (let i = 0; i < comboLegs.length; i++) {
+      const cl = comboLegs[i];
+      const leg = legs.find(l => l.leg_order === cl.legOrder);
+      const depDate = this._formatShortDateForProgressBar(cl.departureDate);
+
+      // Дни пребывания
+      let stayStr = '';
+      if (i < comboLegs.length - 1) {
+        const nextDate = new Date(comboLegs[i + 1].departureDate);
+        const thisDate = new Date(cl.departureDate);
+        const stay = Math.round((nextDate - thisDate) / (1000 * 60 * 60 * 24));
+        stayStr = ` (${stay} дн)`;
+      }
+
+      // Per-leg info
+      let legInfo = '';
+      if (leg) {
+        const adults = leg.adults || 1;
+        const children = leg.children || 0;
+        legInfo = ` • ${adults}`;
+        if (children > 0) legInfo += `+${children}`;
+        if (leg.baggage) legInfo += ' 🧳';
+      }
+
+      text += `${i + 1}️⃣ ${cl.origin}→${cl.destination} ${depDate}${stayStr} — ${Formatters.formatPrice(cl.price)}${legInfo}\n`;
+    }
+
+    text += '\n';
+
+    // Бюджет
+    if (currentPrice <= userBudget) {
+      const savings = userBudget - currentPrice;
+      text += `🎯 Бюджет: ${Formatters.formatPrice(userBudget)} ✅ Экономия: ${Formatters.formatPrice(savings)}\n`;
+    } else {
+      const over = currentPrice - userBudget;
+      const overPercent = Math.round((over / userBudget) * 100);
+      text += `🎯 Бюджет: ${Formatters.formatPrice(userBudget)} (+${overPercent}%)\n`;
+    }
+
+    // Средняя цена
+    if (analytics && analytics.avgPrice && analytics.dataPoints >= 3) {
+      text += `📊 Средняя: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
+    }
+
+    return {
+      text,
+      legs: comboLegs,
+      tripId: trip.id,
+      totalPrice: currentPrice
+    };
+  }
+
+  formatTripNoResultsBlock(trip, legs, timezone) {
+    const time = this._formatTimeForUser(new Date(), timezone);
+
+    let text = `🔍 Цены не найдены • ${time}\n\n`;
+    text += `🗺️ <b>${trip.name}</b>\n`;
+    text += `❌ Ни одна комбинация не вернула цены\n`;
+    text += `Бюджет: ${Formatters.formatPrice(trip.threshold_price)}\n\n`;
+    text += `Продолжаю мониторинг 🔍`;
+
+    return { text, searchLink: null };
+  }
+
+  async _sendTripAlert(chatId, tripId, block, priority, price, timezone, silent) {
+    try {
+      const time = this._formatTimeForUser(new Date(), timezone);
+      let header, footer;
+
+      if (priority === 'CRITICAL') {
+        header = `🔥🔥🔥 <b>Цена ниже бюджета</b>\n\n`;
+        footer = '\n\n⚡️ <b>Цена может вырасти в ближайшие часы</b>';
+      } else if (priority === 'HIGH') {
+        header = `📊 <b>Самая низкая цена</b> • ${time}\n\n`;
+        footer = '\n\n💡 Продолжаю искать варианты в бюджете';
+      } else {
+        header = `🔍 <b>Продолжаем поиск</b> • ${time}\n\n`;
+        footer = '\n\nПродолжаю мониторинг 🔎';
+      }
+
+      const message = `${header}${block.text}${footer}`;
+
+      const sendOpts = {
+        parse_mode: 'HTML',
+        disable_notification: silent,
+        disable_web_page_preview: true
+      };
+
+      // Кнопки по ногам (по 2 в ряду)
+      if (block.legs && block.legs.length > 0) {
+        const rows = [];
+        for (let i = 0; i < block.legs.length; i += 2) {
+          const row = [];
+          const leg1 = block.legs[i];
+          row.push({
+            text: `🎫 ${leg1.origin}→${leg1.destination} ${Formatters.formatPrice(leg1.price)}`,
+            callback_data: `trip_aff:${tripId}:${leg1.legOrder}:${Math.round(leg1.price)}`
+          });
+          if (i + 1 < block.legs.length) {
+            const leg2 = block.legs[i + 1];
+            row.push({
+              text: `🎫 ${leg2.origin}→${leg2.destination} ${Formatters.formatPrice(leg2.price)}`,
+              callback_data: `trip_aff:${tripId}:${leg2.legOrder}:${Math.round(leg2.price)}`
+            });
+          }
+          rows.push(row);
+        }
+        sendOpts.reply_markup = { inline_keyboard: rows };
+      }
+
+      await this.bot.sendMessage(chatId, message, sendOpts);
+      console.log(`${silent ? '🔕' : '🔔'} Trip алерт [${priority}] отправлен пользователю ${chatId}`);
+    } catch (error) {
+      console.error(`Ошибка отправки trip алерта [${priority}]:`, error.message);
+    }
+  }
 }
 
 module.exports = NotificationService;

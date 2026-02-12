@@ -1,5 +1,8 @@
 const UnifiedRoute = require('../models/UnifiedRoute');
 const RouteResult = require('../models/RouteResult');
+const Trip = require('../models/Trip');
+const TripLeg = require('../models/TripLeg');
+const TripResult = require('../models/TripResult');
 const DateUtils = require('../utils/dateUtils');
 const Formatters = require('../utils/formatters');
 const ChartGenerator = require("../services/ChartGenerator");
@@ -64,8 +67,9 @@ class RouteHandlers {
         try {
             await airportResolver.load();
             const routes = await UnifiedRoute.findNonArchivedByChatId(chatId);
+            const tripsForCheck = await Trip.findNonArchivedByChatId(chatId);
 
-            if (!routes || routes.length === 0) {
+            if ((!routes || routes.length === 0) && tripsForCheck.length === 0) {
                 const keyboard = {
                     reply_markup: {
                         keyboard: [
@@ -94,7 +98,8 @@ class RouteHandlers {
             );
 
             // Формируем сообщение со списком
-            let message = `📋 МОИ МАРШРУТЫ (${routes.length} ${this._pluralize(routes.length, 'активный', 'активных', 'активных')})\n\n`;
+            const totalCount = routes.length + tripsForCheck.length;
+            let message = `📋 МОИ МАРШРУТЫ (${totalCount} ${this._pluralize(totalCount, 'активный', 'активных', 'активных')})\n\n`;
 
             const buttons = [['➕ Создать маршрут']];
 
@@ -171,6 +176,55 @@ class RouteHandlers {
                 buttons.push([buttonText]);
             }
 
+            // === ТРИПЫ ===
+            const trips = await Trip.findNonArchivedByChatId(chatId);
+
+            if (trips.length > 0) {
+                message += `\n· · · · · · · · · · · · · · · ·\n\n`;
+                message += `🗺️ СОСТАВНЫЕ МАРШРУТЫ (${trips.length})\n\n`;
+            }
+
+            const tripsWithPrices = await Promise.all(
+                trips.map(async (trip) => {
+                    const bestResult = await TripResult.getBestResult(trip.id);
+                    return { ...trip, bestResult };
+                })
+            );
+
+            for (let i = 0; i < tripsWithPrices.length; i++) {
+                const trip = tripsWithPrices[i];
+                const statusIcon = trip.is_paused ? '⏸️' : '✅';
+
+                const start = DateUtils.formatDateDisplay(trip.departure_start).substring(0, 5);
+                const end = DateUtils.formatDateDisplay(trip.departure_end).substring(0, 5);
+
+                let bestPriceText = 'Нет данных';
+                let belowThreshold = false;
+                if (trip.bestResult && trip.bestResult.total_price) {
+                    bestPriceText = Formatters.formatPrice(trip.bestResult.total_price, trip.currency);
+                    belowThreshold = trip.bestResult.total_price <= trip.threshold_price;
+                }
+
+                const tripIndex = routes.length + i;
+                message += `${statusIcon} ${tripIndex + 1}. 🗺️ ${trip.name} (составной)\n`;
+                message += `📅 ${start} - ${end} • ${trip.adults}👤`;
+                if (trip.baggage) message += ' • 🧳';
+                message += '\n';
+                message += `💰 Порог: ${Formatters.formatPrice(trip.threshold_price, trip.currency)} | Лучшая: ${bestPriceText}${belowThreshold ? ' ✨' : ''}\n`;
+
+                if (i < tripsWithPrices.length - 1) {
+                    message += `\n· · · · · · · · · · · · · · · ·\n\n`;
+                } else {
+                    message += `\n`;
+                }
+
+                const passCount = trip.children > 0 ? `${trip.adults}+${trip.children}` : `${trip.adults}`;
+                const baggageIcon = trip.baggage ? '🧳' : '🎒';
+                let buttonText = `${tripIndex + 1}. 🗺️ ${trip.name} ${start}-${end} ${passCount} ${baggageIcon}`;
+                if (trip.is_paused) buttonText += ' ⏸️';
+                buttons.push([buttonText]);
+            }
+
             buttons.push(['🏠 Главное меню']);
 
             const keyboard = {
@@ -182,7 +236,7 @@ class RouteHandlers {
             };
 
             this.bot.sendMessage(chatId, message, keyboard);
-            this.userStates[chatId] = { step: 'select_route', routes };
+            this.userStates[chatId] = { step: 'select_route', routes, trips };
 
         } catch (error) {
             console.error('Ошибка получения маршрутов:', error);
@@ -214,12 +268,24 @@ class RouteHandlers {
      * ДЕТАЛЬНЫЙ ПРОСМОТР МАРШРУТА
      */
     async handleRouteDetails(chatId, routeIndex) {
-        // Логируем просмотр деталей маршрута
         ActivityService.logEvent(chatId, 'view_route_detail', { routeIndex }).catch(err => console.error('Activity log error:', err));
 
         try {
             await airportResolver.load();
             const state = this.userStates[chatId];
+
+            // Проверяем, является ли это трипом
+            const routes = state?.routes || [];
+            const trips = state?.trips || [];
+
+            if (routeIndex >= routes.length && trips.length > 0) {
+                // Это трип
+                const tripIndex = routeIndex - routes.length;
+                if (tripIndex < trips.length) {
+                    await this._handleTripDetails(chatId, trips[tripIndex], routeIndex);
+                    return;
+                }
+            }
 
             // Поддержка возврата из графика/heatmap - используем state.route напрямую
             let route;
@@ -355,6 +421,133 @@ class RouteHandlers {
 
         } catch (error) {
             console.error('Ошибка просмотра маршрута:', error);
+            this.bot.sendMessage(chatId, '❌ Ошибка: ' + error.message);
+        }
+    }
+
+    /**
+     * ДЕТАЛЬНЫЙ ПРОСМОТР ТРИПА
+     */
+    async _handleTripDetails(chatId, trip, routeIndex) {
+        try {
+            const legs = await TripLeg.getByTripId(trip.id);
+
+            let message = `🗺️ <b>${trip.name}</b> (составной)\n\n`;
+            message += `📅 Вылет: ${DateUtils.formatDateDisplay(trip.departure_start)} - ${DateUtils.formatDateDisplay(trip.departure_end)}\n`;
+            message += `💰 Бюджет: ${Formatters.formatPrice(trip.threshold_price, trip.currency)}\n`;
+
+            if (trip.is_paused) message += '\n⏸️ Маршрут на паузе\n';
+
+            message += '\n<b>Ноги маршрута:</b>\n';
+            for (const leg of legs) {
+                const legRoute = airportResolver.formatRoute(leg.origin, leg.destination);
+                let legLine = `${leg.leg_order}️⃣ ${legRoute}`;
+                if (leg.min_days && leg.max_days) {
+                    legLine += `: ${leg.min_days}-${leg.max_days} дн.`;
+                }
+                // Per-leg filters
+                const parts = [];
+                const adults = leg.adults || 1;
+                const children = leg.children || 0;
+                parts.push(`${Formatters.formatPassengers(adults, children)}`);
+                const airline = Formatters.getAirlineName(leg.airline);
+                if (airline !== 'Любая') parts.push(airline);
+                parts.push(leg.baggage ? '🧳' : '🎒');
+                if (leg.max_stops === 0) {
+                    parts.push('прямой');
+                } else if (leg.max_stops === 1) {
+                    let s = 'до 1 пер.';
+                    if (leg.max_layover_hours) s += ` (${leg.max_layover_hours}ч)`;
+                    parts.push(s);
+                } else if (leg.max_stops === 2) {
+                    parts.push('до 2 пер.');
+                }
+                legLine += ` | ${parts.join(', ')}`;
+                message += legLine + '\n';
+            }
+
+            await this.bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
+
+            // Топ-3 результатов
+            const topResults = await TripResult.getTopResults(trip.id, 3);
+
+            if (topResults.length === 0) {
+                await this.bot.sendMessage(chatId, '📊 <b>ЛУЧШИЕ КОМБИНАЦИИ:</b>\n\nПока нет данных.', { parse_mode: 'HTML' });
+            } else {
+                await this.bot.sendMessage(chatId, '📊 <b>ЛУЧШИЕ КОМБИНАЦИИ:</b>', { parse_mode: 'HTML', disable_notification: true });
+
+                for (let i = 0; i < topResults.length; i++) {
+                    const result = topResults[i];
+                    const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+                    const timeAgo = result.found_at ? Formatters.formatTimeAgo(result.found_at) : 'недавно';
+
+                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, trip.currency)}* за всех\n`;
+
+                    if (result.legs) {
+                        for (const leg of result.legs) {
+                            const depDate = DateUtils.formatDateDisplay(leg.departure_date).substring(0, 5);
+                            resultMessage += `  ${leg.leg_order}. ${depDate} — ${Formatters.formatPrice(leg.price)}\n`;
+                        }
+                    }
+
+                    resultMessage += `🕐 Найдено: ${timeAgo}`;
+
+                    if (result.total_price <= trip.threshold_price) {
+                        const savings = trip.threshold_price - result.total_price;
+                        resultMessage += `\n\n🔥 *НИЖЕ БЮДЖЕТА!* Экономия: ${Formatters.formatPrice(savings)}`;
+                    }
+
+                    // Кнопки для каждой ноги
+                    const inlineButtons = [];
+                    if (result.legs) {
+                        for (let j = 0; j < result.legs.length; j += 2) {
+                            const row = [];
+                            const l1 = result.legs[j];
+                            const leg1Info = legs.find(l => l.leg_order === l1.leg_order);
+                            row.push({
+                                text: `🎫 ${leg1Info?.origin || '?'}→${leg1Info?.destination || '?'} ${Formatters.formatPrice(l1.price)}`,
+                                callback_data: `trip_aff:${trip.id}:${l1.leg_order}:${Math.round(l1.price)}`
+                            });
+                            if (j + 1 < result.legs.length) {
+                                const l2 = result.legs[j + 1];
+                                const leg2Info = legs.find(l => l.leg_order === l2.leg_order);
+                                row.push({
+                                    text: `🎫 ${leg2Info?.origin || '?'}→${leg2Info?.destination || '?'} ${Formatters.formatPrice(l2.price)}`,
+                                    callback_data: `trip_aff:${trip.id}:${l2.leg_order}:${Math.round(l2.price)}`
+                                });
+                            }
+                            inlineButtons.push(row);
+                        }
+                    }
+
+                    await this.bot.sendMessage(chatId, resultMessage, {
+                        parse_mode: 'Markdown',
+                        reply_markup: inlineButtons.length > 0 ? { inline_keyboard: inlineButtons } : undefined,
+                        disable_notification: true
+                    });
+
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            // Кнопки действий
+            const keyboard = {
+                reply_markup: {
+                    keyboard: [
+                        [trip.is_paused ? '▶️ Возобновить' : '⏸️ Пауза'],
+                        ['🗑️ Удалить'],
+                        ['◀️ Назад к маршрутам']
+                    ],
+                    resize_keyboard: true,
+                    one_time_keyboard: true
+                }
+            };
+
+            this.bot.sendMessage(chatId, 'Выберите действие:', keyboard);
+            this.userStates[chatId] = { step: 'trip_action', trip, routeIndex, routes: this.userStates[chatId]?.routes, trips: this.userStates[chatId]?.trips };
+
+        } catch (error) {
+            console.error('Ошибка просмотра трипа:', error);
             this.bot.sendMessage(chatId, '❌ Ошибка: ' + error.message);
         }
     }

@@ -10,6 +10,7 @@ import SubscriptionsPage from './pages/subscriptions.js';
 import CheckStatsPage from './pages/checkStats.js';
 import AnalyticsPage from './pages/analytics.js';
 import NotificationsPage from './pages/notifications.js';
+import TripsPage from './pages/trips.js';
 import DigestQueuePage from './pages/digest.js';
 import BroadcastsPage from './pages/broadcasts.js';
 import DatabasePage from './pages/database.js';
@@ -51,6 +52,7 @@ class App {
             dashboard: new DashboardPage(),
             users: new UsersPage(),
             routes: new RoutesPage(),
+            trips: new TripsPage(),
             subscriptions: new SubscriptionsPage(),
             checkStats: new CheckStatsPage(),
             analytics: new AnalyticsPage(),

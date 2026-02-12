@@ -235,6 +235,26 @@ class APIClient {
     }
 
     // ============================================
+    // TRIPS API
+    // ============================================
+
+    async getTrips() {
+        return this.get(CONFIG.API.TRIPS);
+    }
+
+    async getTripById(id) {
+        return this.get(CONFIG.API.TRIP_DETAIL(id));
+    }
+
+    async toggleTrip(id, isPaused) {
+        return this.patch(CONFIG.API.TRIP_TOGGLE(id), { is_paused: isPaused });
+    }
+
+    async deleteTrip(id) {
+        return this.delete(CONFIG.API.TRIP_DETAIL(id));
+    }
+
+    // ============================================
     // NOTIFICATIONS API
     // ============================================
 

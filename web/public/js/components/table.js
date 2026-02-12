@@ -170,6 +170,8 @@ class Table {
                 return `<strong>${row.origin} → ${row.destination}</strong>`;
             case 'route-type':
                 return value ? '<span class="badge bg-info">Гибкий</span>' : '<span class="badge bg-secondary">Фиксированный</span>';
+            case 'trip-dates':
+                return `<small>${row.departure_start || ''} — ${row.departure_end || ''}</small>`;
             case 'dates':
                 return this.formatDates(row);
             case 'priority':

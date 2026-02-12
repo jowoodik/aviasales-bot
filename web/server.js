@@ -10,6 +10,9 @@ const RouteResult = require('../models/RouteResult');
 const ActivityService = require('../services/ActivityService');
 const airportResolver = require('../utils/AirportCodeResolver');
 const YooKassaService = require('../services/YooKassaService');
+const Trip = require('../models/Trip');
+const TripLeg = require('../models/TripLeg');
+const TripResult = require('../models/TripResult');
 
 const app = express();
 const PORT = process.env.WEB_PORT || 3000;
@@ -1388,6 +1391,18 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       });
     });
 
+    // Статистика трипов
+    const allTrips = await new Promise((resolve) => {
+      db.all('SELECT * FROM trips', (err, rows) => resolve(rows || []));
+    });
+    const activeTrips = allTrips.filter(t => !t.is_paused && !t.is_archived);
+    const tripStats = {
+      total: allTrips.length,
+      active: activeTrips.length,
+      archived: allTrips.filter(t => t.is_archived).length,
+      paused: allTrips.filter(t => t.is_paused && !t.is_archived).length
+    };
+
     res.json({
       success: true,
       topUsers,
@@ -1404,7 +1419,8 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
         routes: routesFunnel,
         subscription: subscriptionFunnel
       },
-      dauHistory
+      dauHistory,
+      tripStats
     });
   } catch (error) {
     console.error('Ошибка загрузки аналитики:', error);
@@ -1883,6 +1899,107 @@ app.post('/admin/api/routes/pause-all', requireAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('Ошибка приостановки маршрутов:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// TRIPS API
+// ============================================
+
+// API: Список всех трипов
+app.get('/admin/api/trips', requireAdmin, async (req, res) => {
+  try {
+    const trips = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT t.*,
+          (SELECT MIN(total_price) FROM trip_results WHERE trip_id = t.id) as best_price,
+          (SELECT COUNT(*) FROM trip_results WHERE trip_id = t.id) as results_count
+        FROM trips t ORDER BY t.created_at DESC LIMIT 100
+      `, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    // Подгружаем legs для каждого трипа и резолвим города
+    for (const trip of trips) {
+      const legs = await TripLeg.getByTripId(trip.id);
+      trip.legs = legs.map(leg => ({
+        ...leg,
+        origin_city: airportResolver.getCityName(leg.origin),
+        destination_city: airportResolver.getCityName(leg.destination)
+      }));
+      trip.legs_count = legs.length;
+      // Формируем название маршрута из плечей
+      if (!trip.name && legs.length > 0) {
+        trip.name = legs.map(l => l.origin).join('→') + '→' + legs[legs.length - 1].destination;
+      }
+    }
+
+    res.json(trips);
+  } catch (error) {
+    console.error('Ошибка загрузки трипов:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Детали трипа
+app.get('/admin/api/trips/:id', requireAdmin, async (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id);
+    const trip = await Trip.findById(tripId);
+
+    if (!trip) {
+      return res.status(404).json({ error: 'Трип не найден' });
+    }
+
+    const legs = await TripLeg.getByTripId(tripId);
+    trip.legs = legs.map(leg => ({
+      ...leg,
+      origin_city: airportResolver.getCityName(leg.origin),
+      destination_city: airportResolver.getCityName(leg.destination)
+    }));
+
+    const results = await TripResult.getTopResults(tripId, 5);
+    trip.results = results;
+
+    res.json(trip);
+  } catch (error) {
+    console.error('Ошибка загрузки трипа:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Пауза/возобновление трипа
+app.patch('/admin/api/trips/:id/toggle', requireAdmin, async (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id);
+    const { is_paused } = req.body;
+
+    await Trip.updatePauseStatus(tripId, is_paused);
+
+    console.log(`[ADMIN] Трип ${tripId} ${is_paused ? 'приостановлен' : 'возобновлен'}`);
+
+    res.json({ success: true, tripId, is_paused });
+  } catch (error) {
+    console.error('Ошибка изменения статуса трипа:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Удаление трипа
+app.delete('/admin/api/trips/:id', requireAdmin, async (req, res) => {
+  try {
+    const tripId = parseInt(req.params.id);
+
+    await Trip.delete(tripId);
+
+    console.log(`[ADMIN] Удален трип: ${tripId}`);
+
+    res.json({ success: true, message: `Трип ${tripId} удален` });
+  } catch (error) {
+    console.error('Ошибка удаления трипа:', error);
     res.status(500).json({ error: error.message });
   }
 });

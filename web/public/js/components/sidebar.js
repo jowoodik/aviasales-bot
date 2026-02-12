@@ -26,6 +26,12 @@ const MENU_ITEMS = [
         route: '#routes'
     },
     {
+        id: 'trips',
+        label: 'Составные маршруты',
+        icon: 'bi-map',
+        route: '#trips'
+    },
+    {
         id: 'check-stats',
         label: 'Статистика проверок',
         icon: 'bi-graph-up',

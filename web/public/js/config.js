@@ -34,6 +34,11 @@ export const CONFIG = {
         BROADCAST_DETAIL: (id) => `/broadcasts/${id}`,
         BROADCAST_USERS: '/broadcast-users',
 
+        // Trips
+        TRIPS: '/trips',
+        TRIP_DETAIL: (id) => `/trips/${id}`,
+        TRIP_TOGGLE: (id) => `/trips/${id}/toggle`,
+
         // Notifications
         NOTIFICATIONS: '/notifications',
         // DIGEST_QUEUE: '/digest-queue', // REMOVED
@@ -150,6 +155,21 @@ export const CONFIG = {
                 { key: 'sent_at', label: 'Отправлено', sortable: true, type: 'datetime' }
             ],
             actions: ['view']
+        },
+
+        TRIPS: {
+            columns: [
+                { key: 'id', label: 'ID', sortable: true },
+                { key: 'chat_id', label: 'Chat ID', sortable: true, type: 'code' },
+                { key: 'name', label: 'Маршрут', sortable: true },
+                { key: 'legs_count', label: 'Плечей', sortable: true, type: 'badge' },
+                { key: 'dates', label: 'Даты', sortable: false, type: 'trip-dates' },
+                { key: 'threshold_price', label: 'Бюджет', sortable: true, type: 'price' },
+                { key: 'best_price', label: 'Лучшая цена', sortable: true, type: 'price' },
+                { key: 'is_paused', label: 'Статус', sortable: true, type: 'status' },
+                { key: 'created_at', label: 'Создан', sortable: true, type: 'date' }
+            ],
+            actions: ['view', 'pause', 'delete']
         }
 
         // DIGEST_QUEUE: { // REMOVED

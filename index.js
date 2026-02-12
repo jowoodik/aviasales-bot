@@ -2,11 +2,14 @@ require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 const db = require('./config/database');
 const RouteHandlers = require('./handlers/routeHandlers');
+const TripHandlers = require('./handlers/tripHandlers');
 const SettingsHandlers = require('./handlers/settingsHandlers');
-const SubscriptionHandlers = require('./handlers/subscriptionHandlers'); // Добавляем
-const SubscriptionService = require('./services/SubscriptionService'); // Добавляем
-const ActivityService = require('./services/ActivityService'); // Логирование активности
+const SubscriptionHandlers = require('./handlers/subscriptionHandlers');
+const SubscriptionService = require('./services/SubscriptionService');
+const ActivityService = require('./services/ActivityService');
 const RouteResult = require('./models/RouteResult');
+const TripResult = require('./models/TripResult');
+const TripLeg = require('./models/TripLeg');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: false });
@@ -47,8 +50,9 @@ const userStates = {};
 
 // Инициализация обработчиков
 const routeHandlers = new RouteHandlers(bot, userStates);
+const tripHandlers = new TripHandlers(bot, userStates);
 const settingsHandlers = new SettingsHandlers(bot, userStates);
-const subscriptionHandlers = new SubscriptionHandlers(bot, userStates); // Добавляем
+const subscriptionHandlers = new SubscriptionHandlers(bot, userStates);
 
 // Обновленное главное меню с кнопкой подписки
 const getMainMenuKeyboard = (chatId) => {
@@ -229,8 +233,36 @@ bot.on('message', async (msg) => {
     // РАБОТА С МАРШРУТАМИ
     // ========================================
     if (text === '➕ Создать маршрут' || text.includes('Создать маршрут')) {
-      routeHandlers.handleCreateRoute(chatId);
+      // Показываем выбор типа маршрута
+      const keyboard = {
+        reply_markup: {
+          keyboard: [
+            ['📍 Обычный маршрут'],
+            ['🗺️ Составной маршрут (несколько городов)'],
+            ['🔙 Назад']
+          ],
+          resize_keyboard: true,
+          one_time_keyboard: true
+        }
+      };
+      bot.sendMessage(chatId, 'Какой маршрут хотите создать?', keyboard);
+      userStates[chatId] = { step: 'choose_route_type' };
       return;
+    }
+
+    if (state?.step === 'choose_route_type') {
+      if (text === '📍 Обычный маршрут') {
+        routeHandlers.handleCreateRoute(chatId);
+        return;
+      }
+      if (text.includes('Составной маршрут')) {
+        tripHandlers.handleCreateTrip(chatId);
+        return;
+      }
+      if (text === '🔙 Назад') {
+        await routeHandlers.handleMyRoutes(chatId);
+        return;
+      }
     }
 
     // Выбор маршрута из списка
@@ -244,6 +276,61 @@ bot.on('message', async (msg) => {
     if (state && state.routeData) {
       const handled = await routeHandlers.handleCreateStep(chatId, text);
       if (handled) return;
+    }
+
+    // Создание составного маршрута (трип)
+    if (state && state.tripData) {
+      const handled = await tripHandlers.handleTripStep(chatId, text);
+      if (handled) return;
+    }
+
+    // Действия с трипом
+    if (state?.step === 'trip_action') {
+      const Trip = require('./models/Trip');
+
+      if (text === '⏸️ Пауза') {
+        await Trip.updatePauseStatus(state.trip.id, true);
+        bot.sendMessage(chatId, `⏸️ Составной маршрут "${state.trip.name}" поставлен на паузу.`, getMainMenuKeyboard(chatId));
+        delete userStates[chatId];
+        return;
+      }
+      if (text === '▶️ Возобновить') {
+        await Trip.updatePauseStatus(state.trip.id, false);
+        bot.sendMessage(chatId, `▶️ Составной маршрут "${state.trip.name}" возобновлен.`, getMainMenuKeyboard(chatId));
+        delete userStates[chatId];
+        return;
+      }
+      if (text === '🗑️ Удалить') {
+        userStates[chatId] = { ...state, step: 'confirm_delete_trip' };
+        const keyboard = {
+          reply_markup: {
+            keyboard: [['✅ Да, удалить'], ['❌ Нет, оставить']],
+            resize_keyboard: true,
+            one_time_keyboard: true
+          }
+        };
+        bot.sendMessage(chatId, `Вы уверены, что хотите удалить составной маршрут "${state.trip.name}"?`, keyboard);
+        return;
+      }
+      if (text === '◀️ Назад к маршрутам') {
+        await routeHandlers.handleMyRoutes(chatId);
+        return;
+      }
+    }
+
+    if (state?.step === 'confirm_delete_trip') {
+      const Trip = require('./models/Trip');
+
+      if (text === '✅ Да, удалить') {
+        await Trip.delete(state.trip.id);
+        bot.sendMessage(chatId, `🗑️ Составной маршрут "${state.trip.name}" удален.`, getMainMenuKeyboard(chatId));
+        delete userStates[chatId];
+        return;
+      }
+      if (text === '❌ Нет, оставить') {
+        await routeHandlers.handleMyRoutes(chatId);
+        return;
+      }
     }
 
     // Действия с маршрутом
@@ -299,6 +386,12 @@ bot.on('message', async (msg) => {
     if (text === '◀️ Назад') {
       const state = userStates[chatId];
 
+      // Если мы в деталях трипа -> назад к списку маршрутов
+      if (state?.step === 'trip_action') {
+        await routeHandlers.handleMyRoutes(chatId);
+        return;
+      }
+
       // Если мы в деталях маршрута -> назад к списку маршрутов
       if (state?.step === 'route_action') {
         await routeHandlers.handleMyRoutes(chatId);
@@ -320,6 +413,17 @@ bot.on('message', async (msg) => {
             getMainMenuKeyboard(chatId)
         );
         delete userStates[chatId];
+        return;
+      }
+
+      // Если мы в создании трипа -> отмена и главное меню
+      if (state?.tripData) {
+        delete userStates[chatId];
+        bot.sendMessage(
+            chatId,
+            '❌ Создание составного маршрута отменено.\n\nВы в главном меню.',
+            getMainMenuKeyboard(chatId)
+        );
         return;
       }
 
@@ -484,6 +588,56 @@ bot.on('callback_query', async (callbackQuery) => {
           console.log(`🔗 Партнерский клик: chatId=${chatId}, ${result.origin}→${result.destination}, ${price}₽`);
         }
       );
+    }
+
+    // Обработка кликов по ногам трипа
+    else if (data.startsWith('trip_aff:')) {
+      // Формат: trip_aff:tripId:legOrder:price
+      const parts = data.split(':');
+      const tripId = parseInt(parts[1]);
+      const legOrder = parseInt(parts[2]);
+      const price = parseInt(parts[3]);
+
+      try {
+        // Получаем лучший результат трипа
+        const bestResult = await TripResult.getBestResult(tripId);
+        if (!bestResult || !bestResult.legs) {
+          await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Результат не найден' });
+          return;
+        }
+
+        const legResult = bestResult.legs.find(l => l.leg_order === legOrder);
+        if (!legResult || !legResult.search_link) {
+          await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Ссылка не найдена' });
+          return;
+        }
+
+        // Получаем информацию о ноге
+        const legs = await TripLeg.getByTripId(tripId);
+        const leg = legs.find(l => l.leg_order === legOrder);
+
+        ActivityService.logEvent(chatId, 'trip_affiliate_click', {
+          tripId, legOrder, price,
+          origin: leg?.origin, destination: leg?.destination
+        }).catch(err => console.error('Activity log error:', err));
+
+        await bot.answerCallbackQuery(callbackQuery.id, { text: '✈️ Открываю Aviasales...' });
+
+        const linkMessage = `🎫 <b>Ваша ссылка на билет готова!</b>\n\n` +
+          `<b>${leg?.origin || '?'} → ${leg?.destination || '?'}</b>\n` +
+          `💰 Цена: ${price.toLocaleString('ru-RU')} ₽\n\n` +
+          `👉 <a href="${legResult.search_link}">Открыть на Aviasales</a>`;
+
+        await bot.sendMessage(chatId, linkMessage, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        });
+
+        console.log(`🔗 Trip клик: chatId=${chatId}, leg ${legOrder}, ${price}₽`);
+      } catch (error) {
+        console.error('Ошибка обработки trip_aff callback:', error);
+        await bot.answerCallbackQuery(callbackQuery.id, { text: '❌ Ошибка' });
+      }
     }
 
   } catch (error) {

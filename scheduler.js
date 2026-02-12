@@ -5,6 +5,10 @@ require('dotenv').config();
 const UnifiedMonitor = require('./services/UnifiedMonitor');
 const NotificationService = require('./services/NotificationService');
 const RouteResult = require('./models/RouteResult');
+const Trip = require('./models/Trip');
+const TripLeg = require('./models/TripLeg');
+const TripResult = require('./models/TripResult');
+const TripOptimizer = require('./services/TripOptimizer');
 const airportResolver = require('./utils/AirportCodeResolver');
 const TimezoneUtils = require('./utils/timezoneUtils');
 const db = require('./config/database');
@@ -319,15 +323,46 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
       }
     }
 
-    if (batchItems.length === 0) {
+    // --- СБОР ТРИПОВ ---
+    const tripBatchItems = [];
+    const tripMetaMap = new Map(); // tripId → {trip, legs, chatId, userSettings}
+
+    for (const user of users) {
+      const trips = await Trip.getActiveByChatId(user.chat_id);
+      const userSettings = await getUserSettings(user.chat_id);
+
+      for (const trip of trips) {
+        const isExpired = await checkAndArchiveTripIfExpired(trip, userSettings);
+        if (isExpired) continue;
+
+        const legs = await TripLeg.getByTripId(trip.id);
+        const items = TripOptimizer.generateBatchItems(trip, legs, userSettings, monitor.api);
+
+        if (items.length === 0) continue;
+
+        tripMetaMap.set(trip.id, { trip, legs, chatId: user.chat_id, userSettings });
+
+        items.forEach(item => {
+          tripBatchItems.push({ ...item, chatId: user.chat_id });
+        });
+      }
+    }
+
+    if (tripBatchItems.length > 0) {
+      console.log(`  🗺️  Подготовлено ${tripBatchItems.length} URLs для ${tripMetaMap.size} трипов`);
+    }
+
+    const allBatchItems = [...batchItems, ...tripBatchItems];
+
+    if (allBatchItems.length === 0) {
       console.log('  ℹ️  Нет маршрутов для проверки');
       return;
     }
 
-    console.log(`  📋 Подготовлено ${batchItems.length} URLs для ${routeMetaMap.size} маршрутов`);
+    console.log(`  📋 Подготовлено ${allBatchItems.length} URLs (${batchItems.length} маршрутов + ${tripBatchItems.length} трипов)`);
 
     // 3. Проверить ВСЕ URLs одним батчем с индивидуальными фильтрами!
-    const urlsWithFilters = batchItems.map(item => ({
+    const urlsWithFilters = allBatchItems.map(item => ({
       url: item.url,
       airline: item.airline,
       baggage: item.baggage,
@@ -339,10 +374,10 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
 
     console.log(`  ✅ Batch-проверка завершена: ${response.stats.success}/${response.stats.total} успешно`);
 
-    // 4. Группируем результаты по маршрутам
+    // 4. Группируем результаты по маршрутам (только первые batchItems.length элементов)
     const routeResults = new Map(); // routeId → [{combination, priceResult, url}]
 
-    for (let i = 0; i < response.results.length; i++) {
+    for (let i = 0; i < batchItems.length; i++) {
       const item = batchItems[i];
       const result = response.results[i];
 
@@ -472,6 +507,118 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
 
       } catch (error) {
         console.error(`  ❌ Ошибка уведомления для маршрута ${routeId}:`, error);
+      }
+    }
+
+    // --- ОБРАБОТКА ТРИПОВ ---
+    if (tripBatchItems.length > 0) {
+      // Группировка результатов трипов: tripId → legOrder → Map<date, priceResult>
+      const tripPriceResults = new Map();
+
+      for (let i = batchItems.length; i < allBatchItems.length; i++) {
+        const item = allBatchItems[i];
+        const result = response.results[i];
+
+        if (!tripPriceResults.has(item.tripId)) {
+          tripPriceResults.set(item.tripId, new Map());
+        }
+        const legMap = tripPriceResults.get(item.tripId);
+
+        if (!legMap.has(item.legOrder)) {
+          legMap.set(item.legOrder, new Map());
+        }
+
+        if (result && result.price > 0) {
+          legMap.get(item.legOrder).set(item.departureDate, {
+            price: result.price,
+            searchLink: result.searchLink || item.url,
+            airline: result.airline || null
+          });
+        }
+      }
+
+      for (const [tripId, pricesByLeg] of tripPriceResults) {
+        const meta = tripMetaMap.get(tripId);
+        if (!meta) continue;
+
+        try {
+          const bestCombo = TripOptimizer.findBestCombination(meta.trip, meta.legs, pricesByLeg);
+
+          if (!bestCombo) {
+            // NO_RESULTS для трипа
+            const noResultsCheck = await notificationService.processNoResults(meta.chatId, null, tripId);
+            if (noResultsCheck.shouldSend) {
+              const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
+              const noResultsBlock = notificationService.formatTripNoResultsBlock(meta.trip, meta.legs, timezone);
+
+              await notificationService._sendInstantAlert(
+                meta.chatId, null, noResultsBlock, 'NO_RESULTS', null, timezone, true
+              );
+
+              await notificationService._logNotification(
+                meta.chatId, null, 'NO_RESULTS', null, 'NO_RESULTS', true, tripId
+              );
+
+              console.log(`    📭 NO_RESULTS для трипа ${tripId}`);
+              totalSent++;
+            }
+            await Trip.updateLastCheck(tripId);
+            continue;
+          }
+
+          // Сохранить результат
+          const legResults = bestCombo.legs.map(l => ({
+            legOrder: l.legOrder,
+            departureDate: l.departureDate,
+            price: l.price,
+            airline: l.airline,
+            searchLink: l.searchLink
+          }));
+          await TripResult.save(tripId, bestCombo.totalPrice, legResults);
+
+          // Аналитика
+          const analytics = await notificationService.getTripAnalytics(tripId);
+
+          // Классификация
+          const classified = notificationService.classifyPriority({
+            currentPrice: bestCombo.totalPrice,
+            userBudget: meta.trip.threshold_price,
+            historicalMin: analytics.minPrice
+          });
+
+          const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
+
+          // Маршрутизация уведомления
+          const tripRouteResult = await notificationService.processAndRouteNotification({
+            chatId: meta.chatId,
+            routeId: null,
+            tripId: tripId,
+            route: meta.trip,
+            priority: classified.priority,
+            reasons: classified.reasons,
+            currentPrice: bestCombo.totalPrice,
+            analytics,
+            bestResult: bestCombo,
+            userSettings: meta.userSettings,
+            subscriptionType
+          });
+
+          if (tripRouteResult.action === 'sent' || tripRouteResult.action === 'sent_silent') {
+            const block = notificationService.formatTripBlock(meta.trip, meta.legs, bestCombo, analytics, classified.priority);
+
+            await notificationService._sendTripAlert(
+              meta.chatId, tripId, block, classified.priority,
+              bestCombo.totalPrice, timezone, tripRouteResult.action === 'sent_silent'
+            );
+
+            totalSent++;
+          }
+
+          await Trip.updateLastCheck(tripId);
+
+        } catch (error) {
+          console.error(`  ❌ Ошибка обработки трипа ${tripId}:`, error);
+        }
       }
     }
 
@@ -746,6 +893,36 @@ async function checkAndArchiveExpiredRoute(route, userSettings) {
 }
 
 /**
+ * Проверить истечение срока трипа и архивировать если нужно
+ */
+async function checkAndArchiveTripIfExpired(trip, userSettings) {
+  const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
+  const today = getTodayInUserTimezone(timezone);
+
+  const checkDate = new Date(trip.departure_end);
+  checkDate.setHours(0, 0, 0, 0);
+
+  if (checkDate < today) {
+    try {
+      await Trip.setAsArchived(trip.id);
+
+      const message = `📦 *Составной маршрут архивирован*\n\n` +
+        `🗺️ ${trip.name}\n` +
+        `Причина: дата вылета прошла`;
+
+      await bot.sendMessage(trip.chat_id, message, { parse_mode: 'Markdown' });
+      console.log(`    📦 Трип ${trip.id} автоматически архивирован`);
+      return true;
+    } catch (error) {
+      console.error(`    ❌ Ошибка архивации трипа ${trip.id}:`, error);
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Получить пользователей по типу подписки
  */
 function getUsersBySubscription(subscriptionType) {
@@ -886,6 +1063,30 @@ async function cleanupOldData() {
         console.error('  ❌ Ошибка очистки daily_digest_queue:', err);
       } else {
         console.log('  ✅ Очищены старые daily_digest_queue');
+      }
+    });
+
+    // Удаляем старые результаты трипов
+    db.run(`
+      DELETE FROM trip_results
+      WHERE found_at < datetime('now', '-30 days')
+    `, (err) => {
+      if (err) {
+        console.error('  ❌ Ошибка очистки trip_results:', err);
+      } else {
+        console.log('  ✅ Очищены старые trip_results');
+      }
+    });
+
+    // Удаляем осиротевшие trip_leg_results
+    db.run(`
+      DELETE FROM trip_leg_results
+      WHERE trip_result_id NOT IN (SELECT id FROM trip_results)
+    `, (err) => {
+      if (err) {
+        console.error('  ❌ Ошибка очистки trip_leg_results:', err);
+      } else {
+        console.log('  ✅ Очищены осиротевшие trip_leg_results');
       }
     });
 

@@ -528,6 +528,110 @@ db.serialize(() => {
     }
   });
 
+  // ============================================
+  // СОСТАВНЫЕ МАРШРУТЫ (TRIPS)
+  // ============================================
+  db.run(`
+    CREATE TABLE IF NOT EXISTS trips (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      departure_start TEXT NOT NULL,
+      departure_end TEXT NOT NULL,
+      threshold_price REAL NOT NULL,
+      currency TEXT DEFAULT 'RUB',
+      is_paused INTEGER DEFAULT 0,
+      is_archived INTEGER DEFAULT 0,
+      last_check TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS trip_legs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL REFERENCES trips(id),
+      leg_order INTEGER NOT NULL,
+      origin TEXT NOT NULL,
+      destination TEXT NOT NULL,
+      min_days INTEGER,
+      max_days INTEGER,
+      adults INTEGER DEFAULT 1,
+      children INTEGER DEFAULT 0,
+      airline TEXT,
+      baggage INTEGER DEFAULT 0,
+      max_stops INTEGER,
+      max_layover_hours INTEGER
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS trip_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL REFERENCES trips(id),
+      total_price REAL NOT NULL,
+      found_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS trip_leg_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_result_id INTEGER NOT NULL REFERENCES trip_results(id),
+      leg_order INTEGER NOT NULL,
+      departure_date TEXT NOT NULL,
+      price REAL,
+      airline TEXT,
+      search_link TEXT
+    )
+  `);
+
+  // Индексы для трипов
+  db.run(`CREATE INDEX IF NOT EXISTS idx_trips_chat_id ON trips(chat_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_trips_active ON trips(is_paused, is_archived)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_trip_legs_trip_id ON trip_legs(trip_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_trip_results_trip_id ON trip_results(trip_id, total_price)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_trip_leg_results_result_id ON trip_leg_results(trip_result_id)`);
+
+  // Миграции: добавляем trip_id в существующие таблицы
+  db.run(`ALTER TABLE notification_log ADD COLUMN trip_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления trip_id в notification_log:', err.message);
+    }
+  });
+
+  db.run(`ALTER TABLE route_check_stats ADD COLUMN trip_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления trip_id в route_check_stats:', err.message);
+    }
+  });
+
+  db.run(`ALTER TABLE price_analytics ADD COLUMN trip_id INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления trip_id в price_analytics:', err.message);
+    }
+  });
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_notif_log_trip ON notification_log(trip_id, priority, sent_at)`);
+
+  // Миграция: per-leg фильтры в trip_legs
+  const legFilterColumns = [
+    { name: 'adults', sql: 'adults INTEGER DEFAULT 1' },
+    { name: 'children', sql: 'children INTEGER DEFAULT 0' },
+    { name: 'airline', sql: 'airline TEXT' },
+    { name: 'baggage', sql: 'baggage INTEGER DEFAULT 0' },
+    { name: 'max_stops', sql: 'max_stops INTEGER' },
+    { name: 'max_layover_hours', sql: 'max_layover_hours INTEGER' }
+  ];
+
+  for (const col of legFilterColumns) {
+    db.run(`ALTER TABLE trip_legs ADD COLUMN ${col.sql}`, (err) => {
+      if (err && !err.message.includes('duplicate column')) {
+        console.error(`❌ Ошибка добавления ${col.name} в trip_legs:`, err.message);
+      }
+    });
+  }
+
   console.log('✅ База данных инициализирована и мигрирована');
   console.log('🔥 Новые таблицы для статистики проверок готовы');
 });
