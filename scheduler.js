@@ -512,28 +512,54 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
 
     // --- ОБРАБОТКА ТРИПОВ ---
     if (tripBatchItems.length > 0) {
-      // Группировка результатов трипов: tripId → legOrder → Map<date, priceResult>
-      const tripPriceResults = new Map();
+      // Группировка результатов: one-way и round-trip отдельно
+      const tripPriceResults = new Map(); // tripId → Map<legOrder, Map<date, priceResult>>
+      const tripRtPrices = new Map();     // tripId → Map<pairKey, Map<depDate, Map<retDate, priceResult>>>
 
       for (let i = batchItems.length; i < allBatchItems.length; i++) {
         const item = allBatchItems[i];
         const result = response.results[i];
 
-        if (!tripPriceResults.has(item.tripId)) {
-          tripPriceResults.set(item.tripId, new Map());
-        }
-        const legMap = tripPriceResults.get(item.tripId);
+        if (item.isRoundTrip) {
+          // Round-trip результат
+          if (!tripRtPrices.has(item.tripId)) {
+            tripRtPrices.set(item.tripId, new Map());
+          }
+          const rtMap = tripRtPrices.get(item.tripId);
+          const pairKey = `${item.outLegOrder}-${item.retLegOrder}`;
 
-        if (!legMap.has(item.legOrder)) {
-          legMap.set(item.legOrder, new Map());
-        }
+          if (!rtMap.has(pairKey)) {
+            rtMap.set(pairKey, new Map());
+          }
+          if (!rtMap.get(pairKey).has(item.departureDate)) {
+            rtMap.get(pairKey).set(item.departureDate, new Map());
+          }
 
-        if (result && result.price > 0) {
-          legMap.get(item.legOrder).set(item.departureDate, {
-            price: result.price,
-            searchLink: result.searchLink || item.url,
-            airline: result.airline || null
-          });
+          if (result && result.price > 0) {
+            rtMap.get(pairKey).get(item.departureDate).set(item.returnDate, {
+              price: result.price,
+              searchLink: result.searchLink || item.url,
+              airline: result.airline || null
+            });
+          }
+        } else {
+          // One-way результат
+          if (!tripPriceResults.has(item.tripId)) {
+            tripPriceResults.set(item.tripId, new Map());
+          }
+          const legMap = tripPriceResults.get(item.tripId);
+
+          if (!legMap.has(item.legOrder)) {
+            legMap.set(item.legOrder, new Map());
+          }
+
+          if (result && result.price > 0) {
+            legMap.get(item.legOrder).set(item.departureDate, {
+              price: result.price,
+              searchLink: result.searchLink || item.url,
+              airline: result.airline || null
+            });
+          }
         }
       }
 
@@ -542,7 +568,8 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
         if (!meta) continue;
 
         try {
-          const bestCombo = TripOptimizer.findBestCombination(meta.trip, meta.legs, pricesByLeg);
+          const roundTripPrices = tripRtPrices.get(tripId) || null;
+          const bestCombo = TripOptimizer.findBestCombination(meta.trip, meta.legs, pricesByLeg, roundTripPrices);
 
           if (!bestCombo) {
             // NO_RESULTS для трипа

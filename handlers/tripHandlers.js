@@ -693,11 +693,12 @@ class TripHandlers {
 
         const apiCalls = TripOptimizer.countApiCalls(fakeTrip, fakeLegs);
         const subscription = await SubscriptionService.getUserSubscription(chatId);
+        const tripMaxCombinations = subscription.max_combinations * 2;
 
-        if (apiCalls > subscription.max_combinations) {
+        if (apiCalls > tripMaxCombinations) {
             this.bot.sendMessage(
                 chatId,
-                `⚠️ Этот трип потребует ${apiCalls} проверок, а лимит подписки "${subscription.display_name}" — ${subscription.max_combinations}.\n\n` +
+                `⚠️ Этот трип потребует ${apiCalls} проверок, а лимит подписки "${subscription.display_name}" — ${tripMaxCombinations}.\n\n` +
                 `Попробуйте уменьшить диапазон дат или количество дней пребывания.`
             );
             await this._showDepartureStartStep(chatId, state);
@@ -1375,11 +1376,15 @@ class TripHandlers {
             routeName += ` → ${leg.destination}`;
         }
 
-        // Count API calls
+        // Count API calls (с фильтрами для корректного подсчета round-trip пар)
         const fakeTrip = { departure_start: td.departure_start, departure_end: td.departure_end };
         const fakeLegs = legs.map((l, i) => ({
             leg_order: i + 1, origin: l.origin, destination: l.destination,
-            min_days: l.min_days, max_days: l.max_days
+            min_days: l.min_days, max_days: l.max_days,
+            adults: l.adults || 1, children: l.children || 0,
+            airline: l.airline || null, baggage: l.baggage || 0,
+            max_stops: l.max_stops != null ? l.max_stops : null,
+            max_layover_hours: l.max_layover_hours || null
         }));
         const apiCalls = TripOptimizer.countApiCalls(fakeTrip, fakeLegs);
 

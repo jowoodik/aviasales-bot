@@ -9,7 +9,7 @@ const TEST_CONFIG = {
         id: 999,
         name: 'SVX→MOW→DPS→MOW→SVX',
         departure_start: '2026-02-25',
-        departure_end: '2026-03-12',
+        departure_end: '2026-03-15',
         threshold_price: 550000,
         currency: 'RUB'
     },
@@ -61,7 +61,7 @@ function formatLegFilters(leg) {
 async function main() {
     console.log('');
     console.log('='.repeat(80));
-    console.log('🗺️  ТЕСТ СОСТАВНОГО МАРШРУТА (TRIP)');
+    console.log('🗺️  ТЕСТ СОСТАВНОГО МАРШРУТА (TRIP) + ROUND-TRIP');
     console.log('='.repeat(80));
     console.log('');
 
@@ -84,10 +84,17 @@ async function main() {
     console.log('');
 
     // 2. Подсчет API-вызовов и комбинаций
-    const apiCalls = TripOptimizer.countApiCalls(trip, legs);
+    const detailed = TripOptimizer.countApiCallsDetailed(trip, legs);
     const combinations = TripOptimizer.countTripCombinations(trip, legs);
     console.log('📊 Оценка:');
-    console.log(`   API-вызовов: ${apiCalls}`);
+    console.log(`   One-way вызовов: ${detailed.oneWay}`);
+    console.log(`   Round-trip вызовов: ${detailed.roundTrip}`);
+    if (detailed.pairs.length > 0) {
+        for (const p of detailed.pairs) {
+            console.log(`      ↔️  ${p.outLeg.origin}→${p.outLeg.destination} + ${p.retLeg.origin}→${p.retLeg.destination}: ${p.calls} вызовов`);
+        }
+    }
+    console.log(`   Всего API-вызовов: ${detailed.total}`);
     console.log(`   Офлайн-комбинаций: ${combinations.toLocaleString('ru-RU')}`);
     console.log('');
 
@@ -98,9 +105,14 @@ async function main() {
     const userSettings = { timezone: 'Asia/Yekaterinburg' };
     const batchItems = TripOptimizer.generateBatchItems(trip, legs, userSettings, api);
 
-    console.log(`🔗 Сгенерировано ${batchItems.length} URLs для проверки:`);
+    const oneWayItems = batchItems.filter(i => !i.isRoundTrip);
+    const rtItems = batchItems.filter(i => i.isRoundTrip);
+
+    console.log(`🔗 Сгенерировано ${batchItems.length} URLs (${oneWayItems.length} one-way + ${rtItems.length} round-trip):`);
+
+    console.log('\n   One-way:');
     for (const leg of legs) {
-        const legItems = batchItems.filter(i => i.legOrder === leg.leg_order);
+        const legItems = oneWayItems.filter(i => i.legOrder === leg.leg_order);
         console.log(`   Нога ${leg.leg_order} (${leg.origin}→${leg.destination}): ${legItems.length} URLs`);
         if (legItems.length > 0 && legItems.length <= 5) {
             legItems.forEach(item => {
@@ -108,6 +120,23 @@ async function main() {
             });
         } else if (legItems.length > 5) {
             console.log(`      📅 ${legItems[0].departureDate} ... ${legItems[legItems.length - 1].departureDate}`);
+        }
+    }
+
+    if (rtItems.length > 0) {
+        console.log('\n   Round-trip:');
+        // Группировка RT по парам
+        const rtByPair = new Map();
+        for (const item of rtItems) {
+            const key = `${item.outLegOrder}-${item.retLegOrder}`;
+            if (!rtByPair.has(key)) rtByPair.set(key, []);
+            rtByPair.get(key).push(item);
+        }
+        for (const [pairKey, items] of rtByPair) {
+            const first = items[0];
+            const last = items[items.length - 1];
+            console.log(`   ↔️  ${first.origin}→${first.destination} (RT): ${items.length} URLs`);
+            console.log(`      📅 ${first.departureDate}/${first.returnDate} ... ${last.departureDate}/${last.returnDate}`);
         }
     }
     console.log('');
@@ -147,51 +176,70 @@ async function main() {
     console.log(`📋 Статистика: ${response.stats.success}/${response.stats.total} успешно`);
     console.log('');
 
-    // 5. Группировка результатов по ногам
+    // 5. Группировка результатов: one-way и round-trip
     const pricesByLeg = new Map();
+    const roundTripPrices = new Map();
 
     for (let i = 0; i < batchItems.length; i++) {
         const item = batchItems[i];
         const result = response.results[i];
 
-        if (!pricesByLeg.has(item.legOrder)) {
-            pricesByLeg.set(item.legOrder, new Map());
-        }
-        const legMap = pricesByLeg.get(item.legOrder);
+        if (item.isRoundTrip) {
+            // Round-trip результат
+            const pairKey = `${item.outLegOrder}-${item.retLegOrder}`;
+            if (!roundTripPrices.has(pairKey)) {
+                roundTripPrices.set(pairKey, new Map());
+            }
+            if (!roundTripPrices.get(pairKey).has(item.departureDate)) {
+                roundTripPrices.get(pairKey).set(item.departureDate, new Map());
+            }
 
-        if (result && result.price > 0) {
-            const existing = legMap.get(item.departureDate);
-            if (!existing || result.price < existing.price) {
-                legMap.set(item.departureDate, {
+            if (result && result.price > 0) {
+                roundTripPrices.get(pairKey).get(item.departureDate).set(item.returnDate, {
                     price: result.price,
                     searchLink: result.enhancedSearchLink || result.searchLink || null,
                     airline: result.airline || null
                 });
             }
+        } else {
+            // One-way результат
+            if (!pricesByLeg.has(item.legOrder)) {
+                pricesByLeg.set(item.legOrder, new Map());
+            }
+            const legMap = pricesByLeg.get(item.legOrder);
+
+            if (result && result.price > 0) {
+                const existing = legMap.get(item.departureDate);
+                if (!existing || result.price < existing.price) {
+                    legMap.set(item.departureDate, {
+                        price: result.price,
+                        searchLink: result.enhancedSearchLink || result.searchLink || null,
+                        airline: result.airline || null
+                    });
+                }
+            }
         }
     }
 
-    // 6. Вывод цен по ногам
+    // 6. Вывод one-way цен по ногам
     console.log('-'.repeat(80));
-    console.log('💰 ЦЕНЫ ПО НОГАМ:');
+    console.log('💰 ONE-WAY ЦЕНЫ ПО НОГАМ:');
     console.log('-'.repeat(80));
 
     for (const leg of legs) {
         const legPrices = pricesByLeg.get(leg.leg_order);
         const found = legPrices ? legPrices.size : 0;
-        const totalForLeg = batchItems.filter(i => i.legOrder === leg.leg_order).length;
+        const totalForLeg = oneWayItems.filter(i => i.legOrder === leg.leg_order).length;
 
         console.log(`\n  Нога ${leg.leg_order}: ${leg.origin} → ${leg.destination} (найдено цен: ${found}/${totalForLeg})`);
 
         if (legPrices && legPrices.size > 0) {
-            // Сортируем по дате
             const sorted = [...legPrices.entries()].sort((a, b) => a[0].localeCompare(b[0]));
             for (const [date, data] of sorted) {
                 const priceStr = data.price.toLocaleString('ru-RU');
                 console.log(`    📅 ${date}: ${priceStr} ₽ ${data.airline ? '(' + data.airline + ')' : ''}`);
             }
 
-            // Статистика
             const prices = [...legPrices.values()].map(v => v.price);
             const minPrice = Math.min(...prices);
             const maxPrice = Math.max(...prices);
@@ -201,21 +249,63 @@ async function main() {
         }
     }
 
-    // 7. Поиск лучшей комбинации
+    // 7. Вывод round-trip цен
+    if (roundTripPrices.size > 0) {
+        console.log('');
+        console.log('-'.repeat(80));
+        console.log('↔️  ROUND-TRIP ЦЕНЫ ПО ПАРАМ:');
+        console.log('-'.repeat(80));
+
+        for (const [pairKey, depMap] of roundTripPrices) {
+            const [outOrder, retOrder] = pairKey.split('-').map(Number);
+            const outLeg = legs.find(l => l.leg_order === outOrder);
+            const retLeg = legs.find(l => l.leg_order === retOrder);
+
+            let found = 0;
+            let allPrices = [];
+            for (const [, retMap] of depMap) {
+                for (const [, data] of retMap) {
+                    found++;
+                    allPrices.push(data.price);
+                }
+            }
+
+            const rtItemCount = rtItems.filter(i => i.outLegOrder === outOrder && i.retLegOrder === retOrder).length;
+            console.log(`\n  ↔️  ${outLeg.origin}↔${outLeg.destination} (ноги ${outOrder}+${retOrder}) (найдено: ${found}/${rtItemCount})`);
+
+            // Показать по датам
+            const sortedDeps = [...depMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+            for (const [depDate, retMap] of sortedDeps) {
+                const sortedRets = [...retMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+                for (const [retDate, data] of sortedRets) {
+                    const priceStr = data.price.toLocaleString('ru-RU');
+                    console.log(`    📅 ${depDate} → ${retDate}: ${priceStr} ₽`);
+                }
+            }
+
+            if (allPrices.length > 0) {
+                console.log(`    📉 Мин: ${Math.min(...allPrices).toLocaleString('ru-RU')} ₽ | Макс: ${Math.max(...allPrices).toLocaleString('ru-RU')} ₽`);
+            }
+        }
+    }
+
+    // 8. Поиск лучшей комбинации (с учетом round-trip)
     console.log('');
     console.log('='.repeat(80));
-    console.log('🏆 ПОИСК ЛУЧШЕЙ КОМБИНАЦИИ');
+    console.log('🏆 ПОИСК ЛУЧШЕЙ КОМБИНАЦИИ (one-way + round-trip)');
     console.log('='.repeat(80));
     console.log('');
 
-    const bestCombo = TripOptimizer.findBestCombination(trip, legs, pricesByLeg);
+    const bestCombo = TripOptimizer.findBestCombination(
+        trip, legs, pricesByLeg,
+        roundTripPrices.size > 0 ? roundTripPrices : null
+    );
 
     if (!bestCombo) {
         console.log('❌ Не удалось найти полную комбинацию!');
         console.log('   Причины: нет цен для всех ног в совместимых датах.');
         console.log('');
 
-        // Покажем, для каких ног нет цен
         for (const leg of legs) {
             const legPrices = pricesByLeg.get(leg.leg_order);
             if (!legPrices || legPrices.size === 0) {
@@ -230,8 +320,11 @@ async function main() {
             const legInfo = legs.find(l => l.leg_order === legResult.legOrder);
             const route = legInfo ? `${legInfo.origin}→${legInfo.destination}` : `Нога ${legResult.legOrder}`;
             const priceStr = legResult.price.toLocaleString('ru-RU');
+            const rtMark = legResult.isRoundTrip
+                ? (legResult.coveredByRoundTrip ? ' [RT: вкл. в ногу ' + legResult.coveredByRoundTrip + ']' : ' [RT]')
+                : '';
 
-            console.log(`  ${legResult.legOrder}️⃣  ${route} | ${legResult.departureDate} | ${legResult.airline || '—'} | ${priceStr} ₽`);
+            console.log(`  ${legResult.legOrder}️⃣  ${route} | ${legResult.departureDate} | ${legResult.airline || '—'} | ${priceStr} ₽${rtMark}`);
             if (legResult.searchLink) {
                 console.log(`      🔗 ${legResult.searchLink.substring(0, 100)}...`);
             }
@@ -248,6 +341,20 @@ async function main() {
             console.log(`✅ Точно в бюджет: ${budget.toLocaleString('ru-RU')} ₽`);
         } else {
             console.log(`⚠️  Превышение бюджета на ${Math.abs(diff).toLocaleString('ru-RU')} ₽`);
+        }
+
+        // Сравнение с чисто one-way комбинацией
+        const oneWayCombo = TripOptimizer.findBestCombination(trip, legs, pricesByLeg, null);
+        if (oneWayCombo) {
+            const savings = oneWayCombo.totalPrice - bestCombo.totalPrice;
+            if (savings > 0) {
+                console.log('');
+                console.log(`💡 Экономия за счет round-trip: ${savings.toLocaleString('ru-RU')} ₽`);
+                console.log(`   (one-way итого: ${oneWayCombo.totalPrice.toLocaleString('ru-RU')} ₽)`);
+            } else {
+                console.log('');
+                console.log(`ℹ️  Round-trip не дал экономии (one-way итого: ${oneWayCombo.totalPrice.toLocaleString('ru-RU')} ₽)`);
+            }
         }
     }
 
