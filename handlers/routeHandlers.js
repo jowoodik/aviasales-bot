@@ -207,7 +207,7 @@ class RouteHandlers {
 
                 const tripIndex = routes.length + i;
                 message += `${statusIcon} ${tripIndex + 1}. 🗺️ ${trip.name} (составной)\n`;
-                message += `📅 ${start} - ${end} • ${trip.adults}👤`;
+                message += `📅 ${start} - ${end}`;
                 if (trip.baggage) message += ' • 🧳';
                 message += '\n';
                 message += `💰 Порог: ${Formatters.formatPrice(trip.threshold_price, trip.currency)} | Лучшая: ${bestPriceText}${belowThreshold ? ' ✨' : ''}\n`;
@@ -218,9 +218,7 @@ class RouteHandlers {
                     message += `\n`;
                 }
 
-                const passCount = trip.children > 0 ? `${trip.adults}+${trip.children}` : `${trip.adults}`;
-                const baggageIcon = trip.baggage ? '🧳' : '🎒';
-                let buttonText = `${tripIndex + 1}. 🗺️ ${trip.name} ${start}-${end} ${passCount} ${baggageIcon}`;
+                let buttonText = `${tripIndex + 1}. 🗺️ ${trip.name} ${start}-${end}`;
                 if (trip.is_paused) buttonText += ' ⏸️';
                 buttons.push([buttonText]);
             }
@@ -481,20 +479,55 @@ class RouteHandlers {
                     const icon = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
                     const timeAgo = result.found_at ? Formatters.formatTimeAgo(result.found_at) : 'недавно';
 
-                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, trip.currency)}* за всех\n`;
+                    let resultMessage = `${icon} *${Formatters.formatPrice(result.total_price, trip.currency)}* за всех\n\n`;
+
+                    // Проверяем наличие RT пар
+                    let hasRoundTrip = false;
 
                     if (result.legs) {
                         for (const leg of result.legs) {
+                            const legInfo = legs.find(l => l.leg_order === leg.leg_order);
+                            if (!legInfo) continue;
+
                             const depDate = DateUtils.formatDateDisplay(leg.departure_date).substring(0, 5);
-                            resultMessage += `  ${leg.leg_order}. ${depDate} — ${Formatters.formatPrice(leg.price)}\n`;
+
+                            if (leg.coveredByRoundTrip) {
+                                // Return-нога RT пары
+                                resultMessage += `  ${leg.leg_order}. ${depDate} ${legInfo.origin}→${legInfo.destination} — 0 ₽ (включено в билет ${leg.coveredByRoundTrip})\n`;
+                                hasRoundTrip = true;
+                            } else if (leg.isRoundTrip) {
+                                // Outbound-нога RT пары - найти return ногу для отображения даты возврата
+                                const returnLeg = result.legs.find(l => l.coveredByRoundTrip === leg.leg_order);
+                                if (returnLeg) {
+                                    const retDate = DateUtils.formatDateDisplay(returnLeg.departure_date).substring(0, 5);
+                                    resultMessage += `  ${leg.leg_order}. ${depDate}-${retDate} ${legInfo.origin}↔${legInfo.destination} — ${Formatters.formatPrice(leg.price)} (туда-обратно)\n`;
+                                    hasRoundTrip = true;
+                                } else {
+                                    // RT нога без пары (странно, но обработаем)
+                                    resultMessage += `  ${leg.leg_order}. ${depDate} ${legInfo.origin}→${legInfo.destination} — ${Formatters.formatPrice(leg.price)}\n`;
+                                }
+                            } else {
+                                // One-way нога
+                                resultMessage += `  ${leg.leg_order}. ${depDate} ${legInfo.origin}→${legInfo.destination} — ${Formatters.formatPrice(leg.price)}\n`;
+                            }
                         }
                     }
 
-                    resultMessage += `🕐 Найдено: ${timeAgo}`;
+                    resultMessage += `\n🕐 Найдено: ${timeAgo}`;
 
                     if (result.total_price <= trip.threshold_price) {
                         const savings = trip.threshold_price - result.total_price;
                         resultMessage += `\n\n🔥 *НИЖЕ БЮДЖЕТА!* Экономия: ${Formatters.formatPrice(savings)}`;
+                    }
+
+                    // Примечание о RT билетах
+                    if (hasRoundTrip) {
+                        const allRoundTrip = result.legs.every(l => l.isRoundTrip || l.coveredByRoundTrip);
+                        if (allRoundTrip) {
+                            resultMessage += `\n\n💡 Бот нашел билеты туда-обратно — они дешевле, чем два билета в одну сторону!`;
+                        } else {
+                            resultMessage += `\n\n💡 Часть маршрута найдена по билетам туда-обратно (дешевле одного направления).`;
+                        }
                     }
 
                     // Кнопки для каждой ноги
@@ -504,15 +537,36 @@ class RouteHandlers {
                             const row = [];
                             const l1 = result.legs[j];
                             const leg1Info = legs.find(l => l.leg_order === l1.leg_order);
+
+                            let btn1Text;
+                            if (l1.coveredByRoundTrip) {
+                                btn1Text = `🎫 ${leg1Info?.origin || '?'}→${leg1Info?.destination || '?'} (вкл.)`;
+                            } else if (l1.isRoundTrip) {
+                                btn1Text = `🎫 ${leg1Info?.origin || '?'}↔${leg1Info?.destination || '?'} ${Formatters.formatPrice(l1.price)}`;
+                            } else {
+                                btn1Text = `🎫 ${leg1Info?.origin || '?'}→${leg1Info?.destination || '?'} ${Formatters.formatPrice(l1.price)}`;
+                            }
+
                             row.push({
-                                text: `🎫 ${leg1Info?.origin || '?'}→${leg1Info?.destination || '?'} ${Formatters.formatPrice(l1.price)}`,
+                                text: btn1Text,
                                 callback_data: `trip_aff:${trip.id}:${l1.leg_order}:${Math.round(l1.price)}`
                             });
+
                             if (j + 1 < result.legs.length) {
                                 const l2 = result.legs[j + 1];
                                 const leg2Info = legs.find(l => l.leg_order === l2.leg_order);
+
+                                let btn2Text;
+                                if (l2.coveredByRoundTrip) {
+                                    btn2Text = `🎫 ${leg2Info?.origin || '?'}→${leg2Info?.destination || '?'} (вкл.)`;
+                                } else if (l2.isRoundTrip) {
+                                    btn2Text = `🎫 ${leg2Info?.origin || '?'}↔${leg2Info?.destination || '?'} ${Formatters.formatPrice(l2.price)}`;
+                                } else {
+                                    btn2Text = `🎫 ${leg2Info?.origin || '?'}→${leg2Info?.destination || '?'} ${Formatters.formatPrice(l2.price)}`;
+                                }
+
                                 row.push({
-                                    text: `🎫 ${leg2Info?.origin || '?'}→${leg2Info?.destination || '?'} ${Formatters.formatPrice(l2.price)}`,
+                                    text: btn2Text,
                                     callback_data: `trip_aff:${trip.id}:${l2.leg_order}:${Math.round(l2.price)}`
                                 });
                             }

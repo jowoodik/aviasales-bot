@@ -7,25 +7,79 @@ class NotificationService {
     this.bot = bot;
   }
 
-  classifyPriority(routeData) {
-    const { currentPrice, userBudget, historicalMin } = routeData;
+  async classifyPriority(routeData) {
+    const { currentPrice, userBudget, historicalMin, routeId, tripId } = routeData;
     const reasons = [];
+    let score = 0;
 
-    // CRITICAL: цена ниже бюджета
-    if (userBudget && currentPrice < userBudget) {
-      reasons.push(`Цена ${currentPrice.toLocaleString('ru-RU')} ₽ ниже бюджета ${userBudget.toLocaleString('ru-RU')} ₽`);
-      return { priority: 'CRITICAL', reasons };
+    // Получаем статистику для расчета скоринга
+    const stats = tripId
+      ? await this.getTripStatistics(tripId)
+      : await this.getRouteStatistics(routeId);
+    const { avgPrice, stdPrice, dataPoints } = stats;
+
+    // 1. Базовый скоринг (объективная оценка цены)
+
+    // 1.1 Относительно минимума
+    if (historicalMin) {
+      if (currentPrice < historicalMin) {
+        score += 5;
+        reasons.push(`+5 новый минимум (было ${historicalMin.toLocaleString('ru-RU')} ₽)`);
+      } else if (currentPrice < historicalMin * 1.02) {
+        score += 4;
+        reasons.push(`+4 около минимума (${historicalMin.toLocaleString('ru-RU')} ₽)`);
+      } else if (currentPrice < historicalMin * 1.05) {
+        score += 3;
+        reasons.push(`+3 близко к минимуму`);
+      } else if (currentPrice < historicalMin * 1.10) {
+        score += 2;
+        reasons.push(`+2 в топ 10%`);
+      }
     }
 
-    // HIGH: цена ниже исторического минимума (но не ниже бюджета)
-    if (historicalMin && currentPrice < historicalMin) {
-      reasons.push(`Цена ${currentPrice.toLocaleString('ru-RU')} ₽ ниже исторического минимума ${historicalMin.toLocaleString('ru-RU')} ₽`);
-      return { priority: 'HIGH', reasons };
+    // 1.2 Статистическое отклонение (если достаточно данных)
+    if (avgPrice && stdPrice && dataPoints >= 10) {
+      const zScore = (avgPrice - currentPrice) / stdPrice;
+      if (zScore > 1.0) {
+        score += 3;
+        reasons.push(`+3 сильно ниже среднего (z=${zScore.toFixed(1)})`);
+      } else if (zScore > 0.5) {
+        score += 2;
+        reasons.push(`+2 ниже среднего (z=${zScore.toFixed(1)})`);
+      } else if (zScore > 0) {
+        score += 1;
+        reasons.push(`+1 чуть ниже среднего`);
+      }
     }
 
-    // LOW: все остальное
-    reasons.push('Цена не соответствует критериям CRITICAL/HIGH');
-    return { priority: 'LOW', reasons };
+    // 2. Бонус за соответствие бюджету
+    if (userBudget) {
+      if (currentPrice < userBudget * 0.85) {
+        score += 3;
+        reasons.push(`+3 на 15%+ ниже бюджета`);
+      } else if (currentPrice < userBudget) {
+        score += 2;
+        reasons.push(`+2 в рамках бюджета`);
+      }
+    }
+
+    // 3. ПРИОРИТЕТЫ
+
+    // CRITICAL - СТРОГО: цена ниже бюджета И объективно выгодная
+    if (userBudget && currentPrice < userBudget && score >= 7) {
+      reasons.unshift(`🔥 Цена ${currentPrice.toLocaleString('ru-RU')} ₽ ниже бюджета ${userBudget.toLocaleString('ru-RU')} ₽`);
+      return { priority: 'CRITICAL', score, reasons };
+    }
+
+    // HIGH - хорошая цена (квота проверяется в _canSendNotification)
+    if (score >= 4) {
+      reasons.unshift(`Хорошая цена ${currentPrice.toLocaleString('ru-RU')} ₽ (скор: ${score})`);
+      return { priority: 'HIGH', score, reasons };
+    }
+
+    // LOW - всё остальное
+    reasons.unshift(`Обычная цена ${currentPrice.toLocaleString('ru-RU')} ₽`);
+    return { priority: 'LOW', score, reasons };
   }
 
   getRouteAnalytics(routeId) {
@@ -42,94 +96,233 @@ class NotificationService {
     });
   }
 
+  getRouteStatistics(routeId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+          `SELECT
+        AVG(price) as avgPrice,
+        MIN(price) as minPrice,
+        COUNT(*) as dataPoints,
+        (SELECT AVG((price - avg_price) * (price - avg_price))
+         FROM price_analytics, (SELECT AVG(price) as avg_price FROM price_analytics WHERE route_id = ?)
+         WHERE route_id = ?) as variance
+       FROM price_analytics
+       WHERE route_id = ?`,
+          [routeId, routeId, routeId],
+          (err, row) => {
+            if (err) return reject(err);
+
+            if (!row || !row.dataPoints) {
+              return resolve({ avgPrice: null, minPrice: null, stdPrice: null, dataPoints: 0 });
+            }
+
+            const stdPrice = row.variance ? Math.sqrt(row.variance) : null;
+
+            resolve({
+              avgPrice: row.avgPrice,
+              minPrice: row.minPrice,
+              stdPrice: stdPrice,
+              dataPoints: row.dataPoints
+            });
+          }
+      );
+    });
+  }
+
+  getTripStatistics(tripId) {
+    return new Promise((resolve, reject) => {
+      db.get(
+          `SELECT
+        AVG(total_price) as avgPrice,
+        MIN(total_price) as minPrice,
+        COUNT(*) as dataPoints,
+        (SELECT AVG((total_price - avg_price) * (total_price - avg_price))
+         FROM trip_results, (SELECT AVG(total_price) as avg_price FROM trip_results WHERE trip_id = ?)
+         WHERE trip_id = ?) as variance
+       FROM trip_results
+       WHERE trip_id = ?`,
+          [tripId, tripId, tripId],
+          (err, row) => {
+            if (err) return reject(err);
+
+            if (!row || !row.dataPoints) {
+              return resolve({ avgPrice: null, minPrice: null, stdPrice: null, dataPoints: 0 });
+            }
+
+            const stdPrice = row.variance ? Math.sqrt(row.variance) : null;
+
+            resolve({
+              avgPrice: row.avgPrice,
+              minPrice: row.minPrice,
+              stdPrice: stdPrice,
+              dataPoints: row.dataPoints
+            });
+          }
+      );
+    });
+  }
+
   async _canSendNotification(chatId, routeId, priority, currentPrice, tripId = null) {
-    // Определяем колонку и значение для поиска (route_id или trip_id)
     const idColumn = tripId ? 'trip_id' : 'route_id';
     const idValue = tripId || routeId;
+    const now = Date.now();
 
+    // Начало сегодняшнего дня
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartISO = todayStart.toISOString();
+
+    // === CRITICAL ===
     if (priority === 'CRITICAL') {
       const lastUrgent = await new Promise((resolve, reject) => {
         db.get(
-          `SELECT price, sent_at FROM notification_log
-           WHERE chat_id = ? AND ${idColumn} = ? AND message_type = 'URGENT'
-           ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, idValue],
-          (err, row) => {
-            if (err) return reject(err);
-            resolve(row);
-          }
+            `SELECT price, sent_at FROM notification_log
+         WHERE chat_id = ? AND ${idColumn} = ? AND priority = 'CRITICAL'
+         ORDER BY sent_at DESC LIMIT 1`,
+            [chatId, idValue],
+            (err, row) => {
+              if (err) return reject(err);
+              resolve(row);
+            }
         );
       });
 
       if (!lastUrgent) {
-        return { canSend: true, reason: 'Первое уведомление' };
+        return { canSend: true, reason: 'Первое CRITICAL' };
       }
 
-      const hoursSince = (Date.now() - new Date(lastUrgent.sent_at).getTime()) / (1000 * 60 * 60);
+      const hoursSince = (now - new Date(lastUrgent.sent_at).getTime()) / (1000 * 60 * 60);
 
+      // Можно отправить если прошло 6ч ИЛИ цена упала
       if (hoursSince >= 6) {
-        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)}ч с последнего CRITICAL` };
       }
 
       if (lastUrgent.price > currentPrice) {
-        return { canSend: true, reason: `Цена упала с ${lastUrgent.price} до ${currentPrice}` };
+        return { canSend: true, reason: `Цена упала: ${lastUrgent.price} → ${currentPrice}` };
       }
 
-      return { canSend: false, reason: `URGENT < 6ч назад (${hoursSince.toFixed(1)}ч), цена не упала` };
+      return {
+        canSend: false,
+        reason: `CRITICAL < 6ч назад (${hoursSince.toFixed(1)}ч), цена не упала`
+      };
     }
 
+    // === HIGH (максимум 2 в день) ===
     if (priority === 'HIGH') {
+      // Считаем сколько HIGH отправлено сегодня
+      const highCountToday = await new Promise((resolve, reject) => {
+        db.get(
+            `SELECT COUNT(*) as count FROM notification_log
+         WHERE chat_id = ? AND ${idColumn} = ?
+         AND priority = 'HIGH'
+         AND sent_at >= ?`,
+            [chatId, idValue, todayStartISO],
+            (err, row) => {
+              if (err) return reject(err);
+              resolve(row ? row.count : 0);
+            }
+        );
+      });
+
+      // Квота исчерпана
+      if (highCountToday >= 2) {
+        return {
+          canSend: false,
+          reason: `Квота HIGH исчерпана (${highCountToday}/2 сегодня)`
+        };
+      }
+
+      // Проверяем таймаут от ЛЮБОГО уведомления
       const lastAny = await new Promise((resolve, reject) => {
         db.get(
-          `SELECT sent_at FROM notification_log
-           WHERE chat_id = ? AND ${idColumn} = ?
-           ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, idValue],
-          (err, row) => {
-            if (err) return reject(err);
-            resolve(row);
-          }
+            `SELECT sent_at FROM notification_log
+         WHERE chat_id = ? AND ${idColumn} = ?
+         ORDER BY sent_at DESC LIMIT 1`,
+            [chatId, idValue],
+            (err, row) => {
+              if (err) return reject(err);
+              resolve(row);
+            }
         );
       });
 
       if (!lastAny) {
-        return { canSend: true, reason: 'Первое уведомление' };
+        return { canSend: true, reason: 'Первое HIGH за день' };
       }
 
-      const hoursSince = (Date.now() - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
+      const hoursSince = (now - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
 
-      if (hoursSince >= 12) {
-        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+      // HIGH: минимум 8 часов между уведомлениями
+      if (hoursSince >= 8) {
+        return {
+          canSend: true,
+          reason: `Прошло ${hoursSince.toFixed(1)}ч (HIGH ${highCountToday + 1}/2)`
+        };
       }
 
-      return { canSend: false, reason: `Последнее уведомление < 12ч назад (${hoursSince.toFixed(1)}ч)` };
+      return {
+        canSend: false,
+        reason: `Последнее < 8ч назад (${hoursSince.toFixed(1)}ч)`
+      };
     }
 
+    // === LOW (для набора минимума 3 уведомления в день) ===
     if (priority === 'LOW') {
+      // Считаем общее количество уведомлений сегодня
+      const totalToday = await new Promise((resolve, reject) => {
+        db.get(
+            `SELECT COUNT(*) as count FROM notification_log
+         WHERE chat_id = ? AND ${idColumn} = ?
+         AND sent_at >= ?`,
+            [chatId, idValue, todayStartISO],
+            (err, row) => {
+              if (err) return reject(err);
+              resolve(row ? row.count : 0);
+            }
+        );
+      });
+
+      // Если уже есть 3+ уведомления сегодня - LOW не отправляем
+      if (totalToday >= 3) {
+        return {
+          canSend: false,
+          reason: `Уже ${totalToday} уведомлений сегодня`
+        };
+      }
+
+      // Проверяем таймаут
       const lastAny = await new Promise((resolve, reject) => {
         db.get(
-          `SELECT sent_at FROM notification_log
-           WHERE chat_id = ? AND ${idColumn} = ?
-           ORDER BY sent_at DESC LIMIT 1`,
-          [chatId, idValue],
-          (err, row) => {
-            if (err) return reject(err);
-            resolve(row);
-          }
+            `SELECT sent_at FROM notification_log
+         WHERE chat_id = ? AND ${idColumn} = ?
+         ORDER BY sent_at DESC LIMIT 1`,
+            [chatId, idValue],
+            (err, row) => {
+              if (err) return reject(err);
+              resolve(row);
+            }
         );
       });
 
       if (!lastAny) {
-        return { canSend: true, reason: 'Первое уведомление' };
+        return { canSend: true, reason: 'Первое LOW за день' };
       }
 
-      const hoursSince = (Date.now() - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
+      const hoursSince = (now - new Date(lastAny.sent_at).getTime()) / (1000 * 60 * 60);
 
-      if (hoursSince >= 24) {
-        return { canSend: true, reason: `Прошло ${hoursSince.toFixed(1)} часов` };
+      // LOW: минимум 6 часов между уведомлениями
+      if (hoursSince >= 6) {
+        return {
+          canSend: true,
+          reason: `Прошло ${hoursSince.toFixed(1)}ч (уведомление ${totalToday + 1}/3+)`
+        };
       }
 
-      return { canSend: false, reason: `Последнее уведомление < 24ч назад (${hoursSince.toFixed(1)}ч)` };
+      return {
+        canSend: false,
+        reason: `Последнее < 6ч назад (${hoursSince.toFixed(1)}ч)`
+      };
     }
 
     return { canSend: false, reason: 'Неизвестный приоритет' };

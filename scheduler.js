@@ -463,10 +463,11 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
         const checkStats = await notificationService.getRouteCheckStats(routeId);
 
         const currentPrice = bestResult.total_price;
-        const classified = notificationService.classifyPriority({
+        const classified = await notificationService.classifyPriority({
           currentPrice,
           userBudget: route.threshold_price,
-          historicalMin: analytics.minPrice
+          historicalMin: analytics.minPrice,
+          routeId
         });
         const priority = classified.priority;
         const reasons = classified.reasons;
@@ -607,10 +608,11 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
           const analytics = await notificationService.getTripAnalytics(tripId);
 
           // Классификация
-          const classified = notificationService.classifyPriority({
+          const classified = await notificationService.classifyPriority({
             currentPrice: bestCombo.totalPrice,
             userBudget: meta.trip.threshold_price,
-            historicalMin: analytics.minPrice
+            historicalMin: analytics.minPrice,
+            tripId: tripId
           });
 
           const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
@@ -678,156 +680,6 @@ async function checkRoutesBySubscription(subscriptionType) {
     const endTime = new Date();
     const duration = ((endTime - startTime) / 1000).toFixed(2);
     console.error(`❌ [${formatTimestamp(endTime)}] Ошибка при проверке для подписки ${subscriptionType} (${duration}s):`, error);
-  }
-}
-
-/**
- * Проверить маршруты конкретного пользователя (новый flow с приоритетами)
- *
- * ВАЖНО: Эта функция сохранена для ОБРАТНОЙ СОВМЕСТИМОСТИ и используется:
- * - Командой /check (ручная проверка одного пользователя)
- * - Другими местами, где нужна последовательная проверка маршрутов
- *
- * Для планировщика используется checkRoutesBySubscriptionBatch() - оптимизированная версия.
- */
-async function checkUserRoutes(chatId, monitor, notificationService, subscriptionType) {
-  const userStartTime = new Date();
-  console.log(`    👤 [${formatTimestamp(userStartTime)}] Начало проверки пользователя ${chatId}`);
-
-  try {
-    await airportResolver.load();
-
-    const userRoutes = await getUserActiveRoutes(chatId);
-
-    if (userRoutes.length === 0) {
-      console.log(`    ℹ️  Пользователь ${chatId}: нет активных маршрутов`);
-      return;
-    }
-
-    const userSettings = await getUserSettings(chatId);
-    const timezone = userSettings?.timezone || 'Asia/Yekaterinburg';
-    console.log(`    📋 Проверяем ${userRoutes.length} маршрутов для пользователя ${chatId}`);
-
-    let sentCount = 0;
-
-    for (const route of userRoutes) {
-      try {
-        // 0. Проверяем истечение срока маршрута
-        const isExpired = await checkAndArchiveExpiredRoute(route, userSettings);
-        if (isExpired) {
-          console.log(`    📦 Маршрут #${route.id} архивирован - пропускаем проверку`);
-          continue;
-        }
-
-        // 1. Проверка маршрута (данные сохраняются в БД внутри checkSingleRoute)
-        await monitor.checkSingleRoute(route, userSettings);
-
-        // 2. Лучший результат
-        const bestResults = await RouteResult.getTopResults(route.id, 1);
-        const bestResult = bestResults[0] || null;
-
-        // 3. Если нет результатов - обработка NO_RESULTS
-        if (!bestResult) {
-          const noResultsCheck = await notificationService.processNoResults(chatId, route.id);
-
-          if (noResultsCheck.shouldSend) {
-            const analytics = await notificationService.getRouteAnalytics(route.id);
-            const checkStats = await notificationService.getRouteCheckStats(route.id);
-            const noResultsBlock = notificationService.formatNoResultsBlock(route, analytics, checkStats, timezone);
-
-            await notificationService._sendInstantAlert(
-              chatId,
-              route.id,
-              noResultsBlock,
-              'NO_RESULTS',
-              null,
-              timezone,
-              true // всегда без звука
-            );
-
-            // Логируем
-            await notificationService._logNotification(
-              chatId,
-              route.id,
-              'NO_RESULTS',
-              null,
-              'NO_RESULTS',
-              true
-            );
-
-            console.log(`    📭 NO_RESULTS уведомление отправлено для маршрута ${route.id}: ${noResultsCheck.reason}`);
-            sentCount++;
-          } else {
-            console.log(`    ⏭️  NO_RESULTS пропущено для маршрута ${route.id}: ${noResultsCheck.reason}`);
-          }
-
-          await updateRouteLastCheck(route.id);
-          continue;
-        }
-
-        // 4. Аналитика
-        const analytics = await notificationService.getRouteAnalytics(route.id);
-
-        // 5. Статистика комбинаций
-        const checkStats = await notificationService.getRouteCheckStats(route.id);
-
-        // 6. Классификация приоритета
-        const currentPrice = bestResult.total_price;
-        const classified = notificationService.classifyPriority({
-          currentPrice,
-          userBudget: route.threshold_price,
-          historicalMin: analytics.minPrice
-        });
-        const priority = classified.priority;
-        const reasons = classified.reasons;
-
-        // 7. Маршрутизация уведомления
-        const routeResult = await notificationService.processAndRouteNotification({
-          chatId,
-          routeId: route.id,
-          route,
-          priority,
-          reasons,
-          currentPrice,
-          analytics,
-          bestResult,
-          checkStats,
-          userSettings,
-          subscriptionType
-        });
-
-        // 8. Если уведомление нужно отправить - отправляем сразу
-        if (routeResult.action === 'sent' || routeResult.action === 'sent_silent') {
-          const block = await notificationService.formatSingleRouteBlock(route, bestResult, analytics, checkStats, priority);
-
-          await notificationService._sendInstantAlert(
-            chatId,
-            route.id,
-            block,
-            priority,
-            currentPrice,
-            timezone,
-            routeResult.action === 'sent_silent'
-          );
-
-          sentCount++;
-        }
-
-        await updateRouteLastCheck(route.id);
-
-      } catch (error) {
-        console.error(`    ❌ Ошибка проверки маршрута ${route.id}:`, error);
-      }
-    }
-
-    const userEndTime = new Date();
-    const userDuration = ((userEndTime - userStartTime) / 1000).toFixed(2);
-    console.log(`    ✅ [${formatTimestamp(userEndTime)}] Завершено для ${chatId}: ${userRoutes.length} маршрутов, ${sentCount} уведомлений отправлено (${userDuration}s)`);
-
-  } catch (error) {
-    const userEndTime = new Date();
-    const userDuration = ((userEndTime - userStartTime) / 1000).toFixed(2);
-    console.error(`    ❌ [${formatTimestamp(userEndTime)}] Ошибка для пользователя ${chatId} (${userDuration}s):`, error);
   }
 }
 
