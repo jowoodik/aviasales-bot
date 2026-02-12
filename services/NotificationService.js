@@ -934,6 +934,35 @@ class NotificationService {
     };
   }
 
+  formatTripPartialResultsBlock(trip, legs, pricesByLeg, timezone) {
+    const time = this._formatTimeForUser(new Date(), timezone);
+
+    let text = `🔍 Неполные результаты • ${time}\n\n`;
+    text += `🗺️ <b>${trip.name}</b>\n\n`;
+
+    for (const leg of legs) {
+      const legPrices = pricesByLeg.get(leg.leg_order);
+      const idx = leg.leg_order;
+
+      if (legPrices && legPrices.size > 0) {
+        // Найти минимальную цену по всем датам
+        let minPrice = Infinity;
+        for (const [, data] of legPrices) {
+          if (data.price < minPrice) minPrice = data.price;
+        }
+        text += `${idx}️⃣ ${leg.origin}→${leg.destination} — от ${Formatters.formatPrice(minPrice)} ✅\n`;
+      } else {
+        text += `${idx}️⃣ ${leg.origin}→${leg.destination} — ❌ не найдено\n`;
+      }
+    }
+
+    text += `\nПолная комбинация не найдена.\n`;
+    text += `Бюджет: ${Formatters.formatPrice(trip.threshold_price)}\n\n`;
+    text += `Продолжаю мониторинг 🔍`;
+
+    return { text, searchLink: null };
+  }
+
   formatTripNoResultsBlock(trip, legs, timezone) {
     const time = this._formatTimeForUser(new Date(), timezone);
 

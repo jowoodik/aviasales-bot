@@ -263,6 +263,23 @@ async function initializeScheduler() {
 }
 
 /**
+ * Проверяет, есть ли частичные результаты: хотя бы одна нога с ценами И хотя бы одна без.
+ */
+function hasPartialPrices(pricesByLeg, legs) {
+  let hasAny = false;
+  let missingAny = false;
+  for (const leg of legs) {
+    const legPrices = pricesByLeg.get(leg.leg_order);
+    if (legPrices && legPrices.size > 0) {
+      hasAny = true;
+    } else {
+      missingAny = true;
+    }
+  }
+  return hasAny && missingAny;
+}
+
+/**
  * BATCH-версия: Проверить маршруты для подписки параллельно (оптимизация)
  */
 async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notificationService) {
@@ -573,22 +590,45 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
           const bestCombo = TripOptimizer.findBestCombination(meta.trip, meta.legs, pricesByLeg, roundTripPrices);
 
           if (!bestCombo) {
-            // NO_RESULTS для трипа
-            const noResultsCheck = await notificationService.processNoResults(meta.chatId, null, tripId);
-            if (noResultsCheck.shouldSend) {
-              const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
-              const noResultsBlock = notificationService.formatTripNoResultsBlock(meta.trip, meta.legs, timezone);
+            const hasPartial = hasPartialPrices(pricesByLeg, meta.legs);
 
-              await notificationService._sendInstantAlert(
-                meta.chatId, null, noResultsBlock, 'NO_RESULTS', null, timezone, true
+            if (hasPartial) {
+              // Частичные результаты — LOW приоритет
+              const canSend = await notificationService._canSendNotification(
+                meta.chatId, null, 'LOW', null, tripId
               );
+              if (canSend.canSend) {
+                const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
+                const block = notificationService.formatTripPartialResultsBlock(
+                  meta.trip, meta.legs, pricesByLeg, timezone
+                );
+                await notificationService._sendInstantAlert(
+                  meta.chatId, null, block, 'LOW', null, timezone, true
+                );
+                await notificationService._logNotification(
+                  meta.chatId, null, 'LOW', null, 'DAILY', true, tripId
+                );
+                console.log(`    🔍 PARTIAL_RESULTS для трипа ${tripId}`);
+                totalSent++;
+              }
+            } else {
+              // Полностью нет результатов — NO_RESULTS как раньше
+              const noResultsCheck = await notificationService.processNoResults(meta.chatId, null, tripId);
+              if (noResultsCheck.shouldSend) {
+                const timezone = meta.userSettings?.timezone || 'Asia/Yekaterinburg';
+                const noResultsBlock = notificationService.formatTripNoResultsBlock(meta.trip, meta.legs, timezone);
 
-              await notificationService._logNotification(
-                meta.chatId, null, 'NO_RESULTS', null, 'NO_RESULTS', true, tripId
-              );
+                await notificationService._sendInstantAlert(
+                  meta.chatId, null, noResultsBlock, 'NO_RESULTS', null, timezone, true
+                );
 
-              console.log(`    📭 NO_RESULTS для трипа ${tripId}`);
-              totalSent++;
+                await notificationService._logNotification(
+                  meta.chatId, null, 'NO_RESULTS', null, 'NO_RESULTS', true, tripId
+                );
+
+                console.log(`    📭 NO_RESULTS для трипа ${tripId}`);
+                totalSent++;
+              }
             }
             await Trip.updateLastCheck(tripId);
             continue;
