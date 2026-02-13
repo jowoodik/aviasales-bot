@@ -51,11 +51,11 @@ class DashboardPage {
         const userActivity = statsData.userActivity || { dau: 0, wau: 0, mau: 0 };
 
         // Комбинации
-        const comb = statsData.combinations || { active: { fixed: 0, flexible: 0, trips: 0 }, all: { fixed: 0, flexible: 0, trips: 0 }, new24h: { fixed: 0, flexible: 0, trips: 0 } };
+        const comb = statsData.combinations || { active: { fixed: 0, flexible: 0, trips: 0 }, all: { fixed: 0, flexible: 0, trips: 0 }, newToday: { fixed: 0, flexible: 0, trips: 0 } };
         const combActive = comb.active;
         const combAll = comb.all;
-        const combNew = comb.new24h;
-        const newIn24h = statsData.newIn24h || { users: 0, fixedRoutes: 0, flexibleRoutes: 0, trips: 0 };
+        const combNew = comb.newToday;
+        const newToday = statsData.newToday || { users: 0, fixedRoutes: 0, flexibleRoutes: 0, trips: 0 };
 
         // Маршруты
         const activeRoutes = routes.filter(r => !r.is_paused && !r.is_archived);
@@ -90,9 +90,9 @@ class DashboardPage {
                                 <div class="mb-2"><i class="bi bi-people-fill text-primary" style="font-size: 1.5rem;"></i></div>
                                 <h2 class="text-primary mb-0">${users.length}</h2>
                                 <p class="text-muted mb-2">Пользователи</p>
-                                ${newIn24h.users > 0
-                                    ? `<span class="badge bg-success">+${newIn24h.users} за 24ч</span>`
-                                    : `<span class="badge bg-light text-muted">0 за 24ч</span>`}
+                                ${newToday.users > 0
+                                    ? `<span class="badge bg-success">+${newToday.users} сегодня</span>`
+                                    : `<span class="badge bg-light text-muted">0 сегодня</span>`}
                             </div>
                         </div>
                     </div>
@@ -110,17 +110,17 @@ class DashboardPage {
                                         <tr>
                                             <td class="text-start text-muted py-0">Фикс</td>
                                             <td class="text-end py-0"><strong>${fixedRoutes}</strong><span class="text-muted">/${totalFixedRoutes}</span></td>
-                                            <td class="text-end py-0">${newIn24h.fixedRoutes > 0 ? `<span class="text-success">+${newIn24h.fixedRoutes}</span>` : ''}</td>
+                                            <td class="text-end py-0">${newToday.fixedRoutes > 0 ? `<span class="text-success">+${newToday.fixedRoutes}</span>` : ''}</td>
                                         </tr>
                                         <tr>
                                             <td class="text-start text-muted py-0">Гибкие</td>
                                             <td class="text-end py-0"><strong>${flexibleRoutes}</strong><span class="text-muted">/${totalFlexibleRoutes}</span></td>
-                                            <td class="text-end py-0">${newIn24h.flexibleRoutes > 0 ? `<span class="text-success">+${newIn24h.flexibleRoutes}</span>` : ''}</td>
+                                            <td class="text-end py-0">${newToday.flexibleRoutes > 0 ? `<span class="text-success">+${newToday.flexibleRoutes}</span>` : ''}</td>
                                         </tr>
                                         <tr>
                                             <td class="text-start text-muted py-0">Составные</td>
                                             <td class="text-end py-0"><strong>${activeTripsCount}</strong><span class="text-muted">/${totalTripsCount}</span></td>
-                                            <td class="text-end py-0">${newIn24h.trips > 0 ? `<span class="text-success">+${newIn24h.trips}</span>` : ''}</td>
+                                            <td class="text-end py-0">${newToday.trips > 0 ? `<span class="text-success">+${newToday.trips}</span>` : ''}</td>
                                         </tr>
                                     </tbody>
                                 </table>

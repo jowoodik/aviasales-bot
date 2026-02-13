@@ -1406,44 +1406,44 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
       }
     }
 
-    // Новые за 24 часа
-    const [newUsers24h, newFixedRoutes24h, newFlexibleRoutes24h, newTrips24h] = await Promise.all([
+    // Новые за сегодня (с начала дня)
+    const [newUsersToday, newFixedRoutesToday, newFlexibleRoutesToday, newTripsToday] = await Promise.all([
       new Promise((resolve) => {
-        db.get(`SELECT COUNT(*) as count FROM user_settings WHERE created_at >= datetime('now', '-1 day')`, (err, row) => resolve(row?.count || 0));
+        db.get(`SELECT COUNT(*) as count FROM user_settings WHERE created_at >= date('now', 'start of day')`, (err, row) => resolve(row?.count || 0));
       }),
       new Promise((resolve) => {
-        db.get(`SELECT COUNT(*) as count FROM unified_routes WHERE created_at >= datetime('now', '-1 day') AND is_flexible = 0`, (err, row) => resolve(row?.count || 0));
+        db.get(`SELECT COUNT(*) as count FROM unified_routes WHERE created_at >= date('now', 'start of day') AND is_flexible = 0`, (err, row) => resolve(row?.count || 0));
       }),
       new Promise((resolve) => {
-        db.get(`SELECT COUNT(*) as count FROM unified_routes WHERE created_at >= datetime('now', '-1 day') AND is_flexible = 1`, (err, row) => resolve(row?.count || 0));
+        db.get(`SELECT COUNT(*) as count FROM unified_routes WHERE created_at >= date('now', 'start of day') AND is_flexible = 1`, (err, row) => resolve(row?.count || 0));
       }),
       new Promise((resolve) => {
-        db.get(`SELECT COUNT(*) as count FROM trips WHERE created_at >= datetime('now', '-1 day')`, (err, row) => resolve(row?.count || 0));
+        db.get(`SELECT COUNT(*) as count FROM trips WHERE created_at >= date('now', 'start of day')`, (err, row) => resolve(row?.count || 0));
       })
     ]);
 
-    // Комбинации новых маршрутов за 24ч (по категориям)
-    const newRoutes24hData = await new Promise((resolve) => {
-      db.all(`SELECT * FROM unified_routes WHERE created_at >= datetime('now', '-1 day') AND is_paused = 0 AND is_archived = 0`, (err, rows) => resolve(rows || []));
+    // Комбинации новых маршрутов за сегодня (по категориям)
+    const newRoutesTodayData = await new Promise((resolve) => {
+      db.all(`SELECT * FROM unified_routes WHERE created_at >= date('now', 'start of day') AND is_paused = 0 AND is_archived = 0`, (err, rows) => resolve(rows || []));
     });
-    let newFixedCombinations24h = 0;
-    let newFlexibleCombinations24h = 0;
-    for (const route of newRoutes24hData) {
+    let newFixedCombinationsToday = 0;
+    let newFlexibleCombinationsToday = 0;
+    for (const route of newRoutesTodayData) {
       const count = UnifiedRoute.countCombinations(route);
       if (route.is_flexible) {
-        newFlexibleCombinations24h += count;
+        newFlexibleCombinationsToday += count;
       } else {
-        newFixedCombinations24h += count;
+        newFixedCombinationsToday += count;
       }
     }
-    // Комбинации новых трипов за 24ч
-    let newTripCombinations24h = 0;
-    const newTrips24hData = await new Promise((resolve) => {
-      db.all(`SELECT * FROM trips WHERE created_at >= datetime('now', '-1 day') AND is_paused = 0 AND is_archived = 0`, (err, rows) => resolve(rows || []));
+    // Комбинации новых трипов за сегодня
+    let newTripCombinationsToday = 0;
+    const newTripsTodayData = await new Promise((resolve) => {
+      db.all(`SELECT * FROM trips WHERE created_at >= date('now', 'start of day') AND is_paused = 0 AND is_archived = 0`, (err, rows) => resolve(rows || []));
     });
-    for (const trip of newTrips24hData) {
+    for (const trip of newTripsTodayData) {
       const legs = await TripLeg.getByTripId(trip.id);
-      newTripCombinations24h += TripOptimizer.countTripCombinations(trip, legs);
+      newTripCombinationsToday += TripOptimizer.countTripCombinations(trip, legs);
     }
 
     // Статистика подписок (по пользователям)
@@ -1478,17 +1478,17 @@ app.get('/admin/api/analytics-main', requireAdmin, async (req, res) => {
           flexible: allCombinations.flexible,
           trips: allTripCombinations
         },
-        new24h: {
-          fixed: newFixedCombinations24h,
-          flexible: newFlexibleCombinations24h,
-          trips: newTripCombinations24h
+        newToday: {
+          fixed: newFixedCombinationsToday,
+          flexible: newFlexibleCombinationsToday,
+          trips: newTripCombinationsToday
         }
       },
-      newIn24h: {
-        users: newUsers24h,
-        fixedRoutes: newFixedRoutes24h,
-        flexibleRoutes: newFlexibleRoutes24h,
-        trips: newTrips24h
+      newToday: {
+        users: newUsersToday,
+        fixedRoutes: newFixedRoutesToday,
+        flexibleRoutes: newFlexibleRoutesToday,
+        trips: newTripsToday
       },
       subscriptionStats,
       funnels: {
