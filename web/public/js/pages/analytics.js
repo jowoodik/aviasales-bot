@@ -1,7 +1,8 @@
 import api from '../api.js';
 import ChartComponent from '../components/chart.js';
+import Modal from '../components/modal.js';
 import CONFIG from '../config.js';
-import { showLoading, showError, formatNumber } from '../utils/helpers.js';
+import { showLoading, showError, formatNumber, formatPrice } from '../utils/helpers.js';
 import airportService from '../services/airportService.js';
 
 class AnalyticsPage {
@@ -437,7 +438,7 @@ class AnalyticsPage {
           ${data.slice(0, 15).map((deal, index) => {
             const savingsPercent = ((deal.savings / deal.avg_price) * 100).toFixed(0);
             return `
-            <tr>
+            <tr style="cursor: pointer;" data-deal-index="${index}">
               <td><span class="badge ${index < 3 ? 'bg-danger' : 'bg-secondary'} rounded-circle">${index + 1}</span></td>
               <td><strong>${this.formatRouteLabel(deal)}</strong></td>
               <td><small>${new Date(deal.departure_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}${deal.return_date ? ' - ' + new Date(deal.return_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : ''}</small></td>
@@ -459,6 +460,89 @@ class AnalyticsPage {
     `;
 
         container.innerHTML = html;
+
+        // Add click handlers to deal rows
+        container.querySelectorAll('tr[data-deal-index]').forEach(row => {
+            row.addEventListener('click', () => {
+                const index = parseInt(row.dataset.dealIndex);
+                const deal = data[index];
+                if (deal) this.showDealModal(deal);
+            });
+        });
+    }
+
+    showDealModal(deal) {
+        const savingsPercent = ((deal.savings / deal.avg_price) * 100).toFixed(0);
+        const departureDate = new Date(deal.departure_date).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' });
+        const returnDate = deal.return_date ? new Date(deal.return_date).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' }) : null;
+
+        const searchUrl = deal.search_link || null;
+
+        const modal = new Modal({
+            title: `${this.formatRouteLabel(deal)}`,
+            size: 'lg',
+            body: `
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <h6>Детали предложения</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>Маршрут:</strong></td>
+                                <td><strong>${this.formatRouteLabel(deal)}</strong></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Дата вылета:</strong></td>
+                                <td>${departureDate}</td>
+                            </tr>
+                            ${returnDate ? `
+                            <tr>
+                                <td><strong>Дата возврата:</strong></td>
+                                <td>${returnDate}</td>
+                            </tr>
+                            ` : ''}
+                            <tr>
+                                <td><strong>Авиакомпания:</strong></td>
+                                <td>${deal.airline || 'Не указана'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Ценовая информация</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>Цена:</strong></td>
+                                <td><strong class="text-success fs-5">${formatNumber(Math.round(deal.total_price))} ₽</strong></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Средняя цена:</strong></td>
+                                <td><span class="text-muted">${formatNumber(Math.round(deal.avg_price))} ₽</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Экономия:</strong></td>
+                                <td><strong class="text-success">-${formatNumber(Math.round(deal.savings))} ₽</strong></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Скидка:</strong></td>
+                                <td><span class="badge bg-success fs-6">-${savingsPercent}%</span></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                ${searchUrl ? `
+                <div class="mt-3 text-center">
+                    <a href="${searchUrl}" target="_blank" class="btn btn-primary">
+                        <i class="bi bi-search me-1"></i> Найти билеты
+                    </a>
+                </div>
+                ` : ''}
+            `,
+            footer: `
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            `
+        });
+
+        modal.create();
+        modal.show();
     }
 
     renderAirlinesChart() {

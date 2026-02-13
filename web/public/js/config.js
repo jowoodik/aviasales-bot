@@ -8,6 +8,8 @@ export const CONFIG = {
         USERS: '/users',
         USER_DETAIL: (chatId) => `/users/${chatId}`,
         USER_STATS: (chatId) => `/users/${chatId}/stats`,
+        USER_ROUTES: (chatId) => `/users/${chatId}/routes`,
+        USER_NOTIFICATIONS: (chatId) => `/users/${chatId}/notifications`,
 
         // Airports
         AIRPORTS: '/airports',
@@ -46,6 +48,7 @@ export const CONFIG = {
 
         // Statistics
         CHECK_STATS: '/check-stats',
+        CHECK_STAT_DETAILS: (id) => `/check-stats/${id}/details`,
         FAILED_CHECKS: '/failed-checks',
         ANALYTICS: '/analytics',
 

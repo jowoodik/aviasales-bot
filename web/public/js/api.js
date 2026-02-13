@@ -119,6 +119,14 @@ class APIClient {
         return this.delete(CONFIG.API.USER_DETAIL(chatId));
     }
 
+    async getUserRoutes(chatId) {
+        return this.get(CONFIG.API.USER_ROUTES(chatId));
+    }
+
+    async getUserNotifications(chatId) {
+        return this.get(CONFIG.API.USER_NOTIFICATIONS(chatId));
+    }
+
     // ============================================
     // ROUTES API
     // ============================================
@@ -280,6 +288,10 @@ class APIClient {
 
     async getCheckStats() {
         return this.get(CONFIG.API.CHECK_STATS);
+    }
+
+    async getCheckStatDetails(id) {
+        return this.get(CONFIG.API.CHECK_STAT_DETAILS(id));
     }
 
     async getAnalytics() {

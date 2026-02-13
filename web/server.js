@@ -2491,6 +2491,67 @@ app.get('/admin/api/users/:chatId/stats', requireAdmin, async (req, res) => {
   }
 });
 
+// API: Получить маршруты пользователя
+app.get('/admin/api/users/:chatId/routes', requireAdmin, async (req, res) => {
+  try {
+    const chatId = parseInt(req.params.chatId);
+
+    const routes = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          u.*,
+          (SELECT COUNT(*) FROM route_results WHERE route_id = u.id) as check_count
+        FROM unified_routes u
+        WHERE u.chat_id = ?
+        ORDER BY u.created_at DESC
+      `, [chatId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    routes.forEach(r => {
+      r.origin_city = airportResolver.getCityName(r.origin);
+      r.destination_city = airportResolver.getCityName(r.destination);
+    });
+
+    res.json(routes);
+  } catch (error) {
+    console.error('Ошибка получения маршрутов пользователя:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Получить уведомления пользователя
+app.get('/admin/api/users/:chatId/notifications', requireAdmin, async (req, res) => {
+  try {
+    const chatId = parseInt(req.params.chatId);
+
+    const notifications = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          nl.*,
+          COALESCE(
+            (SELECT origin || ' → ' || destination FROM unified_routes WHERE id = nl.route_id),
+            'N/A'
+          ) as routename
+        FROM notification_log nl
+        WHERE nl.chat_id = ?
+        ORDER BY nl.sent_at DESC
+        LIMIT 50
+      `, [chatId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json(notifications);
+  } catch (error) {
+    console.error('Ошибка получения уведомлений пользователя:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ============================================
 // ROUTES MANAGEMENT API
 // ============================================
@@ -2617,6 +2678,50 @@ app.get('/admin/api/routes/:id/check-stats', requireAdmin, async (req, res) => {
     res.json({ summary, recent });
   } catch (error) {
     console.error('Ошибка получения статистики проверок:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API: Детали конкретной проверки (combination_check_results)
+app.get('/admin/api/check-stats/:id/details', requireAdmin, async (req, res) => {
+  try {
+    const checkStatId = parseInt(req.params.id);
+
+    // Получаем запись check_stats для определения route_id и времени
+    const checkStat = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT cs.*, (r.origin || ' → ' || r.destination) as routename, r.chat_id
+        FROM route_check_stats cs
+        JOIN unified_routes r ON cs.route_id = r.id
+        WHERE cs.id = ?
+      `, [checkStatId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!checkStat) {
+      return res.status(404).json({ error: 'Check stat not found' });
+    }
+
+    // Получаем детальные результаты комбинаций за это время проверки
+    const details = await new Promise((resolve, reject) => {
+      db.all(`
+        SELECT
+          id, route_id, departure_date, return_date, days_in_country,
+          status, price, currency, error_reason, search_url, check_timestamp
+        FROM combination_check_results
+        WHERE route_id = ? AND check_timestamp = ?
+        ORDER BY status ASC, price ASC
+      `, [checkStat.route_id, checkStat.check_timestamp], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    res.json({ checkStat, details });
+  } catch (error) {
+    console.error('Ошибка получения деталей проверки:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -2,9 +2,10 @@
 
 import api from '../api.js';
 import Table from '../components/table.js';
+import Modal from '../components/modal.js';
 import ChartComponent from '../components/chart.js';
 import CONFIG from '../config.js';
-import { showLoading, showError, formatDateTime } from '../utils/helpers.js';
+import { showLoading, showError, formatDateTime, formatPrice } from '../utils/helpers.js';
 
 class CheckStatsPage {
     constructor() {
@@ -226,13 +227,322 @@ class CheckStatsPage {
         this.table.render();
     }
 
-    handleAction(action, id) {
-        // For now, just view details
+    async handleAction(action, id) {
         if (action === 'view') {
-            const stat = this.stats.find(s => s.route_id == id);
+            const stat = this.stats.find(s => s.id == id);
             if (stat) {
-                window.location.hash = `#routes?view=${stat.route_id}`;
+                await this.viewCheckDetails(stat);
             }
+        }
+    }
+
+    async viewCheckDetails(stat) {
+        const modal = new Modal({
+            title: `Проверка: ${stat.routename || 'Маршрут #' + stat.route_id}`,
+            size: 'xl',
+            body: this.renderTabbedContent(stat),
+            footer: `
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            `
+        });
+
+        modal.create();
+        modal.show();
+
+        // Load info tab immediately
+        this.loadInfoTab(stat, modal.getBody());
+
+        // Setup lazy loading
+        this.setupTabHandlers(stat, modal.getBody());
+    }
+
+    renderTabbedContent(stat) {
+        return `
+            <ul class="nav nav-tabs" id="checkTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active text-dark" id="info-tab" data-bs-toggle="tab" data-bs-target="#info-pane" type="button" role="tab">
+                        <i class="bi bi-info-circle"></i> Сводка
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link text-dark" id="details-tab" data-bs-toggle="tab" data-bs-target="#details-pane" type="button" role="tab">
+                        <i class="bi bi-list-check"></i> Детализация
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link text-dark" id="route-tab" data-bs-toggle="tab" data-bs-target="#route-pane" type="button" role="tab">
+                        <i class="bi bi-signpost-2"></i> Маршрут
+                    </button>
+                </li>
+            </ul>
+            <div class="tab-content pt-3" id="checkTabContent">
+                <div class="tab-pane fade show active" id="info-pane" role="tabpanel">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Загрузка...</span>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="details-pane" role="tabpanel" data-loaded="false">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Загрузка...</span>
+                    </div>
+                </div>
+                <div class="tab-pane fade" id="route-pane" role="tabpanel" data-loaded="false">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                        <span class="ms-2">Загрузка...</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    setupTabHandlers(stat, container) {
+        const tabs = container.querySelectorAll('[data-bs-toggle="tab"]');
+        tabs.forEach(tab => {
+            tab.addEventListener('shown.bs.tab', async (e) => {
+                const targetId = e.target.getAttribute('data-bs-target');
+                const pane = container.querySelector(targetId);
+
+                if (pane && pane.dataset.loaded === 'false') {
+                    pane.dataset.loaded = 'true';
+
+                    switch (targetId) {
+                        case '#details-pane':
+                            await this.loadDetailsTab(stat, pane);
+                            break;
+                        case '#route-pane':
+                            await this.loadRouteTab(stat, pane);
+                            break;
+                    }
+                }
+            });
+        });
+    }
+
+    loadInfoTab(stat, container) {
+        const infoPane = container.querySelector('#info-pane');
+        const total = (stat.successful_checks || 0) + (stat.failed_checks || 0);
+        const rate = total > 0 ? ((stat.successful_checks / total) * 100).toFixed(1) : '0';
+
+        infoPane.innerHTML = `
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="card border-primary">
+                        <div class="card-body text-center">
+                            <h3 class="text-primary">${stat.total_combinations || total}</h3>
+                            <small class="text-muted">Комбинаций</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card border-success">
+                        <div class="card-body text-center">
+                            <h3 class="text-success">${stat.successful_checks || 0}</h3>
+                            <small class="text-muted">Успешных</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card border-danger">
+                        <div class="card-body text-center">
+                            <h3 class="text-danger">${stat.failed_checks || 0}</h3>
+                            <small class="text-muted">Неудачных</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card border-info">
+                        <div class="card-body text-center">
+                            <h3 class="text-info">${rate}%</h3>
+                            <small class="text-muted">Success Rate</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <h6>Информация о проверке</h6>
+                    <table class="table table-sm">
+                        <tr>
+                            <td><strong>ID проверки:</strong></td>
+                            <td>${stat.id}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Route ID:</strong></td>
+                            <td>${stat.route_id}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Маршрут:</strong></td>
+                            <td><strong>${stat.routename || '—'}</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Chat ID:</strong></td>
+                            <td><code>${stat.chatid || '—'}</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Время проверки:</strong></td>
+                            <td>${stat.check_timestamp ? new Date(stat.check_timestamp).toLocaleString('ru-RU') : '—'}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    async loadDetailsTab(stat, pane) {
+        try {
+            const data = await api.getCheckStatDetails(stat.id);
+            const details = data.details || [];
+
+            if (details.length === 0) {
+                pane.innerHTML = '<p class="text-muted">Нет детальных данных по комбинациям для этой проверки</p>';
+                return;
+            }
+
+            const statusColors = {
+                'success': 'success',
+                'found': 'success',
+                'error': 'danger',
+                'not_found': 'warning',
+                'timeout': 'secondary'
+            };
+            const statusLabels = {
+                'success': 'Найден',
+                'found': 'Найден',
+                'error': 'Ошибка',
+                'not_found': 'Не найден',
+                'timeout': 'Таймаут'
+            };
+
+            const successCount = details.filter(d => d.status === 'success' || d.status === 'found').length;
+            const errorCount = details.filter(d => d.status === 'error').length;
+            const notFoundCount = details.filter(d => d.status === 'not_found').length;
+
+            pane.innerHTML = `
+                <div class="row g-3 mb-3">
+                    <div class="col-auto">
+                        <span class="badge bg-success">Найдено: ${successCount}</span>
+                    </div>
+                    <div class="col-auto">
+                        <span class="badge bg-danger">Ошибки: ${errorCount}</span>
+                    </div>
+                    <div class="col-auto">
+                        <span class="badge bg-warning">Не найдено: ${notFoundCount}</span>
+                    </div>
+                    <div class="col-auto">
+                        <span class="badge bg-secondary">Всего: ${details.length}</span>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Статус</th>
+                                <th>Даты</th>
+                                <th>Дней</th>
+                                <th>Цена</th>
+                                <th>Ошибка</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${details.map(d => {
+                                const depDate = d.departure_date ? new Date(d.departure_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '?';
+                                const retDate = d.return_date ? new Date(d.return_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+                                const dates = retDate ? `${depDate} — ${retDate}` : depDate;
+                                return `
+                                    <tr>
+                                        <td><span class="badge bg-${statusColors[d.status] || 'secondary'}">${statusLabels[d.status] || d.status}</span></td>
+                                        <td><small>${dates}</small></td>
+                                        <td>${d.days_in_country || '—'}</td>
+                                        <td>${d.price ? formatPrice(d.price, d.currency) : '—'}</td>
+                                        <td>${d.error_reason ? `<small class="text-danger">${d.error_reason}</small>` : '—'}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <small class="text-muted">Показано ${details.length} комбинаций</small>
+            `;
+        } catch (error) {
+            console.error('Error loading check details:', error);
+            pane.innerHTML = `<div class="alert alert-danger">Ошибка загрузки деталей: ${error.message}</div>`;
+        }
+    }
+
+    async loadRouteTab(stat, pane) {
+        try {
+            const route = await api.getRouteById(stat.route_id);
+
+            const routeLabel = route.origin_city && route.destination_city
+                ? `${route.origin_city} (${route.origin}) → ${route.destination_city} (${route.destination})`
+                : `${route.origin} → ${route.destination}`;
+
+            const dates = route.is_flexible
+                ? `${route.departure_start || '?'} — ${route.departure_end || '?'}`
+                : `${route.departure_date || '?'}${route.return_date ? ' — ' + route.return_date : ''}`;
+
+            pane.innerHTML = `
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <h6>Информация о маршруте</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>ID:</strong></td>
+                                <td>${route.id}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Маршрут:</strong></td>
+                                <td><strong>${routeLabel}</strong></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Даты:</strong></td>
+                                <td>${dates}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Тип:</strong></td>
+                                <td>${route.is_flexible ? '<span class="badge bg-info">Гибкий</span>' : '<span class="badge bg-secondary">Фиксированный</span>'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Статус:</strong></td>
+                                <td>${route.is_paused ? '<span class="badge bg-secondary">Пауза</span>' : '<span class="badge bg-success">Активен</span>'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Параметры</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>Порог цены:</strong></td>
+                                <td><strong>${formatPrice(route.threshold_price, route.currency)}</strong></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Пассажиры:</strong></td>
+                                <td>${route.adults || route.passengers_adults || 1} взр.</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Авиакомпания:</strong></td>
+                                <td>${(route.airline || route.preferred_airline) === 'any' ? 'Любая' : (route.airline || route.preferred_airline || 'Любая')}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Создан:</strong></td>
+                                <td>${new Date(route.created_at).toLocaleString('ru-RU')}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Последняя проверка:</strong></td>
+                                <td>${route.last_check ? new Date(route.last_check).toLocaleString('ru-RU') : 'Не проверялся'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            `;
+        } catch (error) {
+            console.error('Error loading route:', error);
+            pane.innerHTML = `<div class="alert alert-danger">Ошибка загрузки маршрута: ${error.message}</div>`;
         }
     }
 
