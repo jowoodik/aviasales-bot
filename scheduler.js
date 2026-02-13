@@ -640,7 +640,9 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
             departureDate: l.departureDate,
             price: l.price,
             airline: l.airline,
-            searchLink: l.searchLink
+            searchLink: l.searchLink,
+            isRoundTrip: l.isRoundTrip || false,
+            coveredByRoundTrip: l.coveredByRoundTrip || null
           }));
           await TripResult.save(tripId, bestCombo.totalPrice, legResults);
 
@@ -692,6 +694,9 @@ async function checkRoutesBySubscriptionBatch(subscriptionType, monitor, notific
     }
 
     console.log(`  📬 Отправлено ${totalSent} уведомлений`);
+
+    // Очистка пользователей, заблокировавших бота
+    await notificationService.cleanupBlockedUsers();
 
   } catch (error) {
     console.error(`  ❌ Критическая ошибка batch-проверки для ${subscriptionType}:`, error);

@@ -7,50 +7,73 @@ const TEST_CONFIG = {
     // Трип: SVX → MOW → DPS → MOW → SVX
     trip: {
         id: 999,
-        name: 'MOW→KJA→NZG→UUD',
-        departure_start: '2026-07-25',
-        departure_end: '2026-07-26',
-        threshold_price: 70000,
+        name: 'SVX→MOW→DPS→MOW→SVX',
+        departure_start: '2026-02-25',
+        departure_end: '2026-02-27',
+        threshold_price: 550000,
         currency: 'RUB'
     },
 
     // Ноги маршрута (per-leg фильтры)
     legs: [
         {
-            leg_order: 1, origin: 'MOW', destination: 'KJA',
-            min_days: 3, max_days: 6,
-            adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+            leg_order: 1, origin: 'SVX', destination: 'MOW',
+            min_days: 1, max_days: 1,
+            adults: 4, children: 1, airline: null, baggage: 1, max_stops: 0, max_layover_hours: null
         },
         {
-            leg_order: 1, origin: 'KJA', destination: 'NZG',
-            min_days: 3, max_days: 5,
-            adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+            leg_order: 2, origin: 'MOW', destination: 'DPS',
+            min_days: 28, max_days: 29,
+            adults: 4, children: 1, airline: 'EY', baggage: 1, max_stops: 1, max_layover_hours: 5
         },
         {
-            leg_order: 1, origin: 'NZG', destination: 'UUD',
-            min_days: 3, max_days: 3,
-            adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+            leg_order: 3, origin: 'DPS', destination: 'MOW',
+            min_days: 1, max_days: 1,
+            adults: 4, children: 1, airline: 'EY', baggage: 1, max_stops: 1, max_layover_hours: 5
         },
-
-        // {
-        //     leg_order: 2, origin: 'MOW', destination: 'DPS',
-        //     min_days: 28, max_days: 29,
-        //     adults: 4, children: 1, airline: 'EY', baggage: 1, max_stops: 1, max_layover_hours: 5
-        // },
-        // {
-        //     leg_order: 3, origin: 'DPS', destination: 'MOW',
-        //     min_days: 1, max_days: 1,
-        //     adults: 4, children: 1, airline: 'EY', baggage: 1, max_stops: 1, max_layover_hours: 5
-        // },
-        // {
-        //     leg_order: 4, origin: 'MOW', destination: 'SVX',
-        //     min_days: null, max_days: null,
-        //     adults: 4, children: 1, airline: null, baggage: 1, max_stops: 0, max_layover_hours: null
-        // }
+        {
+            leg_order: 4, origin: 'MOW', destination: 'SVX',
+            min_days: null, max_days: null,
+            adults: 4, children: 1, airline: null, baggage: 1, max_stops: 0, max_layover_hours: null
+        }
     ],
 
     debug: true
 };
+
+// // 🎯 КОНФИГУРАЦИЯ ТЕСТА
+// const TEST_CONFIG = {
+//     // Трип: SVX → MOW → DPS → MOW → SVX
+//     trip: {
+//         id: 999,
+//         name: 'MOW→KJA→NZG→UUD',
+//         departure_start: '2026-07-25',
+//         departure_end: '2026-07-26',
+//         threshold_price: 70000,
+//         currency: 'RUB'
+//     },
+//
+//     // Ноги маршрута (per-leg фильтры)
+//     legs: [
+//         {
+//             leg_order: 1, origin: 'MOW', destination: 'KJA',
+//             min_days: 3, max_days: 6,
+//             adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+//         },
+//         {
+//             leg_order: 1, origin: 'KJA', destination: 'NZG',
+//             min_days: 3, max_days: 5,
+//             adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+//         },
+//         {
+//             leg_order: 1, origin: 'NZG', destination: 'UUD',
+//             min_days: 3, max_days: 3,
+//             adults: 1, children: 0, airline: null, baggage: 0, max_stops: 0, max_layover_hours: null
+//         }
+//     ],
+//
+//     debug: true
+// };
 
 function formatLegFilters(leg) {
     let pax = `${leg.adults} взр`;

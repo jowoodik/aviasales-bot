@@ -5,6 +5,7 @@ const airportResolver = require('../utils/AirportCodeResolver');
 class NotificationService {
   constructor(bot) {
     this.bot = bot;
+    this.blockedUsers = new Set(); // chat_id пользователей, заблокировавших бота или не найденных
   }
 
   async classifyPriority(routeData) {
@@ -787,6 +788,9 @@ class NotificationService {
       console.log(`${silent ? '🔕' : '🔔'} Алерт [${priority}] отправлен пользователю ${chatId}`);
     } catch (error) {
       console.error(`Ошибка отправки алерта [${priority}]:`, error.message);
+      if (this._isUserBlockedError(error)) {
+        this.blockedUsers.add(chatId);
+      }
     }
   }
 
@@ -880,33 +884,34 @@ class NotificationService {
 
     text += '\n';
 
-    // Ноги с ценами и per-leg фильтрами
+    // Ноги с ценами (с учётом RT пар, как в routeHandlers)
     const comboLegs = bestCombo.legs;
-    for (let i = 0; i < comboLegs.length; i++) {
-      const cl = comboLegs[i];
+    let hasRoundTrip = false;
+
+    for (const cl of comboLegs) {
       const leg = legs.find(l => l.leg_order === cl.legOrder);
+      if (!leg) continue;
+
       const depDate = this._formatShortDateForProgressBar(cl.departureDate);
 
-      // Дни пребывания
-      let stayStr = '';
-      if (i < comboLegs.length - 1) {
-        const nextDate = new Date(comboLegs[i + 1].departureDate);
-        const thisDate = new Date(cl.departureDate);
-        const stay = Math.round((nextDate - thisDate) / (1000 * 60 * 60 * 24));
-        stayStr = ` (${stay} дн)`;
+      if (cl.coveredByRoundTrip) {
+        // Return-нога RT пары — цена 0, включена в другой билет
+        text += `  ${cl.legOrder}. ${depDate} ${leg.origin}→${leg.destination} — 0 ₽ (включено в билет ${cl.coveredByRoundTrip})\n`;
+        hasRoundTrip = true;
+      } else if (cl.isRoundTrip) {
+        // Outbound-нога RT пары — показываем дату возврата
+        const returnLeg = comboLegs.find(l => l.coveredByRoundTrip === cl.legOrder);
+        if (returnLeg) {
+          const retDate = this._formatShortDateForProgressBar(returnLeg.departureDate);
+          text += `  ${cl.legOrder}. ${depDate}-${retDate} ${leg.origin}↔${leg.destination} — ${Formatters.formatPrice(cl.price)} (туда-обратно)\n`;
+          hasRoundTrip = true;
+        } else {
+          text += `  ${cl.legOrder}. ${depDate} ${leg.origin}→${leg.destination} — ${Formatters.formatPrice(cl.price)}\n`;
+        }
+      } else {
+        // One-way нога
+        text += `  ${cl.legOrder}. ${depDate} ${leg.origin}→${leg.destination} — ${Formatters.formatPrice(cl.price)}\n`;
       }
-
-      // Per-leg info
-      let legInfo = '';
-      if (leg) {
-        const adults = leg.adults || 1;
-        const children = leg.children || 0;
-        legInfo = ` • ${adults}`;
-        if (children > 0) legInfo += `+${children}`;
-        if (leg.baggage) legInfo += ' 🧳';
-      }
-
-      text += `${i + 1}️⃣ ${cl.origin}→${cl.destination} ${depDate}${stayStr} — ${Formatters.formatPrice(cl.price)}${legInfo}\n`;
     }
 
     text += '\n';
@@ -914,7 +919,8 @@ class NotificationService {
     // Бюджет
     if (currentPrice <= userBudget) {
       const savings = userBudget - currentPrice;
-      text += `🎯 Бюджет: ${Formatters.formatPrice(userBudget)} ✅ Экономия: ${Formatters.formatPrice(savings)}\n`;
+      text += `🔥 <b>НИЖЕ БЮДЖЕТА!</b> Экономия: ${Formatters.formatPrice(savings)}\n`;
+      text += `🎯 Бюджет: ${Formatters.formatPrice(userBudget)} ✅\n`;
     } else {
       const over = currentPrice - userBudget;
       const overPercent = Math.round((over / userBudget) * 100);
@@ -924,6 +930,16 @@ class NotificationService {
     // Средняя цена
     if (analytics && analytics.avgPrice && analytics.dataPoints >= 3) {
       text += `📊 Средняя: ${Formatters.formatPrice(analytics.avgPrice)}\n`;
+    }
+
+    // Примечание о RT билетах
+    if (hasRoundTrip) {
+      const allRoundTrip = comboLegs.every(l => l.isRoundTrip || l.coveredByRoundTrip);
+      if (allRoundTrip) {
+        text += `\n💡 Бот нашел билеты туда-обратно — они дешевле, чем два билета в одну сторону!`;
+      } else {
+        text += `\n💡 Часть маршрута найдена по билетам туда-обратно (дешевле одного направления).`;
+      }
     }
 
     return {
@@ -999,21 +1015,42 @@ class NotificationService {
         disable_web_page_preview: true
       };
 
-      // Кнопки по ногам (по 2 в ряду)
+      // Кнопки по ногам (по 2 в ряду, с учётом RT пар)
       if (block.legs && block.legs.length > 0) {
         const rows = [];
         for (let i = 0; i < block.legs.length; i += 2) {
           const row = [];
-          const leg1 = block.legs[i];
+          const l1 = block.legs[i];
+
+          let btn1Text;
+          if (l1.coveredByRoundTrip) {
+            btn1Text = `🎫 ${l1.origin}→${l1.destination} (вкл.)`;
+          } else if (l1.isRoundTrip) {
+            btn1Text = `🎫 ${l1.origin}↔${l1.destination} ${Formatters.formatPrice(l1.price)}`;
+          } else {
+            btn1Text = `🎫 ${l1.origin}→${l1.destination} ${Formatters.formatPrice(l1.price)}`;
+          }
+
           row.push({
-            text: `🎫 ${leg1.origin}→${leg1.destination} ${Formatters.formatPrice(leg1.price)}`,
-            callback_data: `trip_aff:${tripId}:${leg1.legOrder}:${Math.round(leg1.price)}`
+            text: btn1Text,
+            callback_data: `trip_aff:${tripId}:${l1.legOrder}:${Math.round(l1.price)}`
           });
+
           if (i + 1 < block.legs.length) {
-            const leg2 = block.legs[i + 1];
+            const l2 = block.legs[i + 1];
+
+            let btn2Text;
+            if (l2.coveredByRoundTrip) {
+              btn2Text = `🎫 ${l2.origin}→${l2.destination} (вкл.)`;
+            } else if (l2.isRoundTrip) {
+              btn2Text = `🎫 ${l2.origin}↔${l2.destination} ${Formatters.formatPrice(l2.price)}`;
+            } else {
+              btn2Text = `🎫 ${l2.origin}→${l2.destination} ${Formatters.formatPrice(l2.price)}`;
+            }
+
             row.push({
-              text: `🎫 ${leg2.origin}→${leg2.destination} ${Formatters.formatPrice(leg2.price)}`,
-              callback_data: `trip_aff:${tripId}:${leg2.legOrder}:${Math.round(leg2.price)}`
+              text: btn2Text,
+              callback_data: `trip_aff:${tripId}:${l2.legOrder}:${Math.round(l2.price)}`
             });
           }
           rows.push(row);
@@ -1025,7 +1062,75 @@ class NotificationService {
       console.log(`${silent ? '🔕' : '🔔'} Trip алерт [${priority}] отправлен пользователю ${chatId}`);
     } catch (error) {
       console.error(`Ошибка отправки trip алерта [${priority}]:`, error.message);
+      if (this._isUserBlockedError(error)) {
+        this.blockedUsers.add(chatId);
+      }
     }
+  }
+
+  _isUserBlockedError(error) {
+    const msg = error.message || '';
+    return msg.includes('403 Forbidden: bot was blocked by the user') ||
+           msg.includes('400 Bad Request: chat not found');
+  }
+
+  async cleanupBlockedUsers() {
+    if (this.blockedUsers.size === 0) return;
+
+    console.log(`\n🧹 Очистка ${this.blockedUsers.size} заблокированных пользователей...`);
+
+    for (const chatId of this.blockedUsers) {
+      try {
+        // Архивируем все маршруты пользователя
+        await new Promise((resolve, reject) => {
+          db.run(
+            'UPDATE unified_routes SET is_archived = 1 WHERE chat_id = ? AND is_archived = 0',
+            [chatId],
+            function (err) {
+              if (err) return reject(err);
+              if (this.changes > 0) {
+                console.log(`  📦 Архивировано ${this.changes} маршрутов пользователя ${chatId}`);
+              }
+              resolve();
+            }
+          );
+        });
+
+        // Архивируем все трипы пользователя
+        await new Promise((resolve, reject) => {
+          db.run(
+            'UPDATE trips SET is_archived = 1 WHERE chat_id = ? AND is_archived = 0',
+            [chatId],
+            function (err) {
+              if (err) return reject(err);
+              if (this.changes > 0) {
+                console.log(`  📦 Архивировано ${this.changes} трипов пользователя ${chatId}`);
+              }
+              resolve();
+            }
+          );
+        });
+
+        // Удаляем пользователя из user_settings
+        await new Promise((resolve, reject) => {
+          db.run(
+            'DELETE FROM user_settings WHERE chat_id = ?',
+            [chatId],
+            (err) => {
+              if (err) return reject(err);
+              resolve();
+            }
+          );
+        });
+
+        console.log(`  🗑️  Пользователь ${chatId} удалён из user_settings`);
+      } catch (error) {
+        console.error(`  ❌ Ошибка очистки пользователя ${chatId}:`, error);
+      }
+    }
+
+    console.log(`🧹 Очистка заблокированных пользователей завершена`);
+    this.blockedUsers.clear();
   }
 }
 

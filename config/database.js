@@ -614,6 +614,18 @@ db.serialize(() => {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_notif_log_trip ON notification_log(trip_id, priority, sent_at)`);
 
+  // Миграция: добавляем is_round_trip и covered_by_round_trip в trip_leg_results
+  db.run(`ALTER TABLE trip_leg_results ADD COLUMN is_round_trip INTEGER DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления is_round_trip в trip_leg_results:', err.message);
+    }
+  });
+  db.run(`ALTER TABLE trip_leg_results ADD COLUMN covered_by_round_trip INTEGER`, (err) => {
+    if (err && !err.message.includes('duplicate column')) {
+      console.error('❌ Ошибка добавления covered_by_round_trip в trip_leg_results:', err.message);
+    }
+  });
+
   // Миграция: per-leg фильтры в trip_legs
   const legFilterColumns = [
     { name: 'adults', sql: 'adults INTEGER DEFAULT 1' },

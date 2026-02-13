@@ -16,7 +16,7 @@ class TripResult {
                     }
 
                     const stmt = db.prepare(
-                        'INSERT INTO trip_leg_results (trip_result_id, leg_order, departure_date, price, airline, search_link) VALUES (?, ?, ?, ?, ?, ?)'
+                        'INSERT INTO trip_leg_results (trip_result_id, leg_order, departure_date, price, airline, search_link, is_round_trip, covered_by_round_trip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
                     );
 
                     let completed = 0;
@@ -24,7 +24,7 @@ class TripResult {
 
                     for (const leg of legResults) {
                         stmt.run(
-                            [tripResultId, leg.legOrder, leg.departureDate, leg.price, leg.airline || null, leg.searchLink || null],
+                            [tripResultId, leg.legOrder, leg.departureDate, leg.price, leg.airline || null, leg.searchLink || null, leg.isRoundTrip ? 1 : 0, leg.coveredByRoundTrip || null],
                             (err2) => {
                                 if (err2 && !hasError) {
                                     hasError = true;
@@ -59,7 +59,7 @@ class TripResult {
                         [row.id],
                         (err2, legs) => {
                             if (err2) return reject(err2);
-                            resolve({ ...row, legs: legs || [] });
+                            resolve({ ...row, legs: (legs || []).map(TripResult._mapLegRow) });
                         }
                     );
                 }
@@ -84,7 +84,7 @@ class TripResult {
                                 [row.id],
                                 (err2, legRows) => {
                                     if (err2) rej(err2);
-                                    else res(legRows || []);
+                                    else res((legRows || []).map(TripResult._mapLegRow));
                                 }
                             );
                         });
@@ -94,6 +94,14 @@ class TripResult {
                 }
             );
         });
+    }
+
+    static _mapLegRow(row) {
+        return {
+            ...row,
+            isRoundTrip: !!row.is_round_trip,
+            coveredByRoundTrip: row.covered_by_round_trip || null
+        };
     }
 
     static cleanOldResults(tripId, keepCount = 10) {
