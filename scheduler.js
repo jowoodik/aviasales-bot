@@ -1031,7 +1031,6 @@ async function runManualCheck(subscriptionType) {
 module.exports = {
   runManualCheck,
   checkRoutesBySubscription,
-  checkUserRoutes, // для команды /check и ручной проверки
   updateSchedulerJobs, // для принудительного обновления интервалов
   getIntervalsFromDB, // для диагностики
   activeJobs // для мониторинга активных задач
